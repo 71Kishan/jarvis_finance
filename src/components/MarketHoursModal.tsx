@@ -86,7 +86,7 @@ export const MarketHoursModal: React.FC<MarketHoursModalProps> = ({
             </div>
             <div>
               <h2 className="text-base sm:text-lg font-bold font-mono text-white flex items-center gap-2">
-                24/7 Market Hours & Android Auto-Pilot
+                Global Market Hours & Mobile Alerts
               </h2>
               <p className="text-xs text-neutral-400 font-sans">
                 Global exchange schedules, push notifications, and background operation guide
@@ -132,7 +132,7 @@ export const MarketHoursModal: React.FC<MarketHoursModalProps> = ({
               <div className="p-3 rounded-xl bg-neutral-900/60 border border-neutral-800 flex flex-col gap-1.5">
                 <div className="flex items-center gap-1.5 text-sky-400 font-mono font-bold text-[11px]">
                   <BatteryCharging className="w-3.5 h-3.5" />
-                  <span>2. Unrestricted Battery</span>
+                  <span>2. Mobile-safe behavior</span>
                 </div>
                 <p className="text-neutral-400 text-[11px] leading-relaxed">
                   In Android App Settings &rarr; Battery, change to <strong>"Unrestricted"</strong> so the operating system doesn't pause the background tab when your screen is locked.
@@ -204,7 +204,7 @@ export const MarketHoursModal: React.FC<MarketHoursModalProps> = ({
             <div className="flex items-center justify-between">
               <span className="text-xs font-mono font-bold uppercase text-neutral-300 flex items-center gap-2">
                 <Globe className="w-4 h-4 text-sky-400" />
-                Live Global Market Clock & Exchange Status
+                Global Market Clock & Session Status
               </span>
               <span className="text-[10px] font-mono text-neutral-400">
                 UTC {schedule.nowUtc.toUTCString().slice(17, 25)}
@@ -263,10 +263,10 @@ export const MarketHoursModal: React.FC<MarketHoursModalProps> = ({
               <div>
                 <div className="text-xs font-mono font-bold text-white uppercase flex items-center gap-2">
                   <Zap className="w-4 h-4 text-emerald-400" />
-                  Autonomous Market Adaptation & Asset Rotation
+                  Paper Watchlist & Session Awareness
                 </div>
                 <p className="text-[11px] text-neutral-400">
-                  When stock/forex markets close for the weekend, automatically rotate scanner to 24/7 crypto (BTC, ETH, SOL, DOGE) to maintain continuous paper profit compounding.
+                  Jarvis can identify which sessions are open and can maintain a paper watchlist. It does not claim continuous background trading or guaranteed compounding.
                 </p>
               </div>
 
@@ -280,7 +280,7 @@ export const MarketHoursModal: React.FC<MarketHoursModalProps> = ({
                     : "bg-neutral-800 text-neutral-400 hover:text-white"
                 }`}
               >
-                {autoRotateAssets ? "AUTO-SWITCH ACTIVE" : "DISABLED"}
+                {autoRotateAssets ? "WATCHLIST ACTIVE" : "DISABLED"}
               </button>
             </div>
           </div>
@@ -290,7 +290,7 @@ export const MarketHoursModal: React.FC<MarketHoursModalProps> = ({
         <div className="p-3.5 border-t border-neutral-800 bg-neutral-900/50 flex items-center justify-between text-xs font-mono text-neutral-400">
           <div className="flex items-center gap-2">
             <ShieldCheck className="w-4 h-4 text-emerald-400" />
-            <span>Autonomous Safe Mode: Online & Armed</span>
+            <span>Paper safety mode: active</span>
           </div>
 
           <button
