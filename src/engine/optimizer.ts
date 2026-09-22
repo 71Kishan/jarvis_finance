@@ -282,8 +282,11 @@ export class StrategyOptimizer {
         }
       }
 
-      // A pending signal is intentionally consumed by the next bar's open.
-      // It is not cleared during the same iteration in which it was created.
+      // A pending order older than one bar is invalid and is never carried forward.
+      if (pendingSignalTime !== null && i - startIndex > 0 && candle.timestamp !== pendingSignalTime && !position) {
+        pendingSignal = null;
+        pendingSignalTime = null;
+      }
     }
 
     const totalPnl = cash - balanceStart;

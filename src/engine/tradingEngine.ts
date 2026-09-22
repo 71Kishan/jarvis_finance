@@ -353,7 +353,7 @@ export class TradingEngine {
 
     next.slippageBps = Math.max(0, Math.min(500, safeNumber(next.slippageBps, 2)));
     next.feeTierPercent = Math.max(0, Math.min(2, safeNumber(next.feeTierPercent, 0.04)));
-    next.maxLeverage = Math.max(1, Math.min(10, safeNumber(next.maxLeverage, 2)));
+    next.maxLeverage = Math.max(1, Math.min(5, safeNumber(next.maxLeverage, 2)));
     next.leverage = Math.max(1, Math.min(next.maxLeverage, safeNumber(next.leverage, 1)));
     next.maxPositionPercent = Math.max(1, Math.min(100, safeNumber(next.maxPositionPercent, 25)));
     next.maxDailyLossPercent = Math.max(0.25, Math.min(20, safeNumber(next.maxDailyLossPercent, 2)));
@@ -415,7 +415,11 @@ export class TradingEngine {
     this.notify();
   }
 
-  public executePaperTrade(request: PaperOrderRequest, currentPrice: number): boolean {
+  public executePaperTrade(
+    request: PaperOrderRequest,
+    currentPrice: number,
+    dataTimestamp: number = Date.now(),
+  ): boolean {
     this.refreshDailyRiskWindow();
 
     if (this.botState === "HALTED_DEAD") {
@@ -430,7 +434,7 @@ export class TradingEngine {
       this.logThought("DEFENSE", "Paper Order Rejected", "A position is already open. The current risk engine permits one active position.", 0);
       return false;
     }
-    if (this.isDataStale(Date.now())) {
+    if (this.isDataStale(dataTimestamp)) {
       this.logThought("DEFENSE", "Paper Order Rejected", "Market input is stale. No paper fill is created from stale data.", 0);
       return false;
     }
@@ -626,7 +630,7 @@ export class TradingEngine {
     this.notify();
   }
 
-  public onTick(currentCandle: Candle, recentCandles: Candle[]) {
+  public onTick(currentCandle: Candle, recentCandles: Candle[], allowNewEntries = true) {
     if (!currentCandle || this.botState === "HALTED_DEAD") return;
 
     this.refreshDailyRiskWindow();
@@ -635,7 +639,13 @@ export class TradingEngine {
     if (isNewCandle) this.lastProcessedCandleTimestamp = currentCandle.timestamp;
 
     // Pending signals are generated from the prior completed bar and executed at the next bar open.
-    if (isNewCandle && !this.activeTrade && this.pendingSignal && currentCandle.timestamp > this.pendingSignal.signalTimestamp) {
+    if (
+      allowNewEntries &&
+      isNewCandle &&
+      !this.activeTrade &&
+      this.pendingSignal &&
+      currentCandle.timestamp > this.pendingSignal.signalTimestamp
+    ) {
       if (!this.dailyRiskHalted && this.canOpenNewPosition()) {
         this.executeEntryAtOpen(currentCandle.open, this.pendingSignal);
       }
@@ -654,6 +664,7 @@ export class TradingEngine {
     // Only form a new signal once per candle. The App can poll the same live candle multiple times.
     if (
       isNewCandle &&
+      allowNewEntries &&
       !this.activeTrade &&
       !this.dailyRiskHalted &&
       recentCandles.length >= 50 &&
@@ -1411,9 +1422,8 @@ export class TradingEngine {
   }
 
   private isDataStale(timestamp: number): boolean {
-    // Manual/local simulated candles are timestamped in the present and pass this check.
-    // Live-feed integrations should provide their real update timestamp through the caller.
-    return timestamp - Date.now() > 5_000;
+    const age = Date.now() - safeNumber(timestamp, Date.now());
+    return age > (this.paperSettings.staleDataMs ?? 90_000) || age < -5_000;
   }
 
   private startFreshPaperSession(capital: number) {
