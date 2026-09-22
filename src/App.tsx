@@ -41,8 +41,10 @@ import {
 
 export default function App() {
   const [currentAsset, setCurrentAsset] = useState<AssetSymbol>("BTC/USD");
-  const [marketSource, setMarketSource] = useState<MarketDataSource>("LIVE_EXCHANGE");
-  const [isAutoTrading, setIsAutoTrading] = useState<boolean>(true);
+  // Safe defaults: explicit simulation and explicit re-arming are required.
+  const [marketSource, setMarketSource] = useState<MarketDataSource>("SIMULATED");
+  const [isAutoTrading, setIsAutoTrading] = useState<boolean>(false);
+  const [liveFeedError, setLiveFeedError] = useState<string | null>(null);
   const [simulationSpeed, setSimulationSpeed] = useState<number>(2); // 2x default for simulator
   const [liveTicker, setLiveTicker] = useState<LiveExchangeTicker | null>(null);
 
@@ -145,6 +147,7 @@ export default function App() {
     setEquityCurve([...engine.getEquityCurve()]);
 
     if (newState === "HALTED_DEAD") {
+      setIsAutoTrading(false);
       setIsEmergencyModalOpen(true);
     }
   }, []);
@@ -184,7 +187,7 @@ export default function App() {
     return () => clearInterval(timer);
   }, [marketSource, isAutoTrading, simulationSpeed, botState, stepTick]);
 
-  // Live Exchange Data Polling Loop (when LIVE_EXCHANGE is active)
+  // Verified market-data polling loop. Never substitute simulation data when live data fails.
   useEffect(() => {
     if (marketSource !== "LIVE_EXCHANGE") return;
 
@@ -192,11 +195,18 @@ export default function App() {
 
     const fetchLiveFeed = async () => {
       try {
-        const res = await fetch(`/api/market/live-feed?symbol=${encodeURIComponent(currentAsset)}&limit=80`);
-        if (!res.ok) throw new Error(`Feed error: ${res.status}`);
-        const data = await res.json();
+        const res = await fetch(
+          `/api/market/live-feed?symbol=${encodeURIComponent(currentAsset)}&limit=80`
+        );
+        const data = await res.json().catch(() => ({}));
+
+        if (!res.ok || !data.success) {
+          throw new Error(data.message || `Feed error: ${res.status}`);
+        }
 
         if (!isSubscribed) return;
+
+        setLiveFeedError(null);
 
         if (data.ticker) {
           setLiveTicker(data.ticker);
@@ -208,32 +218,39 @@ export default function App() {
             const allCandles = simulatorRef.current.getCandles();
             const lastCandle = allCandles[allCandles.length - 1];
 
-            if (isAutoTrading && botState !== "HALTED_DEAD") {
-              tradingEngineRef.current.onTick(lastCandle, allCandles);
-            } else if (tradingEngineRef.current.getActiveTrade()) {
-              // Always manage active trade stop-loss/take-profit even if auto hunting is paused
-              tradingEngineRef.current.onTick(lastCandle, allCandles);
+            if (lastCandle) {
+              const engine = tradingEngineRef.current;
+              const shouldProcess =
+                engine.getBotState() !== "HALTED_DEAD" &&
+                (isAutoTrading || Boolean(engine.getActiveTrade()));
+
+              if (shouldProcess) {
+                engine.onTick(lastCandle, allCandles);
+              }
             }
 
             syncStateFromEngine();
           }
         }
-      } catch (err) {
-        console.warn("Live feed poll error, falling back to local tick:", err);
+      } catch (err: any) {
+        console.warn("Verified market feed unavailable:", err);
+        if (isSubscribed) {
+          setLiveFeedError(
+            err?.message ||
+              "Verified market data is unavailable. Jarvis will not substitute synthetic prices."
+          );
+        }
       }
     };
 
-    // Initial fetch immediately
     fetchLiveFeed();
-
-    // Poll live exchange every 2.5 seconds
-    const interval = setInterval(fetchLiveFeed, 2500);
+    const interval = setInterval(fetchLiveFeed, 5000);
 
     return () => {
       isSubscribed = false;
       clearInterval(interval);
     };
-  }, [marketSource, currentAsset, isAutoTrading, botState, syncStateFromEngine]);
+  }, [marketSource, currentAsset, isAutoTrading, syncStateFromEngine]);
 
   // Handle Asset Switch
   const handleSelectAsset = (asset: AssetSymbol) => {
@@ -249,8 +266,24 @@ export default function App() {
     }
   };
 
-  // Toggle Auto Trading
+  // Market-source switch. Simulation state is restored explicitly; live mode starts empty until verified data arrives.
+  const handleToggleMarketSource = (source: MarketDataSource) => {
+    setMarketSource(source);
+    setLiveFeedError(null);
+
+    if (source === "LIVE_EXCHANGE") {
+      setLiveTicker(null);
+      if (simulatorRef.current) simulatorRef.current.setExternalCandles([]);
+      setCandles([]);
+      setIsAutoTrading(false);
+    } else {
+      simulatorRef.current?.setAsset(currentAsset, 80);
+      setCandles([...(simulatorRef.current?.getCandles() || [])]);
+    }
+  };
+
   const handleToggleAutoTrading = () => {
+    if (botState === "HALTED_DEAD") return;
     setIsAutoTrading((prev) => !prev);
   };
 
@@ -270,7 +303,8 @@ export default function App() {
     if (!tradingEngineRef.current) return;
     tradingEngineRef.current.reviveBot(recapital);
     setIsEmergencyModalOpen(false);
-    setIsAutoTrading(true);
+    // Resuming a halted system never re-arms execution automatically.
+    setIsAutoTrading(false);
     syncStateFromEngine();
   };
 
@@ -316,60 +350,11 @@ export default function App() {
     return success;
   };
 
-  // Instantly run one verified trade on the live market to confirm execution & update strategy vault
-  const handleRunImmediateTrade = async () => {
-    if (!tradingEngineRef.current || !simulatorRef.current) return;
-    const lastCandle = simulatorRef.current.getLastCandle();
-    const currentPrice = lastCandle ? lastCandle.close : 65000;
+  // Deliberately no instant-trade path. Trading always goes through the normal paper-order/risk path.
 
-    // If auto-rotation across markets is active:
-    // If current asset score is below minimum, scan other assets (Forex, Tech Stocks, Crypto, Indices)
-    // to find the highest-probability winning setup
-    if (autoRotateAssets) {
-      try {
-        const res = await fetch(`/api/market/multi-scan?minConfidence=${strategy.minConfidence}`);
-        if (res.ok) {
-          const data = await res.json();
-          const top = data.opportunities?.[0];
-          if (top && top.symbol !== currentAsset && top.score >= 70) {
-            handleSelectAsset(top.symbol as AssetSymbol);
-            setTimeout(() => {
-              if (tradingEngineRef.current) {
-                const tr = tradingEngineRef.current.runImmediateVerifiedTrade(
-                  top.price,
-                  top.bestDirection === "SHORT" ? "SHORT" : "LONG"
-                );
-                syncStateFromEngine();
-                if (tr) setVerificationToastTrade(tr);
-              }
-            }, 300);
-            return;
-          }
-        }
-      } catch (err) {
-        console.warn("Opportunity auto-rotation check skipped:", err);
-      }
-    }
-
-    const tr = tradingEngineRef.current.runImmediateVerifiedTrade(currentPrice);
-    syncStateFromEngine();
-    if (tr) setVerificationToastTrade(tr);
-  };
-
-  // Select asset and optionally execute a trade immediately
-  const handleSelectAndTradeAsset = (asset: AssetSymbol, executeTrade?: boolean) => {
+  // Radar selection changes the monitored asset only. It never places an order.
+  const handleSelectAndTradeAsset = (asset: AssetSymbol, _executeTrade?: boolean) => {
     handleSelectAsset(asset);
-    if (executeTrade) {
-      setTimeout(() => {
-        if (tradingEngineRef.current && simulatorRef.current) {
-          const candle = simulatorRef.current.getLastCandle();
-          const price = candle ? candle.close : 100;
-          const tr = tradingEngineRef.current.runImmediateVerifiedTrade(price);
-          syncStateFromEngine();
-          if (tr) setVerificationToastTrade(tr);
-        }
-      }, 350);
-    }
   };
 
   // Force Quantitative Confluence Scan
@@ -398,7 +383,7 @@ export default function App() {
     if (!tradingEngineRef.current) return;
     tradingEngineRef.current.fullResetAccount(initialCapital);
     setIsEmergencyModalOpen(false);
-    setIsAutoTrading(true);
+    setIsAutoTrading(false);
     syncStateFromEngine();
   };
 
@@ -427,7 +412,10 @@ export default function App() {
     if (el) el.scrollIntoView({ behavior: "smooth" });
   };
 
-  const currentPrice = candles[candles.length - 1]?.close || 65000;
+  const currentPrice =
+    liveTicker?.price ??
+    candles[candles.length - 1]?.close ??
+    0;
   const currentRegime = simulatorRef.current ? simulatorRef.current.getRegime() : "BULL_EXPANSION";
 
   return (
@@ -472,6 +460,16 @@ export default function App() {
         />
       )}
 
+      {/* 2. Data integrity banner */}
+      {liveFeedError && marketSource === "LIVE_EXCHANGE" && (
+        <div className="mx-auto w-full max-w-7xl px-4">
+          <div className="rounded-xl border border-amber-800 bg-amber-950/30 px-4 py-3 text-xs text-amber-200">
+            <strong>Verified data unavailable.</strong> {liveFeedError}
+            <span className="ml-2 text-amber-400">Switch to High-Speed Sandbox for simulated research.</span>
+          </div>
+        </div>
+      )}
+
       {/* 3. Main Operational Command Center */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 flex flex-col gap-4">
         {/* Paper Trading Deck & Order Flow Section */}
@@ -489,9 +487,8 @@ export default function App() {
                 ticker={liveTicker}
                 isAutoTrading={isAutoTrading}
                 onToggleAutoTrading={handleToggleAutoTrading}
-                onToggleMarketSource={(src) => setMarketSource(src)}
+                onToggleMarketSource={handleToggleMarketSource}
                 onExecutePaperTrade={handleExecutePaperTrade}
-                onRunImmediateTrade={handleRunImmediateTrade}
                 onOpenMultiAssetRadar={() => setIsRadarOpen(true)}
                 onOpenStrategyVault={() => setIsVaultOpen(true)}
                 autoRotateAssets={autoRotateAssets}
