@@ -95,7 +95,7 @@ export const EmergencyHaltModal: React.FC<EmergencyHaltModalProps> = ({
               The algorithm detected adverse market regime dislocation and reached the pre-set risk boundary. Rather than allowing compounding drawdown, the system strictly enforced its fiduciary circuit breaker: open positions were safely liquidated and automated order entry was suspended.
             </p>
             <p className="text-indigo-300 text-[11px] bg-indigo-950/30 p-2 rounded border border-indigo-900/40">
-              Capital preservation mandate verified: Maximum drawdown limits protected principal equity. Recalibrate execution parameters before resuming live market cycles.
+              Risk-halt state reached. The modeled limits stop new paper entries; they cannot guarantee protection from real-market gaps or losses.
             </p>
           </div>
 
