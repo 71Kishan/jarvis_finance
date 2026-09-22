@@ -1,279 +1,198 @@
 import { DailyPerformanceGoal, StrategyConfig, StrategyVaultEntry, Trade } from "../types/trading";
-import { DEFAULT_STRATEGY } from "./tradingEngine";
 
-const STORAGE_KEY = "aegis_strategy_vault_v1";
-const DAILY_GOAL_STORAGE_KEY = "aegis_daily_goal_v1";
+const STORAGE_KEY = "jarvis_strategy_v2";
+const DAILY_GOAL_STORAGE_KEY = "jarvis_daily_goal_v2";
+const QUALIFICATION_TRADES = 100;
+const QUALIFICATION_OOS_TRADES = 30;
+const MIN_PROFIT_FACTOR = 1.1;
+const MAX_QUALIFIED_DRAWDOWN = 20;
 
 export class StrategyVault {
-  private entries: Map<string, StrategyVaultEntry> = new Map();
+  private entries = new Map<string, StrategyVaultEntry>();
   private dailyGoal: DailyPerformanceGoal = {
-    dailyTargetUsd: 200,
+    dailyTargetUsd: 0,
     currentDailyPnlUsd: 0,
     tradesCountToday: 0,
     targetAchieved: false,
-    streakDays: 4,
+    streakDays: 0,
   };
 
   constructor() {
     this.loadFromStorage();
-    if (this.entries.size === 0) {
-      this.seedInitialVault();
-    }
   }
 
   public computeSignature(config: StrategyConfig): string {
-    const w = config.indicatorWeights || {
-      trendEMA: 1,
-      rsiReversal: 1,
-      bollingerMeanReversion: 1,
-      macdMomentum: 1,
-      volumeConfirmation: 1,
-    };
+    const w = config.indicatorWeights;
     return [
       config.asset || "ALL",
-      `EMA:${w.trendEMA}`,
-      `RSI:${config.rsiOversold}-${config.rsiOverbought}_W${w.rsiReversal}`,
-      `MACD:${w.macdMomentum}`,
-      `BB:${w.bollingerMeanReversion}`,
-      `SL:${config.stopLossPercent}`,
-      `TP:${config.takeProfitPercent}`,
-      `CONF:${config.minConfidence}`,
-      `TR:${config.trailingStop ? config.trailingStopPercent : 0}`,
+      "EMA:" + w.trendEMA,
+      "RSI:" + config.rsiOversold + "-" + config.rsiOverbought + "_W" + w.rsiReversal,
+      "MACD:" + w.macdMomentum,
+      "BB:" + w.bollingerMeanReversion,
+      "VOL:" + w.volumeConfirmation,
+      "SL:" + config.stopLossPercent,
+      "TP:" + config.takeProfitPercent,
+      "CONF:" + config.minConfidence,
+      "TR:" + (config.trailingStop ? config.trailingStopPercent : 0),
+      "TA:" + (config.trailingActivationPercent ?? 1),
+      "RULES:" + config.rules.join(","),
     ].join("|");
   }
 
-  private seedInitialVault() {
-    const defaultSig = this.computeSignature(DEFAULT_STRATEGY);
-
-    const initialEntries: StrategyVaultEntry[] = [
-      {
-        id: "strat-proven-1",
-        signature: defaultSig,
-        name: "Aegis Multi-Confluence Trend Hunter",
-        category: "TREND_FOLLOWING",
-        asset: "BTC/USD",
-        version: 1,
-        totalTrades: 18,
-        wins: 14,
-        losses: 4,
-        winRate: 77.8,
-        totalPnlUsd: 842.5,
-        profitFactor: 2.85,
-        maxDrawdownPercent: 1.4,
-        status: "PROVEN_PROFITABLE",
-        successNotes: "Robust 9/21/50 EMA trend alignment with volume confirmation. Strict stop preservation.",
-        lastTestedTime: Date.now() - 3600000,
-        config: { ...DEFAULT_STRATEGY },
-      },
-      {
-        id: "strat-proven-2",
-        signature: "ALL|EMA:0.8|RSI:28-72_W1.4|MACD:1.0|BB:1.5|SL:0.8|TP:2.2|CONF:82|TR:0.5",
-        name: "Mean-Reverting Dynamic Bollinger Sniper",
-        category: "MEAN_REVERSION",
-        asset: "SOL/USD",
-        version: 2,
-        totalTrades: 12,
-        wins: 9,
-        losses: 3,
-        winRate: 75.0,
-        totalPnlUsd: 538.1,
-        profitFactor: 2.4,
-        maxDrawdownPercent: 1.1,
-        status: "PROVEN_PROFITABLE",
-        successNotes: "Captures extreme RSI extensions (>72 or <28) bouncing off outer 2.0-stddev Bollinger bands.",
-        lastTestedTime: Date.now() - 7200000,
-        config: {
-          ...DEFAULT_STRATEGY,
-          id: "strat-proven-2",
-          name: "Mean-Reverting Dynamic Bollinger Sniper",
-          rsiOversold: 28,
-          rsiOverbought: 72,
-          stopLossPercent: 0.8,
-          takeProfitPercent: 2.2,
-          minConfidence: 82,
-        },
-      },
-      {
-        id: "strat-testing-1",
-        signature: "ALL|EMA:1.5|RSI:35-65_W0.9|MACD:1.4|BB:0.6|SL:1.2|TP:3.0|CONF:80|TR:0.8",
-        name: "EMA Golden Slope Momentum Scalper",
-        category: "SCALPING",
-        asset: "NVDA",
-        version: 1,
-        totalTrades: 5,
-        wins: 3,
-        losses: 2,
-        winRate: 60.0,
-        totalPnlUsd: 142.0,
-        profitFactor: 1.65,
-        maxDrawdownPercent: 1.8,
-        status: "TESTING_PAPER",
-        successNotes: "Under live paper forward test. High upside target with trailing protection.",
-        lastTestedTime: Date.now() - 1800000,
-        config: {
-          ...DEFAULT_STRATEGY,
-          id: "strat-testing-1",
-          name: "EMA Golden Slope Momentum Scalper",
-          stopLossPercent: 1.2,
-          takeProfitPercent: 3.0,
-          minConfidence: 80,
-        },
-      },
-      {
-        id: "strat-failed-1",
-        signature: "ALL|EMA:0.2|RSI:45-55_W0.3|MACD:0.4|BB:0.3|SL:0.4|TP:0.8|CONF:55|TR:0",
-        name: "Aggressive 5-Minute Micro Breakout",
-        category: "VOLATILITY_BREAKOUT",
-        asset: "ETH/USD",
-        version: 1,
-        totalTrades: 14,
-        wins: 4,
-        losses: 10,
-        winRate: 28.6,
-        totalPnlUsd: -385.2,
-        profitFactor: 0.48,
-        maxDrawdownPercent: 3.8,
-        status: "DISCARDED_FAILED",
-        failureReason: "Discarded: High slippage fee drag and frequent false breakouts in choppy ranges. Do not retry.",
-        lastTestedTime: Date.now() - 86400000,
-        config: {
-          ...DEFAULT_STRATEGY,
-          id: "strat-failed-1",
-          name: "Aggressive 5-Minute Micro Breakout",
-          minConfidence: 55,
-          stopLossPercent: 0.4,
-          takeProfitPercent: 0.8,
-        },
-      },
-      {
-        id: "strat-failed-2",
-        signature: "ALL|EMA:0.0|RSI:30-70_W2.0|MACD:0.0|BB:0.0|SL:1.5|TP:1.5|CONF:60|TR:0",
-        name: "Naked RSI Single-Indicator Reversal",
-        category: "MEAN_REVERSION",
-        asset: "SPY",
-        version: 1,
-        totalTrades: 8,
-        wins: 2,
-        losses: 6,
-        winRate: 25.0,
-        totalPnlUsd: -240.0,
-        profitFactor: 0.35,
-        maxDrawdownPercent: 2.9,
-        status: "DISCARDED_FAILED",
-        failureReason: "Discarded: Caught counter-trend during runaway macro directional extensions without EMA anchor.",
-        lastTestedTime: Date.now() - 172800000,
-        config: {
-          ...DEFAULT_STRATEGY,
-          id: "strat-failed-2",
-          name: "Naked RSI Single-Indicator Reversal",
-          minConfidence: 60,
-        },
-      },
-    ];
-
-    for (const item of initialEntries) {
-      this.entries.set(item.signature, item);
-    }
-    this.saveToStorage();
-  }
-
   public isDuplicateStrategy(config: StrategyConfig): { isDuplicate: boolean; existingEntry?: StrategyVaultEntry } {
-    const sig = this.computeSignature(config);
-    const existing = this.entries.get(sig);
-    if (existing) {
-      return { isDuplicate: true, existingEntry: existing };
-    }
-    return { isDuplicate: false };
-  }
-
-  public registerStrategy(config: StrategyConfig, category: StrategyVaultEntry["category"] = "TREND_FOLLOWING"): StrategyVaultEntry {
     const signature = this.computeSignature(config);
     const existing = this.entries.get(signature);
-    if (existing) {
-      return existing;
-    }
+    return existing ? { isDuplicate: true, existingEntry: existing } : { isDuplicate: false };
+  }
 
-    const newEntry: StrategyVaultEntry = {
-      id: `strat-${Date.now()}`,
+  public registerStrategy(
+    config: StrategyConfig,
+    category: StrategyVaultEntry["category"] = "TREND_FOLLOWING",
+  ): StrategyVaultEntry {
+    const signature = this.computeSignature(config);
+    const existing = this.entries.get(signature);
+    if (existing) return existing;
+
+    const entry: StrategyVaultEntry = {
+      id: "strat-" + Date.now(),
       signature,
-      name: config.name || `Strategy v${config.version}`,
+      name: config.name || "Unnamed strategy",
       category,
-      asset: config.asset || "BTC/USD",
+      asset: config.asset || "UNKNOWN",
       version: config.version,
       totalTrades: 0,
       wins: 0,
       losses: 0,
       winRate: 0,
       totalPnlUsd: 0,
-      profitFactor: 1.0,
+      profitFactor: 0,
       maxDrawdownPercent: 0,
       status: "TESTING_PAPER",
-      successNotes: "Registered for live paper verification.",
+      evidenceStatus: "PAPER_TESTING",
+      grossProfitUsd: 0,
+      grossLossUsd: 0,
       lastTestedTime: Date.now(),
-      config,
+      config: { ...config },
     };
 
-    this.entries.set(signature, newEntry);
+    this.entries.set(signature, entry);
     this.saveToStorage();
-    return newEntry;
+    return entry;
   }
 
   public recordTradeOutcome(config: StrategyConfig, trade: Trade) {
-    const signature = this.computeSignature(config);
-    let entry = this.entries.get(signature);
-
-    if (!entry) {
-      entry = this.registerStrategy(config);
-    }
-
-    const isWin = trade.pnl > 0;
-    const isLoss = trade.pnl < 0;
+    const entry = this.registerStrategy(config);
 
     entry.totalTrades += 1;
-    if (isWin) entry.wins += 1;
-    if (isLoss) entry.losses += 1;
+    if (trade.pnl > 0) {
+      entry.wins += 1;
+      entry.grossProfitUsd = Number(((entry.grossProfitUsd ?? 0) + trade.pnl).toFixed(2));
+    } else if (trade.pnl < 0) {
+      entry.losses += 1;
+      entry.grossLossUsd = Number(((entry.grossLossUsd ?? 0) + Math.abs(trade.pnl)).toFixed(2));
+    }
 
-    entry.totalPnlUsd = Number((entry.totalPnlUsd + trade.pnl).toFixed(2));
-    entry.winRate = Number(((entry.wins / entry.totalTrades) * 100).toFixed(1));
+    entry.totalPnlUsd = Number(((entry.grossProfitUsd ?? 0) - (entry.grossLossUsd ?? 0)).toFixed(2));
+    entry.winRate = entry.totalTrades ? Number(((entry.wins / entry.totalTrades) * 100).toFixed(2)) : 0;
+    entry.profitFactor =
+      (entry.grossLossUsd ?? 0) > 0
+        ? Number(((entry.grossProfitUsd ?? 0) / (entry.grossLossUsd ?? 0)).toFixed(3))
+        : 0;
+    entry.expectancyUsd = entry.totalTrades ? Number((entry.totalPnlUsd / entry.totalTrades).toFixed(2)) : 0;
     entry.lastTestedTime = Date.now();
 
-    // Recompute profit factor
-    const totalWinPnl = entry.wins * Math.max(1, entry.totalPnlUsd > 0 ? entry.totalPnlUsd / entry.wins : 25);
-    const totalLossPnl = entry.losses * 20;
-    entry.profitFactor = Number((totalWinPnl / Math.max(1, totalLossPnl)).toFixed(2));
-
-    // Automated Classification Rule
-    if (entry.totalTrades >= 3) {
-      if (entry.winRate >= 60 && entry.totalPnlUsd > 0) {
-        entry.status = "PROVEN_PROFITABLE";
-        entry.successNotes = `Promoted to Proven: Win rate ${entry.winRate}% with +$${entry.totalPnlUsd.toFixed(2)} accumulated profit.`;
-        entry.failureReason = undefined;
-      } else if (entry.totalPnlUsd < -100 || entry.winRate < 40) {
-        entry.status = "DISCARDED_FAILED";
-        entry.failureReason = `Auto-Blacklisted: Negative PnL (-$${Math.abs(entry.totalPnlUsd).toFixed(2)}) and sub-40% win rate. Avoid repeating.`;
-      }
+    // Paper observations alone never become "proven" after a tiny sample.
+    if (
+      entry.totalTrades >= QUALIFICATION_TRADES &&
+      (entry.outOfSampleTrades ?? 0) >= QUALIFICATION_OOS_TRADES &&
+      entry.profitFactor >= MIN_PROFIT_FACTOR &&
+      entry.totalPnlUsd > 0 &&
+      entry.maxDrawdownPercent <= MAX_QUALIFIED_DRAWDOWN &&
+      (entry.outOfSamplePnlUsd ?? 0) > 0
+    ) {
+      entry.status = "PROVEN_PROFITABLE";
+      entry.evidenceStatus = "QUALIFIED";
+      entry.successNotes = "Qualified only after minimum trade-count, holdout and drawdown gates were met.";
+      entry.failureReason = undefined;
     }
 
-    this.entries.set(signature, entry);
-
-    // Update Daily Performance Goal
-    this.dailyGoal.currentDailyPnlUsd = Number((this.dailyGoal.currentDailyPnlUsd + trade.pnl).toFixed(2));
-    this.dailyGoal.tradesCountToday += 1;
-    if (this.dailyGoal.currentDailyPnlUsd >= this.dailyGoal.dailyTargetUsd) {
-      this.dailyGoal.targetAchieved = true;
+    if (
+      entry.totalTrades >= QUALIFICATION_TRADES &&
+      (entry.totalPnlUsd < 0 || entry.profitFactor < 1)
+    ) {
+      entry.status = "DISCARDED_FAILED";
+      entry.evidenceStatus = "REJECTED";
+      entry.failureReason = "Rejected on negative expectancy/profit factor after the minimum evidence window.";
     }
 
+    this.entries.set(entry.signature, entry);
+    this.updateDailyGoal(trade);
     this.saveToStorage();
   }
 
+  public registerBacktestEvidence(
+    config: StrategyConfig,
+    result: {
+      totalTrades: number;
+      winRate: number;
+      totalPnl: number;
+      profitFactor: number;
+      maxDrawdown: number;
+      outOfSampleTrades?: number;
+      outOfSamplePnl?: number;
+      outOfSampleMaxDrawdown?: number;
+      expectancyUsd?: number;
+    },
+  ) {
+    const entry = this.registerStrategy(config);
+    entry.lastTestedTime = Date.now();
+    entry.totalTrades = Math.max(entry.totalTrades, result.totalTrades);
+    entry.wins = Math.max(entry.wins, Math.round(result.totalTrades * result.winRate / 100));
+    entry.losses = Math.max(0, entry.totalTrades - entry.wins);
+    entry.winRate = result.winRate;
+    entry.totalPnlUsd = result.totalPnl;
+    entry.profitFactor = result.profitFactor;
+    entry.maxDrawdownPercent = result.maxDrawdown;
+    entry.outOfSampleTrades = result.outOfSampleTrades ?? 0;
+    entry.outOfSamplePnlUsd = result.outOfSamplePnl ?? 0;
+    entry.outOfSampleMaxDrawdownPercent = result.outOfSampleMaxDrawdown ?? 0;
+    entry.expectancyUsd = result.expectancyUsd ?? (result.totalTrades ? result.totalPnl / result.totalTrades : 0);
+
+    const qualifies =
+      result.totalTrades >= QUALIFICATION_TRADES &&
+      (result.outOfSampleTrades ?? 0) >= QUALIFICATION_OOS_TRADES &&
+      result.profitFactor >= MIN_PROFIT_FACTOR &&
+      result.totalPnl > 0 &&
+      (result.outOfSamplePnl ?? 0) > 0 &&
+      result.maxDrawdown <= MAX_QUALIFIED_DRAWDOWN;
+
+    if (qualifies) {
+      entry.status = "PROVEN_PROFITABLE";
+      entry.evidenceStatus = "QUALIFIED";
+      entry.successNotes = "Backtest candidate passed the configured evidence gate. Keep paper-forward validation running.";
+    } else {
+      entry.status = "TESTING_PAPER";
+      entry.evidenceStatus = "PAPER_TESTING";
+    }
+
+    this.entries.set(entry.signature, entry);
+    this.saveToStorage();
+    return entry;
+  }
+
   public getAllStrategies(): StrategyVaultEntry[] {
+    const evidenceOrder: Record<string, number> = {
+      QUALIFIED: 0,
+      PAPER_TESTING: 1,
+      REJECTED: 2,
+      UNTESTED: 3,
+    };
+
     return Array.from(this.entries.values()).sort((a, b) => {
-      // Sort: Proven first, then testing, then discarded
-      const order = { PROVEN_PROFITABLE: 0, TESTING_PAPER: 1, DISCARDED_FAILED: 2 };
-      if (order[a.status] !== order[b.status]) {
-        return order[a.status] - order[b.status];
-      }
-      return b.totalPnlUsd - a.totalPnlUsd;
+      const ae = evidenceOrder[a.evidenceStatus ?? "UNTESTED"];
+      const be = evidenceOrder[b.evidenceStatus ?? "UNTESTED"];
+      if (ae !== be) return ae - be;
+      return b.totalTrades - a.totalTrades;
     });
   }
 
@@ -286,36 +205,56 @@ export class StrategyVault {
   }
 
   public setDailyTarget(targetUsd: number) {
-    this.dailyGoal.dailyTargetUsd = targetUsd;
-    this.dailyGoal.targetAchieved = this.dailyGoal.currentDailyPnlUsd >= targetUsd;
+    // Retained for UI compatibility, but a PnL target is informational and never used as an entry trigger.
+    this.dailyGoal.dailyTargetUsd = Math.max(0, Number(targetUsd) || 0);
+    this.dailyGoal.targetAchieved =
+      this.dailyGoal.dailyTargetUsd > 0 && this.dailyGoal.currentDailyPnlUsd >= this.dailyGoal.dailyTargetUsd;
     this.saveToStorage();
   }
 
-  private saveToStorage() {
-    try {
-      const arr = Array.from(this.entries.values());
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(arr));
-      localStorage.setItem(DAILY_GOAL_STORAGE_KEY, JSON.stringify(this.dailyGoal));
-    } catch {
-      // Storage unavailable or quota exceeded
+  private updateDailyGoal(trade: Trade) {
+    const today = new Date().toISOString().slice(0, 10);
+    const lastDate = localStorage.getItem("jarvis_daily_goal_date_v2");
+    if (lastDate !== today) {
+      this.dailyGoal.currentDailyPnlUsd = 0;
+      this.dailyGoal.tradesCountToday = 0;
+      this.dailyGoal.targetAchieved = false;
+      this.dailyGoal.streakDays = this.dailyGoal.streakDays;
+      localStorage.setItem("jarvis_daily_goal_date_v2", today);
     }
+
+    this.dailyGoal.currentDailyPnlUsd = Number((this.dailyGoal.currentDailyPnlUsd + trade.pnl).toFixed(2));
+    this.dailyGoal.tradesCountToday += 1;
+    this.dailyGoal.targetAchieved =
+      this.dailyGoal.dailyTargetUsd > 0 &&
+      this.dailyGoal.currentDailyPnlUsd >= this.dailyGoal.dailyTargetUsd;
+  }
+
+  private saveToStorage() {
+    if (typeof localStorage === "undefined") return;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(Array.from(this.entries.values())));
+    localStorage.setItem(DAILY_GOAL_STORAGE_KEY, JSON.stringify(this.dailyGoal));
   }
 
   private loadFromStorage() {
+    if (typeof localStorage === "undefined") return;
+
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
-        const arr: StrategyVaultEntry[] = JSON.parse(saved);
+        const arr = JSON.parse(saved) as StrategyVaultEntry[];
         for (const item of arr) {
-          this.entries.set(item.signature, item);
+          if (item?.signature) this.entries.set(item.signature, item);
         }
       }
+
       const goalSaved = localStorage.getItem(DAILY_GOAL_STORAGE_KEY);
       if (goalSaved) {
-        this.dailyGoal = JSON.parse(goalSaved);
+        const parsed = JSON.parse(goalSaved) as DailyPerformanceGoal;
+        if (parsed && typeof parsed === "object") this.dailyGoal = parsed;
       }
     } catch {
-      // Fallback
+      // Ignore corrupt local state; the paper account can be reset without affecting source code.
     }
   }
 }
