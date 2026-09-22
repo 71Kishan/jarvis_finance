@@ -236,27 +236,13 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <span className="text-xs font-bold text-neutral-200">
-                Daily Process: risk discipline & evidence
-              </span>
-              <span
-                className={`text-[10px] font-mono font-bold px-1.5 py-0.2 rounded ${
-                  dailyGoal.currentDailyPnlUsd >= 0
-                    ? "bg-emerald-950 text-emerald-300 border border-emerald-800"
-                    : "bg-rose-950 text-rose-300 border border-rose-800"
-                }`}
-              >
-                {dailyGoal.currentDailyPnlUsd >= 0 ? "+" : ""}$
-                {dailyGoal.currentDailyPnlUsd.toFixed(2)} Today
-              </span>
-              <span className="text-[10px] text-amber-400 font-mono hidden sm:inline">
-                {dailyGoal.streakDays}d Streak 🔥
+              <span className="text-xs font-bold text-neutral-200">Daily Process</span>
+              <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-neutral-800 text-neutral-300 border border-neutral-700">
+                {dailyGoal.tradesCountToday} paper trade{dailyGoal.tradesCountToday === 1 ? "" : "s"} today
               </span>
             </div>
             <div className="text-[11px] text-neutral-400">
-              {dailyGoal.targetAchieved
-                ? "No income target. Preserving process discipline."
-                : "Scanning only when the rules produce an eligible setup."}
+              No daily income target. Prioritize data quality, risk limits, trade quality and review.
             </div>
           </div>
         </div>
