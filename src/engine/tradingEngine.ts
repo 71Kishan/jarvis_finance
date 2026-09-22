@@ -223,9 +223,17 @@ export class TradingEngine {
     const exitEstimate = Math.abs(trade.amount * requestedExitPrice);
     const fill = modelExitFill(requestedExitPrice, trade.type, exitEstimate, this.paperSettings);
     trade.exitPrice = Number(fill.fillPrice.toFixed(4)); trade.exitTime = Date.now(); trade.status = status;
-    const gross = grossPnL(trade.type, trade.entryPrice, fill.fillPrice, trade.amount); const net = gross - fill.feeUsd;
-    trade.feesUsd = Number(((trade.feesUsd || 0) + fill.feeUsd).toFixed(2)); trade.slippageUsd = Number(((trade.slippageUsd || 0) + fill.slippageUsd).toFixed(2)); trade.pnl = Number(net.toFixed(2)); trade.pnlPercent = Number((net / Math.max(1, trade.sizeUsd) * 100).toFixed(2));
-    this.vitality.cash = Number((this.vitality.cash + (trade.marginUsd || trade.sizeUsd) + net).toFixed(2)); this.vitality.totalFees = Number((this.vitality.totalFees + fill.feeUsd).toFixed(2)); this.vitality.totalTrades++; this.vitality.totalPnl = Number((this.vitality.totalPnl + net).toFixed(2));
+    const entryFee = trade.feesUsd || 0;
+    const gross = grossPnL(trade.type, trade.entryPrice, fill.fillPrice, trade.amount);
+    const totalTradeFees = entryFee + fill.feeUsd;
+    const economicNet = gross - totalTradeFees;
+    trade.feesUsd = Number(totalTradeFees.toFixed(2));
+    trade.slippageUsd = Number(((trade.slippageUsd || 0) + fill.slippageUsd).toFixed(2));
+    trade.pnl = Number(economicNet.toFixed(2));
+    trade.pnlPercent = Number((economicNet / Math.max(1, trade.sizeUsd) * 100).toFixed(2));
+    // Entry fee was already removed from cash when the position opened; add back only margin + gross PnL - exit fee.
+    this.vitality.cash = Number((this.vitality.cash + (trade.marginUsd || trade.sizeUsd) + gross - fill.feeUsd).toFixed(2));
+    this.vitality.totalFees = Number((this.vitality.totalFees + fill.feeUsd).toFixed(2)); this.vitality.totalTrades++; this.vitality.totalPnl = Number((this.vitality.totalPnl + net).toFixed(2));
     if (net > 0) { this.vitality.winningTrades++; this.vitality.survivalStreak++; this.vitality.consecutiveLosses = 0; delete this.vitality.lastLossAt; }
     else if (net < 0) { this.vitality.losingTrades++; this.vitality.survivalStreak = 0; this.vitality.consecutiveLosses++; this.vitality.lastLossAt = Date.now(); }
     this.vitality.winRate = this.vitality.totalTrades ? Number((this.vitality.winningTrades / this.vitality.totalTrades * 100).toFixed(1)) : 0;
