@@ -90,21 +90,21 @@ export const Header: React.FC<HeaderProps> = ({
     switch (botState) {
       case "THRIVING":
         return {
-          label: "OPTIMAL (ALPHA ACCELERATION)",
+          label: "PAPER SYSTEM STABLE",
           color: "bg-emerald-500/10 text-emerald-400 border-emerald-500/30",
           icon: Flame,
           pulse: "bg-emerald-400",
         };
       case "HUNTING":
         return {
-          label: "SCANNING HIGH-CONFIDENCE SIGNALS",
+          label: "SCANNING QUALIFIED SIGNALS",
           color: "bg-blue-500/10 text-blue-400 border-blue-500/30",
           icon: Zap,
           pulse: "bg-blue-400",
         };
       case "IN_POSITION":
         return {
-          label: "POSITION ACTIVE (RISK-HEDGED)",
+          label: "POSITION ACTIVE (RISK MONITORED)",
           color: "bg-violet-500/10 text-violet-300 border-violet-500/30",
           icon: Activity,
           pulse: "bg-violet-400",
@@ -158,7 +158,7 @@ export const Header: React.FC<HeaderProps> = ({
                   JARVIS FINANCE
                 </span>
                 <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-neutral-800 text-neutral-400 border border-neutral-700">
-                  Self-Optimizing
+                  Research + Controlled Optimization
                 </span>
               </div>
               <p className="text-xs text-neutral-400 font-mono">
