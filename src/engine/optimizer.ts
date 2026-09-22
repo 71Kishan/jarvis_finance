@@ -82,7 +82,7 @@ export class StrategyOptimizer {
       position = null;
     };
 
-    for (let i = 60; i < candles.length - 1; i += 1) {
+    for (let i = 60; i < candles.length; i += 1) {
       const candle = candles[i];
       const candleDay = new Date(candle.timestamp).toISOString().slice(0, 10);
       if (candleDay !== dailyKey) {
@@ -145,7 +145,8 @@ export class StrategyOptimizer {
         candle.timestamp - lastLossAtMs < DEFAULT_RISK_POLICY.cooldownMinutes * 60_000;
 
       let openedThisBar = false;
-      if (!position && !halted && !inCooldown) {
+      const canOpenNextBar = i < candles.length - 1;
+      if (!position && !halted && !inCooldown && canOpenNextBar) {
         const signal = evaluateSignal(candle, candles.slice(0, i), s);
         if (signal.eligible) {
           const next = candles[i + 1];
@@ -203,7 +204,18 @@ export class StrategyOptimizer {
       previousEquity = equity;
     }
 
-    if (position) closePosition(position, candles[candles.length - 1].close);
+    // The final candle is processed for exits above. If the position survives
+    // the final bar, force-close at its observed close so the reported equity
+    // and return include the liquidation cost and the final bar.
+    if (position) {
+      closePosition(position, candles[candles.length - 1].close);
+      const finalEquityAfterForcedClose = cash;
+      peak = Math.max(peak, finalEquityAfterForcedClose);
+      const finalDrawdown = peak > 0 ? ((peak - finalEquityAfterForcedClose) / peak) * 100 : 0;
+      maxDrawdown = Math.max(maxDrawdown, finalDrawdown);
+      returns.push(previousEquity > 0 ? finalEquityAfterForcedClose / previousEquity - 1 : 0);
+      previousEquity = finalEquityAfterForcedClose;
+    }
 
     const totalTrades = wins + losses;
     const mean = this.mean(returns);
@@ -302,7 +314,7 @@ export class StrategyOptimizer {
       optimizationInsights: [
         "Walk-forward split: 60% train, 20% validation, 20% held-out test, with warm-up overlap for indicator calculation.",
         "Candidate selection uses training/validation evidence only; the held-out test set is reported after selection.",
-        "Entry signals are generated from a completed bar and filled at the next bar open.",
+        "Entry signals are generated from a completed bar and filled at the next bar open; the final bar is used only for exit/equity accounting.",
         "Test results include modeled entry and exit fees plus adverse slippage.",
         "Ambiguous OHLC bars resolve stop-first rather than assuming a favorable intrabar path.",
         "A small sample is not production validation; forward paper and shadow evidence remain required.",
