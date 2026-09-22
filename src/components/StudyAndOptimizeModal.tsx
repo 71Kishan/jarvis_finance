@@ -94,19 +94,27 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
     }
   };
 
-  const handleAdoptBestStrategy = () => {
-    if (aiAnalysis?.recommendedStrategy) {
-      onApplyStrategy({
-        ...currentStrategy,
-        ...aiAnalysis.recommendedStrategy,
-        id: `strat-evolved-v${(currentStrategy.version || 1) + 1}`,
-        version: (currentStrategy.version || 1) + 1,
-      });
-      onClose();
-    } else if (optimizationData?.bestStrategy) {
-      onApplyStrategy(optimizationData.bestStrategy);
-      onClose();
+  const handleApplyPaperCandidate = () => {
+    const candidate = aiAnalysis?.recommendedStrategy || optimizationData?.bestStrategy;
+    if (!candidate) return;
+
+    const result = optimizationData?.bestResult;
+    if (result && result.verdict === "FAIL") {
+      setAiAnalysis((prev) => ({
+        ...(prev || {}),
+        thoughtLog: "Application blocked: the selected candidate failed the initial research gate.",
+        keyTakeaway: "Keep the current paper strategy unchanged until a candidate passes appropriate validation.",
+      }));
+      return;
     }
+
+    onApplyStrategy({
+      ...currentStrategy,
+      ...candidate,
+      id: `strat-paper-candidate-v${(currentStrategy.version || 1) + 1}`,
+      version: (currentStrategy.version || 1) + 1,
+    });
+    onClose();
   };
 
   return (
@@ -120,10 +128,10 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
             </div>
             <div>
               <h2 className="text-sm font-bold text-neutral-100 uppercase tracking-wide">
-                Quantitative Strategy Evolution & Backtest Lab
+                Strategy Research & Validation Lab
               </h2>
               <p className="text-[11px] text-neutral-400">
-                Continuous optimization via historical market data and quantitative parameter search
+                Compare transparent candidates using historical data, modeled costs, and validation gates. Results are research evidence, not a promise of future returns.
               </p>
             </div>
           </div>
@@ -143,7 +151,7 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
             <div className="space-y-1">
               <div className="flex items-center gap-2 text-indigo-300 font-bold text-xs">
                 <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
-                <span>Execute Quantitative Strategy Optimization Cycle</span>
+                <span>Run a research cycle</span>
               </div>
               <p className="text-[11px] text-neutral-400 max-w-xl">
                 Evaluates {candles.length} historical candles, performs parameter surface search, backtests risk-to-reward ratios, and recalibrates algorithmic execution thresholds.
@@ -159,12 +167,12 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
               {isLoading ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Computing Models...</span>
+                  <span>Running research...</span>
                 </>
               ) : (
                 <>
                   <Play className="w-4 h-4 fill-white" />
-                  <span>Run Quantitative Optimization</span>
+                  <span>Run Research Study</span>
                 </>
               )}
             </button>
@@ -190,13 +198,13 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
 
                 <div className="bg-neutral-950 p-3 rounded-lg border border-neutral-800/80 text-[11px] space-y-1">
                   <div className="text-amber-400 font-semibold">
-                    Risk Mandate: "{aiAnalysis.survivalVow}"
+                    Risk notes: "{aiAnalysis.survivalVow}"
                   </div>
                   <div className="text-neutral-400">
-                    Regime Assessment: <strong className="text-neutral-200">{aiAnalysis.regimeAssessment}</strong>
+                    Regime assessment: <strong className="text-neutral-200">{aiAnalysis.regimeAssessment}</strong>
                   </div>
                   <div className="text-neutral-400">
-                    Key Quantitative Takeaway: <strong className="text-indigo-300">{aiAnalysis.keyTakeaway}</strong>
+                    Research takeaway: <strong className="text-indigo-300">{aiAnalysis.keyTakeaway}</strong>
                   </div>
                 </div>
               </div>
@@ -212,7 +220,7 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
                   Simulated Strategy Candidates ({optimizationData.candidatesTested.length} tested across historical data)
                 </h3>
                 <span className="text-[10px] text-neutral-500">
-                  Sorted by Win-Rate & Survival Score
+                  Candidate order is not a recommendation
                 </span>
               </div>
 
@@ -238,7 +246,7 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
                             </span>
                             {isTop && (
                               <span className="px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 text-[9px] font-bold border border-emerald-500/40">
-                                TOP PERFORMER
+                                CANDIDATE
                               </span>
                             )}
                           </div>
@@ -288,7 +296,7 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
                       </div>
 
                       <div className="flex items-center justify-between text-[10px] text-neutral-400 pt-1 border-t border-neutral-800/60">
-                        <span>Min Confidence: {cand.strategy.minConfidence}%</span>
+                        <span>Signal threshold: {cand.strategy.minConfidence}%</span>
                         <span>SL: {cand.strategy.stopLossPercent}% | TP: +{cand.strategy.takeProfitPercent}%</span>
                       </div>
                     </div>
@@ -313,7 +321,7 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
         {/* Modal Footer */}
         <div className="px-5 py-3 border-t border-neutral-800 bg-neutral-900/70 flex items-center justify-between">
           <span className="text-neutral-500 text-[11px]">
-            Adopting updates the terminal's live execution matrix immediately.
+            Applying updates only changes the PAPER strategy candidate. Formal validation is still required.
           </span>
 
           <div className="flex items-center gap-2">
@@ -325,12 +333,12 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
             </button>
             <button
               id="adopt-strategy-btn"
-              onClick={handleAdoptBestStrategy}
+              onClick={handleApplyPaperCandidate}
               disabled={!optimizationData && !aiAnalysis}
               className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition-all shadow-md disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
             >
               <CheckCircle2 className="w-3.5 h-3.5" />
-              <span>Adopt Optimized Strategy</span>
+              <span>Apply Candidate to Paper</span>
             </button>
           </div>
         </div>
