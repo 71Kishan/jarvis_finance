@@ -418,7 +418,7 @@ export const AiCopilotModal: React.FC<AiCopilotModalProps> = ({
                 <option value="gemini-3.8-flash" className="bg-slate-900 text-white">
                   gemini-3.8-flash
                 </option>
-              
+              </select>
             </div>
 
             <button
