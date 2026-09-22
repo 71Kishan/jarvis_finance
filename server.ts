@@ -356,116 +356,194 @@ const BASE_PRICES: Record<string, { price: number; category: "CRYPTO" | "STOCK" 
   "GBP/USD": { price: 1.305, category: "FOREX", name: "British Pound / USD" },
 };
 
+function calculateRsiFromCloses(closes: number[], period = 14): number | null {
+  if (closes.length <= period) return null;
+  let gain = 0;
+  let loss = 0;
+  for (let i = 1; i <= period; i += 1) {
+    const delta = closes[i] - closes[i - 1];
+    gain += Math.max(delta, 0);
+    loss += Math.max(-delta, 0);
+  }
+  let avgGain = gain / period;
+  let avgLoss = loss / period;
+  for (let i = period + 1; i < closes.length; i += 1) {
+    const delta = closes[i] - closes[i - 1];
+    avgGain = ((period - 1) * avgGain + Math.max(delta, 0)) / period;
+    avgLoss = ((period - 1) * avgLoss + Math.max(-delta, 0)) / period;
+  }
+  if (avgLoss === 0) return avgGain === 0 ? 50 : 100;
+  return 100 - 100 / (1 + avgGain / avgLoss);
+}
+
+function calculateEmaFromCloses(closes: number[], period: number): number | null {
+  if (closes.length < period) return null;
+  const k = 2 / (period + 1);
+  let ema = closes[0];
+  for (let i = 1; i < closes.length; i += 1) ema = closes[i] * k + ema * (1 - k);
+  return ema;
+}
+
 // Endpoint: Multi-Market Cross-Asset Opportunity Scanner
 app.get("/api/market/multi-scan", async (req: Request, res: Response) => {
   try {
-    const minConfidence = parseInt(req.query.minConfidence as string) || 75;
+    const minConfidence = Math.max(50, Math.min(95, parseInt(req.query.minConfidence as string) || 75));
+    const cryptoSymbols = ["BTC/USD", "ETH/USD", "SOL/USD", "DOGE/USD", "XRP/USD"];
+    const scanTimestamp = Date.now();
 
-    // Fetch Binance tickers for crypto & forex in one fast batch request
-    let binanceTickerMap: Record<string, any> = {};
-    try {
-      const bRes = await fetch("https://api.binance.com/api/v3/ticker/24hr", {
-        headers: { "User-Agent": "AutonomousTradingBot/1.0" },
-      });
-      if (bRes.ok) {
-        const list = await bRes.json();
-        for (const item of list) {
-          binanceTickerMap[item.symbol] = item;
+    const cryptoResults = await Promise.all(
+      cryptoSymbols.map(async (symbol) => {
+        const pair = SYMBOL_MAP[symbol];
+        try {
+          const [tickerRes, klinesRes] = await Promise.all([
+            fetch("https://api.binance.com/api/v3/ticker/24hr?symbol=" + pair, {
+              headers: { "User-Agent": "JarvisFinance/1.0" },
+            }),
+            fetch("https://api.binance.com/api/v3/klines?symbol=" + pair + "&interval=1h&limit=100", {
+              headers: { "User-Agent": "JarvisFinance/1.0" },
+            }),
+          ]);
+
+          if (!tickerRes.ok || !klinesRes.ok) throw new Error("Binance market data request failed");
+          const ticker = await tickerRes.json();
+          const rawKlines = await klinesRes.json();
+          const closes = rawKlines.map((k: any) => Number(k[4])).filter((n: number) => Number.isFinite(n));
+          const volumes = rawKlines.map((k: any) => Number(k[5])).filter((n: number) => Number.isFinite(n));
+
+          const rsiValue = calculateRsiFromCloses(closes);
+          const ema9 = calculateEmaFromCloses(closes, 9);
+          const ema21 = calculateEmaFromCloses(closes, 21);
+          const ema50 = calculateEmaFromCloses(closes, 50);
+          const price = Number(ticker.lastPrice);
+          const change24hPercent = Number(ticker.priceChangePercent);
+          const averageVolume = volumes.length ? volumes.reduce((a: number, b: number) => a + b, 0) / volumes.length : 0;
+          const currentVolume = volumes[volumes.length - 1] || 0;
+
+          if (![price, change24hPercent, rsiValue, ema9, ema21, ema50].every((v) => Number.isFinite(v))) {
+            throw new Error("Insufficient technical history");
+          }
+
+          let longScore = 0;
+          let shortScore = 0;
+          const reasons: string[] = [];
+
+          if (ema9 > ema21 && ema21 > ema50 && price > ema9) {
+            longScore += 35;
+            reasons.push("9/21/50 EMA alignment supports trend continuation");
+          } else if (ema9 < ema21 && ema21 < ema50 && price < ema9) {
+            shortScore += 35;
+            reasons.push("9/21/50 EMA alignment supports downside continuation");
+          }
+
+          if (rsiValue < 35) {
+            longScore += 25;
+            reasons.push("RSI is oversold");
+          } else if (rsiValue > 65) {
+            shortScore += 25;
+            reasons.push("RSI is overbought");
+          }
+
+          if (change24hPercent > 1) {
+            longScore += 20;
+            reasons.push("24h momentum is positive");
+          } else if (change24hPercent < -1) {
+            shortScore += 20;
+            reasons.push("24h momentum is negative");
+          }
+
+          if (averageVolume > 0 && currentVolume >= averageVolume * 1.2) {
+            if (longScore > shortScore) longScore += 20;
+            else if (shortScore > longScore) shortScore += 20;
+            reasons.push("latest hourly volume is above its 100-bar average");
+          }
+
+          const score = Math.min(95, Math.max(longScore, shortScore));
+          const direction: "LONG" | "SHORT" | "NEUTRAL" =
+            longScore > shortScore ? "LONG" : shortScore > longScore ? "SHORT" : "NEUTRAL";
+          const eligible = score >= minConfidence && direction !== "NEUTRAL";
+
+          return {
+            symbol,
+            name: BASE_PRICES[symbol].name,
+            category: "CRYPTO" as const,
+            price,
+            change24hPercent,
+            score,
+            bestDirection: direction,
+            rsi: Number(rsiValue.toFixed(2)),
+            trend:
+              ema9 > ema21 && ema21 > ema50
+                ? "BULLISH"
+                : ema9 < ema21 && ema21 < ema50
+                  ? "BEARISH"
+                  : "SIDEWAYS",
+            volatility: Math.abs(change24hPercent),
+            isEligible: eligible,
+            scanVerdict: eligible ? "QUALIFIED FOR REVIEW" : "INSUFFICIENT CONFLUENCE",
+            rationale: reasons.length ? reasons.join("; ") + "." : "No independent confluence passed.",
+            dataSource: "BINANCE" as const,
+            dataTimestamp: scanTimestamp,
+          };
+        } catch (error: any) {
+          return {
+            symbol,
+            name: BASE_PRICES[symbol].name,
+            category: "CRYPTO" as const,
+            price: 0,
+            change24hPercent: 0,
+            score: 0,
+            bestDirection: "NEUTRAL" as const,
+            rsi: 50,
+            trend: "SIDEWAYS" as const,
+            volatility: 0,
+            isEligible: false,
+            scanVerdict: "DATA UNAVAILABLE",
+            rationale: error?.message || "Market data unavailable.",
+            dataSource: "UNAVAILABLE" as const,
+            dataTimestamp: scanTimestamp,
+          };
         }
-      }
-    } catch {
-      // Non-fatal, fallback to realistic stochastic pricing
-    }
+      }),
+    );
 
-    const opportunities = Object.entries(BASE_PRICES).map(([symbol, info]) => {
-      const bPair = SYMBOL_MAP[symbol];
-      const liveBinance = bPair ? binanceTickerMap[bPair] : null;
-
-      let currentPrice = info.price;
-      let change24hPercent = 0;
-      let volume = 150000;
-
-      if (liveBinance) {
-        currentPrice = parseFloat(liveBinance.lastPrice);
-        change24hPercent = parseFloat(liveBinance.priceChangePercent);
-        volume = parseFloat(liveBinance.volume);
-      } else {
-        // High fidelity variance for stocks/forex
-        const seed = Math.sin(Date.now() / 15000 + symbol.charCodeAt(0));
-        currentPrice = Number((info.price * (1 + seed * 0.008)).toFixed(info.category === "FOREX" ? 4 : 2));
-        change24hPercent = Number((seed * 3.8).toFixed(2));
-      }
-
-      // Compute technical setup confluence
-      const rsi = Math.round(48 + Math.sin(currentPrice * 17) * 26);
-      const isBullishTrend = change24hPercent > 0.4 || rsi < 36;
-      const isBearishTrend = change24hPercent < -0.4 || rsi > 64;
-
-      let score = 50;
-      let bestDirection: "LONG" | "SHORT" | "NEUTRAL" = "NEUTRAL";
-      let rationale = "";
-
-      if (rsi <= 33) {
-        score += 35;
-        bestDirection = "LONG";
-        rationale = `Oversold RSI (${rsi}) touching lower Bollinger band with high reversal potential.`;
-      } else if (rsi >= 68) {
-        score += 33;
-        bestDirection = "SHORT";
-        rationale = `Overbought RSI (${rsi}) at structural resistance with volume exhaustion.`;
-      } else if (isBullishTrend) {
-        score += 28;
-        bestDirection = "LONG";
-        rationale = `Strong 9/21 EMA golden slope with positive 24h momentum (+${change24hPercent}%).`;
-      } else if (isBearishTrend) {
-        score += 26;
-        bestDirection = "SHORT";
-        rationale = `Bearish breakdown below 50 EMA with descending momentum (${change24hPercent}%).`;
-      } else {
-        score += 5;
-        bestDirection = "NEUTRAL";
-        rationale = `Consolidation zone. Low directional edge.`;
-      }
-
-      // Add category volatility bonus
-      if (info.category === "CRYPTO") score += 6;
-      if (Math.abs(change24hPercent) > 2.5) score += 5;
-
-      score = Math.min(96, Math.max(25, score));
-      const isEligible = score >= minConfidence && bestDirection !== "NEUTRAL";
-
-      return {
+    const unsupported = Object.entries(BASE_PRICES)
+      .filter(([symbol]) => !cryptoSymbols.includes(symbol))
+      .map(([symbol, info]) => ({
         symbol,
         name: info.name,
         category: info.category,
-        price: currentPrice,
-        change24hPercent,
-        score,
-        bestDirection,
-        rsi,
-        trend: isBullishTrend ? "BULLISH" : isBearishTrend ? "BEARISH" : "SIDEWAYS",
-        volatility: Math.abs(change24hPercent),
-        isEligible,
-        scanVerdict: isEligible
-          ? `HIGH-CONFLUENCE ${bestDirection} (${score}%)`
-          : `LOW EDGE (${score}%) - ABSTAIN`,
-        rationale,
-      };
-    });
+        price: 0,
+        change24hPercent: 0,
+        score: 0,
+        bestDirection: "NEUTRAL" as const,
+        rsi: 50,
+        trend: "SIDEWAYS" as const,
+        volatility: 0,
+        isEligible: false,
+        scanVerdict: "DATA SOURCE NOT CONNECTED",
+        rationale:
+          "Jarvis intentionally refuses to synthesize stock/forex prices. Connect a licensed stock/FX data provider before using these instruments for research or trading.",
+        dataSource: "UNAVAILABLE" as const,
+        dataTimestamp: scanTimestamp,
+      }));
 
-    // Sort opportunities by highest score first
-    opportunities.sort((a, b) => b.score - a.score);
+    const opportunities = [...cryptoResults, ...unsupported].sort((a, b) => b.score - a.score);
+    const eligible = opportunities.filter((op) => op.isEligible);
 
     return res.json({
       success: true,
-      timestamp: Date.now(),
+      timestamp: scanTimestamp,
       totalScanned: opportunities.length,
-      topOpportunity: opportunities[0],
+      eligibleCount: eligible.length,
+      topOpportunity: eligible[0] || null,
       opportunities,
     });
   } catch (err: any) {
     console.error("Error in multi-scan:", err);
-    return res.status(500).json({ error: "Failed to scan assets", message: err.message });
+    return res.status(502).json({
+      error: "Verified market scan unavailable",
+      message: "No synthetic fallback was used. Retry when the configured market-data source is available.",
+    });
   }
 });
 
@@ -522,53 +600,16 @@ app.get("/api/market/live-feed", async (req: Request, res: Response) => {
       }
     }
 
-    // Fallback or Synthetic Stock Symbols (NVDA, SPY, AAPL, etc.)
-    const baseInfo = BASE_PRICES[symbolParam] || { price: 100, category: "STOCK", name: symbolParam };
-    const base = baseInfo.price;
-    const now = Date.now();
-    const intervalMs = 60 * 1000;
-    const candles = [];
-    let cur = base;
-
-    for (let i = limit; i >= 0; i--) {
-      const t = now - i * intervalMs;
-      const change = (Math.random() - 0.49) * 0.003 * cur;
-      const open = cur;
-      const close = cur + change;
-      const high = Math.max(open, close) + Math.random() * 0.002 * cur;
-      const low = Math.min(open, close) - Math.random() * 0.002 * cur;
-      const volume = Math.floor(50 + Math.random() * 200);
-      candles.push({
-        timestamp: t,
-        open: Number(open.toFixed(baseInfo.category === "FOREX" ? 4 : 2)),
-        high: Number(high.toFixed(baseInfo.category === "FOREX" ? 4 : 2)),
-        low: Number(low.toFixed(baseInfo.category === "FOREX" ? 4 : 2)),
-        close: Number(close.toFixed(baseInfo.category === "FOREX" ? 4 : 2)),
-        volume,
-      });
-      cur = close;
-    }
-
-    const last = candles[candles.length - 1];
-    const ticker = {
+        return res.status(503).json({
+      error: "MARKET_DATA_UNAVAILABLE",
+      message:
+        "No verified live feed exists for " +
+        symbolParam +
+        ". Jarvis intentionally refuses to substitute synthetic prices into a live-data view.",
       symbol: symbolParam,
-      price: last.close,
-      bid: Number((last.close * 0.9998).toFixed(baseInfo.category === "FOREX" ? 4 : 2)),
-      ask: Number((last.close * 1.0002).toFixed(baseInfo.category === "FOREX" ? 4 : 2)),
-      high24h: Number((last.close * 1.025).toFixed(baseInfo.category === "FOREX" ? 4 : 2)),
-      low24h: Number((last.close * 0.975).toFixed(baseInfo.category === "FOREX" ? 4 : 2)),
-      volume24h: 184500,
-      change24hPercent: 1.84,
-      lastUpdated: now,
-      source: "SYNTHETIC" as const,
-    };
-
-    return res.json({
-      success: true,
-      symbol: symbolParam,
-      candles,
-      ticker,
+      dataSource: "UNAVAILABLE",
     });
+
   } catch (err: any) {
     console.error("Error fetching live market feed:", err);
     return res.status(500).json({ error: "Failed to fetch live feed", message: err.message });
