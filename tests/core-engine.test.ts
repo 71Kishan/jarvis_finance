@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { DEFAULT_RISK_POLICY, evaluateRisk } from "../src/engine/riskPolicy";
-import { DEFAULT_STRATEGY } from "../src/engine/tradingEngine";
+import { DEFAULT_STRATEGY, TradingEngine } from "../src/engine/tradingEngine";
 import { modelEntryFill, modelExitFill, resolveStopTarget, grossPnL } from "../src/engine/executionModel";
 import { evaluateSignal } from "../src/engine/signalEngine";
 import { Candle } from "../src/types/trading";
@@ -69,6 +69,30 @@ describe("risk policy", () => {
     expect(result.allowed).toBe(false);
     expect(result.reasons.join(" ")).toContain("leverage");
     expect(result.reasons.join(" ")).toContain("Daily drawdown");
+  });
+});
+
+describe("automated paper entry timing", () => {
+  test("queues an eligible signal and fills only at the next bar open", () => {
+    const engine = new TradingEngine(10000, 6, DEFAULT_STRATEGY);
+    engine.setMarketQuality({ spreadBps: 0, dataTimestamp: Date.now(), marketOpen: true });
+
+    const signalBars = Array.from({ length: 60 }, (_, i) => candle(i + 1));
+    const nextBar: Candle = {
+      ...candle(61),
+      open: 108,
+      high: 109,
+      low: 107,
+      close: 108.5,
+    };
+
+    engine.onTick(signalBars[59], signalBars);
+    expect(engine.getActiveTrade()).toBeNull();
+
+    engine.onTick(nextBar, [...signalBars, nextBar]);
+    const trade = engine.getActiveTrade();
+    expect(trade).not.toBeNull();
+    expect(trade?.entryPrice).toBeGreaterThan(nextBar.open);
   });
 });
 
