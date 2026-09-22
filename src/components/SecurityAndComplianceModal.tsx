@@ -84,7 +84,7 @@ export const SecurityAndComplianceModal: React.FC<SecurityAndComplianceModalProp
   const handleSavePin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (newPin.length < 4) {
-      setPinFeedback("PIN must be at least 4 digits.");
+      setPinFeedback("PIN must be exactly 6 digits.");
       return;
     }
     if (newPin !== confirmPin) {
@@ -95,7 +95,7 @@ export const SecurityAndComplianceModal: React.FC<SecurityAndComplianceModalProp
     setPinConfigured(true);
     setNewPin("");
     setConfirmPin("");
-    setPinFeedback("Security PIN set successfully. Session protection active!");
+    setPinFeedback("Six-digit local session PIN set successfully. This protects the app session; it is not brokerage key custody.");
     systemNotificationService.triggerHaptic("SUCCESS");
   };
 
@@ -145,7 +145,7 @@ export const SecurityAndComplianceModal: React.FC<SecurityAndComplianceModalProp
                 Security Vault, Legal Disclosures & Quant Defense
               </h2>
               <p className="text-xs text-neutral-400 font-sans">
-                Trading-software security controls, local audit hashing, and key-handling guidance
+                Local session security, audit checks, risk controls, and key-handling guidance
               </p>
             </div>
           </div>
@@ -211,7 +211,7 @@ export const SecurityAndComplianceModal: React.FC<SecurityAndComplianceModalProp
               <div className="p-4 rounded-xl bg-neutral-900/70 border border-neutral-800 space-y-2">
                 <div className="flex items-center gap-2 text-amber-400 text-xs font-mono font-bold">
                   <AlertTriangle className="w-4 h-4 shrink-0" />
-                  <span>CFTC RULE 4.41 STATUTORY MANDATED DISCLAIMER</span>
+                  <span>SIMULATED PERFORMANCE DISCLOSURE</span>
                 </div>
                 <div className="text-neutral-300 text-xs leading-relaxed space-y-2 font-sans">
                   <p>
