@@ -215,12 +215,14 @@ export default function App() {
               tradingEngineRef.current.onTick(lastCandle, allCandles);
             }
 
-            setCandles([...rows]);
-          syncStateFromEngine();
+            setCandles([...allCandles]);
+            syncStateFromEngine();
           }
         }
       } catch (err) {
-        console.warn("Live feed poll error, falling back to local tick:", err);
+        console.warn("Live feed unavailable; paper/live mode remains fail-closed:", err);
+        setLiveTicker(null);
+        setCandles([]);
       }
     };
 
