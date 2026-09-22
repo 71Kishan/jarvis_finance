@@ -674,6 +674,7 @@ export default function App() {
           currentPrice={currentPrice}
           activeTrade={activeTrade}
           strategy={strategy}
+          isAutoTrading={isAutoTrading}
           initialMode={copilotInitialMode}
         />
       )}
