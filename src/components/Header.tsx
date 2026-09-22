@@ -90,42 +90,42 @@ export const Header: React.FC<HeaderProps> = ({
     switch (botState) {
       case "THRIVING":
         return {
-          label: "OPTIMAL (ALPHA ACCELERATION)",
+          label: "HEALTHY PAPER STATE",
           color: "bg-emerald-500/10 text-emerald-400 border-emerald-500/30",
           icon: Flame,
           pulse: "bg-emerald-400",
         };
       case "HUNTING":
         return {
-          label: "SCANNING HIGH-CONFIDENCE SIGNALS",
+          label: "SCANNING ELIGIBLE SETUPS",
           color: "bg-blue-500/10 text-blue-400 border-blue-500/30",
           icon: Zap,
           pulse: "bg-blue-400",
         };
       case "IN_POSITION":
         return {
-          label: "POSITION ACTIVE (RISK-HEDGED)",
+          label: "POSITION ACTIVE",
           color: "bg-violet-500/10 text-violet-300 border-violet-500/30",
           icon: Activity,
           pulse: "bg-violet-400",
         };
       case "DEFENSIVE":
         return {
-          label: "DEFENSIVE POSTURE (VOLATILITY GUARD)",
+          label: "DEFENSIVE / RISK REDUCTION",
           color: "bg-amber-500/10 text-amber-400 border-amber-500/30",
           icon: ShieldAlert,
           pulse: "bg-amber-400",
         };
       case "CRITICAL_HAZARD":
         return {
-          label: "CIRCUIT WARNING (RISK BUDGET CONTRACTION)",
+          label: "RISK WARNING",
           color: "bg-rose-500/15 text-rose-400 border-rose-500/40 animate-pulse",
           icon: AlertOctagon,
           pulse: "bg-rose-400",
         };
       case "HALTED_DEAD":
         return {
-          label: "EXECUTION SUSPENDED (CIRCUIT BREAKER ENGAGED)",
+          label: "PAPER EXECUTION HALTED",
           color: "bg-red-950/80 text-red-300 border-red-700/60",
           icon: AlertOctagon,
           pulse: "bg-red-600",
@@ -155,14 +155,14 @@ export const Header: React.FC<HeaderProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <span className="font-bold text-neutral-100 tracking-tight text-sm md:text-base">
-                  AEGIS QUANTITATIVE TERMINAL
+                  JARVIS FINANCE
                 </span>
                 <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-neutral-800 text-neutral-400 border border-neutral-700">
-                  Self-Optimizing
+                  RESEARCH TERMINAL
                 </span>
               </div>
               <p className="text-xs text-neutral-400 font-mono">
-                Autonomous Algorithmic Execution &bull; Dynamic Risk Parity
+                Paper Research • Explicit Risk Controls
               </p>
             </div>
           </div>
@@ -221,12 +221,12 @@ export const Header: React.FC<HeaderProps> = ({
             {isAutoTrading ? (
               <>
                 <Play className="w-3.5 h-3.5 fill-emerald-400 text-emerald-400" />
-                <span>AUTO-PILOT ACTIVE</span>
+                <span>AUTO-PAPER ENABLED</span>
               </>
             ) : (
               <>
                 <Pause className="w-3.5 h-3.5" />
-                <span>TRADING PAUSED</span>
+                <span>AUTO-PAPER DISABLED</span>
               </>
             )}
           </button>
@@ -273,7 +273,7 @@ export const Header: React.FC<HeaderProps> = ({
               <button
                 id="header-open-copilot-btn"
                 onClick={() => onOpenCopilot("CHAT")}
-                title="AEGIS Quantitative AI Copilot & Fiduciary Advisor"
+                title="Jarvis Finance AI Copilot — research only"
                 className="flex items-center gap-1.5 px-2.5 py-1.5 hover:bg-indigo-600/30 text-xs font-mono font-semibold transition-colors cursor-pointer"
               >
                 <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
@@ -296,7 +296,7 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               id="header-open-profit-vault-btn"
               onClick={onOpenProfitVault}
-              title="Cold Storage Profit Vault: Auto-withdrawn gains insulated from market risk"
+              title="Paper profit reserve — local accounting only"
               className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/35 text-xs font-mono font-semibold transition-all shadow-[0_0_10px_rgba(245,158,11,0.15)] cursor-pointer"
             >
               <Vault className="w-3.5 h-3.5 text-amber-400" />
@@ -309,7 +309,7 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               id="header-open-radar-btn"
               onClick={onOpenRadar}
-              title="Autonomous Multi-Market Opportunity Scanner"
+              title="Multi-market research scanner"
               className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-neutral-900 hover:bg-neutral-800 text-neutral-300 border border-neutral-800 text-xs font-mono transition-colors"
             >
               <Radar className="w-3.5 h-3.5 text-indigo-400" />
@@ -348,7 +348,7 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               id="header-open-market-hours-btn"
               onClick={onOpenMarketHours}
-              title="24/7 Market Hours & Android Phone Auto-Pilot Setup"
+              title="Market hours & mobile operation reference"
               className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-neutral-900 hover:bg-neutral-800 text-neutral-300 border border-neutral-800 text-xs font-mono transition-colors cursor-pointer"
             >
               <Clock className="w-3.5 h-3.5 text-amber-400" />

@@ -18,16 +18,19 @@ app.use(express.json({ limit: "250kb" }));
 app.use((req: Request, res: Response, next) => {
   // Prevent MIME-sniffing exploits
   res.setHeader("X-Content-Type-Options", "nosniff");
-  // Cross-Site Scripting filter
-  res.setHeader("X-XSS-Protection", "1; mode=block");
+  // X-XSS-Protection is obsolete; rely on output encoding and a CSP at the deployment edge.
   // Referrer leakage prevention
   res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
   // Restrict intrusive hardware permissions (allow microphone for voice interactions)
   res.setHeader("Permissions-Policy", "camera=(), microphone=(self), geolocation=(), payment=()");
   // Prevent unauthorized file execution in older IE/Edge
   res.setHeader("X-Download-Options", "noopen");
-  // DNS prefetch control
-  res.setHeader("X-DNS-Prefetch-Control", "off");
+  // API responses are time-sensitive and should not be cached.
+  res.setHeader("Cache-Control", "no-store");
+  res.setHeader("Cross-Origin-Resource-Policy", "same-origin");
+  if (process.env.NODE_ENV === "production") {
+    res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+  }
   // Remove X-Powered-By to prevent technology fingerprinting
   res.removeHeader("X-Powered-By");
   next();
@@ -87,6 +90,59 @@ const getAIClient = () => {
   });
 };
 
+const getFinancialDatasetsKey = () => process.env.FINANCIAL_DATASETS_API_KEY || "";
+
+async function financialDatasetsGet(pathname: string, params: Record<string, string>) {
+  const apiKey = getFinancialDatasetsKey();
+  if (!apiKey) throw new Error("FINANCIAL_DATASETS_API_KEY is not configured");
+  const url = new URL("https://api.financialdatasets.ai" + pathname);
+  Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
+  const response = await fetch(url, {
+    headers: { "X-API-KEY": apiKey, Accept: "application/json", "User-Agent": "JarvisFinance/1.0" },
+  });
+  const raw = await response.text();
+  let payload: any = null;
+  try { payload = raw ? JSON.parse(raw) : null; } catch {}
+  if (!response.ok) {
+    throw new Error("Financial Datasets request failed (" + response.status + ")" + (payload?.message ? ": " + payload.message : ""));
+  }
+  return payload;
+}
+
+function sanitizeStrategyRecommendation(candidate: any, current: any) {
+  const source = candidate && typeof candidate === "object" ? candidate : {};
+  const fallbackWeights = current?.indicatorWeights || {
+    trendEMA: 0.3, rsiReversal: 0.25, bollingerMeanReversion: 0.2, macdMomentum: 0.15, volumeConfirmation: 0.1,
+  };
+  const clamp = (value: any, min: number, max: number, fallback: number) => {
+    const n = Number(value);
+    return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : fallback;
+  };
+  return {
+    ...current,
+    name: typeof source.name === "string" && source.name.trim() ? source.name.slice(0, 80) : current?.name || "Rules-Based Candidate",
+    version: Math.max(1, Math.floor(clamp(source.version, 1, 10_000, Number(current?.version || 1) + 1))),
+    rsiOversold: clamp(source.rsiOversold, 5, 49, Number(current?.rsiOversold || 34)),
+    rsiOverbought: clamp(source.rsiOverbought, 51, 95, Number(current?.rsiOverbought || 68)),
+    stopLossPercent: clamp(source.stopLossPercent, 0.1, 10, Number(current?.stopLossPercent || 1)),
+    takeProfitPercent: clamp(source.takeProfitPercent, 0.1, 30, Number(current?.takeProfitPercent || 2)),
+    trailingStop: typeof source.trailingStop === "boolean" ? source.trailingStop : Boolean(current?.trailingStop),
+    trailingStopPercent: clamp(source.trailingStopPercent, 0.1, 10, Number(current?.trailingStopPercent || 0.6)),
+    minConfidence: clamp(source.minConfidence, 50, 95, Number(current?.minConfidence || 78)),
+    maxRiskPerTrade: clamp(source.maxRiskPerTrade, 0.1, 2, Number(current?.maxRiskPerTrade || 1)),
+    indicatorWeights: {
+      trendEMA: clamp(source.indicatorWeights?.trendEMA, 0, 1, Number(fallbackWeights.trendEMA)),
+      rsiReversal: clamp(source.indicatorWeights?.rsiReversal, 0, 1, Number(fallbackWeights.rsiReversal)),
+      bollingerMeanReversion: clamp(source.indicatorWeights?.bollingerMeanReversion, 0, 1, Number(fallbackWeights.bollingerMeanReversion)),
+      macdMomentum: clamp(source.indicatorWeights?.macdMomentum, 0, 1, Number(fallbackWeights.macdMomentum)),
+      volumeConfirmation: clamp(source.indicatorWeights?.volumeConfirmation, 0, 1, Number(fallbackWeights.volumeConfirmation)),
+    },
+    rules: Array.isArray(source.rules)
+      ? source.rules.filter((item: any) => typeof item === "string").slice(0, 12).map((item: string) => item.slice(0, 240))
+      : Array.isArray(current?.rules) ? current.rules.slice(0, 12) : [],
+  };
+}
+
 // Health Check
 app.get("/api/health", (_req: Request, res: Response) => {
   res.json({
@@ -102,51 +158,26 @@ function computeQuantitativeStudy(data: any) {
   const currentStrategy = data?.currentStrategy || {};
   const equityStats = data?.equityStats || {};
   const drawdown = Number(data?.drawdownPercent || 0);
-  const winRate = Number(equityStats?.winRate || 62);
-  const rsi = Number(data?.marketContext?.rsi || 50);
-
-  let regime = "Volatility Compression & Mean-Reverting Channel";
-  if (rsi > 58) {
-    regime = "Bullish Trend Expansion & Momentum Continuation";
-  } else if (rsi < 42) {
-    regime = "Bearish Breakdown with Volume Divergence";
-  }
-
-  let survivalStatus: "THRIVING" | "ALERT" | "DEFENSIVE" = "THRIVING";
-  if (drawdown > 2.0) {
-    survivalStatus = "DEFENSIVE";
-  } else if (winRate < 50) {
-    survivalStatus = "ALERT";
-  }
-
-  const minConfidence = Math.min(88, Math.max(74, winRate < 50 ? 82 : (currentStrategy.minConfidence || 75) + 1));
-  const stopLossPercent = Number(Math.max(0.6, Math.min(1.4, (currentStrategy.stopLossPercent || 1.1) * (drawdown > 1.5 ? 0.92 : 1.0))).toFixed(2));
-  const takeProfitPercent = Number(Math.max(2.4, Math.min(4.5, stopLossPercent * 2.6)).toFixed(2));
+  const hasTradeEvidence = Number.isFinite(Number(equityStats?.winRate)) && Number(equityStats?.totalTrades) > 0;
+  const winRate = hasTradeEvidence ? Number(equityStats.winRate) : 0;
+  const rsi = Number(data?.marketContext?.rsi);
+  const regime = Number.isFinite(rsi)
+    ? rsi > 58 ? "Bullish momentum context" : rsi < 42 ? "Bearish momentum context" : "Neutral / mixed momentum context"
+    : "INSUFFICIENT_DATA";
 
   return {
-    survivalStatus,
+    survivalStatus: drawdown > 2 ? "DEFENSIVE" : hasTradeEvidence && winRate >= 50 ? "THRIVING" : "ALERT",
     regimeAssessment: regime,
-    thoughtLog: `Quantitative Risk Engine: Market regime identified as ${regime}. Current win rate is ${winRate.toFixed(1)}% with ${drawdown.toFixed(2)}% drawdown. Calibrating asymmetric risk bracket (SL: ${stopLossPercent}%, TP: ${takeProfitPercent}%) requiring minimum ${minConfidence}% signal confidence to preserve capital.`,
-    survivalVow: "Fiduciary capital preservation mandate active: strictly enforce risk-adjusted stop bounds and eliminate low-probability entries.",
-    keyTakeaway: "Require multi-timeframe volume confirmation on breakout signals. Restrict counter-trend entries when 14-period ATR exceeds 2.2x baseline.",
-    recommendedStrategy: {
-      ...currentStrategy,
-      name: currentStrategy.name || "Institutional Adaptive Alpha",
-      version: (currentStrategy.version || 1) + 1,
-      rsiOversold: Math.max(25, Math.min(35, currentStrategy.rsiOversold || 30)),
-      rsiOverbought: Math.max(65, Math.min(75, currentStrategy.rsiOverbought || 70)),
-      stopLossPercent,
-      takeProfitPercent,
-      trailingStop: true,
-      trailingStopPercent: Number(Math.max(0.6, stopLossPercent * 0.8).toFixed(2)),
-      minConfidence,
-      maxRiskPerTrade: Number(Math.max(0.5, Math.min(2.0, (currentStrategy.maxRiskPerTrade || 1.0) * (drawdown > 1.5 ? 0.8 : 1.0))).toFixed(2)),
-      rules: [
-        "Enforce strict stop-loss discipline on every execution without discretionary override",
-        "Scale position sizing according to Kelly Criterion fractional risk limits",
-        "Auto-reject fills if market bid-ask spread widens beyond 0.10%",
-      ],
-    },
+    thoughtLog: hasTradeEvidence
+      ? "Observed " + winRate.toFixed(1) + "% win rate across " + Number(equityStats.totalTrades) +
+        " recorded trades; current drawdown is " + drawdown.toFixed(2) +
+        "%. Any revision still requires chronological holdout testing and paper validation."
+      : "No validated trade sample was supplied. Jarvis will not invent an edge, win rate, or optimized parameter set.",
+    survivalVow: "Risk discipline: preserve capital, model execution costs, and require evidence before promoting a strategy.",
+    keyTakeaway: "Separate research from execution and evaluate expectancy, drawdown, costs, robustness, and out-of-sample performance.",
+    recommendedStrategy: sanitizeStrategyRecommendation(currentStrategy, currentStrategy),
+    evidenceStatus: hasTradeEvidence ? "OBSERVATIONAL" : "INSUFFICIENT_EVIDENCE",
+    promotionAllowed: false,
   };
 }
 
@@ -159,8 +190,8 @@ function computeQuantitativeCritique(trade: any, marketSnapshot: any) {
   return {
     verdict: isWin ? "PROFIT TARGET EXECUTED - ASYMMETRIC ALPHA SECURED" : "CAPITAL PRESERVATION DEFENSE - LOSS HARD-CAPPED",
     autopsy: isWin
-      ? `Position ${tradeId} on ${asset} executed within projected risk parameters. Captured +$${pnl.toFixed(2)} return with positive statistical expectancy.`
-      : `Position ${tradeId} on ${asset} reached defensive stop boundary at -$${Math.abs(pnl).toFixed(2)}. Automated circuit mitigation prevented further drawdown.`,
+      ? `Position ${tradeId} on ${asset} executed within projected risk parameters. Captured +$${pnl.toFixed(2)} return with one winning outcome does not establish statistical expectancy.`
+      : `Position ${tradeId} on ${asset} reached defensive stop boundary at -$${Math.abs(pnl).toFixed(2)}. The recorded stop or exit is a simulation assumption; it does not prove real-world fill quality.`,
     lesson: isWin
       ? "Reinforce entry patience when momentum oscillators and exponential moving averages converge with order-book depth."
       : "Ensure multi-period ATR volatility filters are satisfied prior to placing breakout orders.",
@@ -168,177 +199,123 @@ function computeQuantitativeCritique(trade: any, marketSnapshot: any) {
   };
 }
 
-function computeQuantitativeMarketIntelligence(asset: string) {
-  const cleanAsset = asset || "BTC/USD";
+function computeQuantitativeMarketIntelligence(asset: string, context: any = {}) {
+  const grounded = Array.isArray(context?.news) || Array.isArray(context?.orderBook) || Number.isFinite(Number(context?.price));
   return {
-    headline: `${cleanAsset}: Order flow microstructures indicate institutional accumulation at primary liquidity boundaries.`,
-    sentimentScore: 66,
-    sentimentLabel: "Quantitative Accumulation & Volatility Contraction",
-    hazardAlert: "Normal - Order book depth reflects balanced institutional participation.",
-    botActionPlan: "Maintain limit-order execution; enter positions upon confirmed exponential moving average crossover.",
+    headline: grounded
+      ? (asset || "UNKNOWN") + ": source data received; interpretation is limited to the supplied observations."
+      : (asset || "UNKNOWN") + ": market intelligence unavailable without verified source data.",
+    sentimentScore: null,
+    sentimentLabel: grounded ? "DATA-DRIVEN REVIEW" : "DATA UNAVAILABLE",
+    hazardAlert: grounded ? "Research interpretation only; not a guarantee or execution instruction." : "No verified market/news observations were supplied.",
+    botActionPlan: "Do not create an order from this fallback. Fetch and validate source data first.",
+    dataBacked: grounded,
   };
 }
 
-// Endpoint: Deep Quantitative Study & Strategy Evolution (Self-Sustaining)
-app.post("/api/bot/study", async (req: Request, res: Response) => {
+// Grounded market/news interpretation. No source data means no generated market claim.
+app.post("/api/bot/market-news", async (req: Request, res: Response) => {
   const body = req.body || {};
-  const localFallback = computeQuantitativeStudy(body);
+  const asset = typeof body.asset === "string" ? body.asset : "UNKNOWN";
+  const marketContext =
+    body.marketContext && typeof body.marketContext === "object"
+      ? body.marketContext
+      : {};
+
+  const grounded =
+    Array.isArray(marketContext.news) ||
+    Array.isArray(marketContext.orderBook) ||
+    Number.isFinite(Number(marketContext.price));
+
+  if (!grounded) {
+    return res.status(422).json({
+      success: false,
+      error: "INSUFFICIENT_MARKET_CONTEXT",
+      message: "Provide source-backed news or market observations before requesting an interpretation.",
+      ...computeQuantitativeMarketIntelligence(asset),
+    });
+  }
+
+  const localIntel = computeQuantitativeMarketIntelligence(asset, marketContext);
 
   try {
     const ai = getAIClient();
-    if (!ai) {
-      return res.json(localFallback);
-    }
-
-    const prompt = `You are the core Quantitative Risk Architect of an Autonomous Algorithmic Trading System.
-Your mandate is strictly capital preservation and mathematical edge.
-Analyze the following portfolio and market data:
-
-Market Context:
-${JSON.stringify(body.marketContext || {}, null, 2)}
-
-Current Strategy Parameters:
-${JSON.stringify(body.currentStrategy || {}, null, 2)}
-
-Equity & Performance Stats:
-- Drawdown: ${body.drawdownPercent || 0}%
-- Win Rate: ${body.equityStats?.winRate || 0}%
-- Total Trades: ${body.equityStats?.totalTrades || 0}
-
-Provide an institutional quantitative analysis in valid JSON:
-{
-  "survivalStatus": "THRIVING" | "ALERT" | "DEFENSIVE",
-  "regimeAssessment": "string describing market structure (e.g. Bullish Trend Expansion, Mean-Reverting Squeeze)",
-  "thoughtLog": "Rigorous quantitative risk reasoning focusing on asymmetric risk-to-reward and capital preservation",
-  "survivalVow": "Formal fiduciary statement regarding mathematical risk discipline",
-  "keyTakeaway": "Actionable technical execution rule",
-  "recommendedStrategy": {
-    "name": "Strategy Name",
-    "version": number,
-    "rsiOversold": number,
-    "rsiOverbought": number,
-    "stopLossPercent": number,
-    "takeProfitPercent": number,
-    "trailingStop": boolean,
-    "trailingStopPercent": number,
-    "minConfidence": number,
-    "maxRiskPerTrade": number,
-    "rules": ["rule 1", "rule 2", "rule 3"]
-  }
-}`;
+    if (!ai) return res.json(localIntel);
 
     const response = await ai.models.generateContent({
       model: "gemini-3.8-flash",
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-        temperature: 0.3,
-      },
+      contents:
+        "Analyze only this source-backed market context for " +
+        asset +
+        ". Do not invent news, sentiment, order flow, institutional activity, or price facts. " +
+        "Return JSON with headline, sentimentScore (0-100 or null), sentimentLabel, hazardAlert, botActionPlan. " +
+        "The botActionPlan is research commentary only, never a guarantee or unreviewed trade instruction.\n\n" +
+        JSON.stringify(marketContext, null, 2),
+      config: { responseMimeType: "application/json", temperature: 0.2 },
     });
 
     const parsed = JSON.parse(response.text || "{}");
     return res.json({
-      ...localFallback,
+      ...localIntel,
       ...parsed,
-      recommendedStrategy: {
-        ...localFallback.recommendedStrategy,
-        ...(parsed.recommendedStrategy || {}),
-      },
+      dataBacked: true,
+      promotionAllowed: false,
     });
   } catch (error: any) {
-    // Zero downtime guarantee: Fallback gracefully to high-precision local quantitative engine
-    console.warn("Gemini API unavailable or expired - executing local quantitative optimization:", error?.message || error);
-    return res.json(localFallback);
-  }
-});
-
-// Endpoint: Post-Trade Attribution & Execution Analysis (Self-Sustaining)
-app.post("/api/bot/critique-trade", async (req: Request, res: Response) => {
-  const { trade, marketSnapshot } = req.body || {};
-  const localAttribution = computeQuantitativeCritique(trade, marketSnapshot);
-
-  try {
-    const ai = getAIClient();
-    if (!ai) {
-      return res.json(localAttribution);
-    }
-
-    const prompt = `You are the Quantitative Risk Auditing System for an algorithmic execution terminal.
-Evaluate this completed trade:
-Trade Record: ${JSON.stringify(trade, null, 2)}
-Market Snapshot: ${JSON.stringify(marketSnapshot, null, 2)}
-
-Provide an institutional post-trade execution analysis in valid JSON:
-{
-  "verdict": "string",
-  "autopsy": "thorough technical analysis of order entry, slippage, and risk execution",
-  "lesson": "institutional risk rule derived from this outcome",
-  "survivalHealthImpact": "string"
-}`;
-
-    const response = await ai.models.generateContent({
-      model: "gemini-3.8-flash",
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-      },
-    });
-
-    const parsed = JSON.parse(response.text || "{}");
-    return res.json({ ...localAttribution, ...parsed });
-  } catch (error: any) {
-    console.warn("Gemini API unavailable - executing local post-trade attribution:", error?.message || error);
-    return res.json(localAttribution);
-  }
-});
-
-// Endpoint: Quantitative Market Structure Intelligence (Self-Sustaining)
-app.post("/api/bot/market-news", async (req: Request, res: Response) => {
-  const { asset } = req.body || {};
-  const localIntel = computeQuantitativeMarketIntelligence(asset);
-
-  try {
-    const ai = getAIClient();
-    if (!ai) {
-      return res.json(localIntel);
-    }
-
-    const prompt = `Generate a high-frequency quantitative market intelligence briefing for ${asset || "BTC/USD"}.
-Focus on order book depth, liquidity imbalance, and volatility regime.
-Return valid JSON:
-{
-  "headline": "concise market structure summary",
-  "sentimentScore": number (0 to 100),
-  "sentimentLabel": "string",
-  "hazardAlert": "string describing macro hazard or clear liquidity",
-  "botActionPlan": "specific execution directive"
-}`;
-
-    const response = await ai.models.generateContent({
-      model: "gemini-3.8-flash",
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-      },
-    });
-
-    const parsed = JSON.parse(response.text || "{}");
-    return res.json({ ...localIntel, ...parsed });
-  } catch (error: any) {
-    console.warn("Gemini API unavailable - executing local market intelligence:", error?.message || error);
+    console.warn("Market interpretation unavailable:", error?.message || error);
     return res.json(localIntel);
   }
 });
 
-// Map symbols to Binance pairs where available
+// Verified stock research gateway backed by Financial Datasets.
+// Credentials remain server-side and are never embedded in the browser bundle.
+app.get("/api/research/stock/:ticker", async (req: Request, res: Response) => {
+  const ticker = String(req.params.ticker || "").trim().toUpperCase();
+
+  if (!/^[A-Z][A-Z0-9.\-]{0,9}$/.test(ticker)) {
+    return res.status(400).json({
+      success: false,
+      error: "INVALID_TICKER",
+      message: "Ticker format is invalid.",
+    });
+  }
+
+  try {
+    const [snapshot, metrics, financials] = await Promise.all([
+      financialDatasetsGet("/prices/snapshot", { ticker }),
+      financialDatasetsGet("/financial-metrics/snapshot", { ticker }),
+      financialDatasetsGet("/financials", { ticker }),
+    ]);
+
+    return res.json({
+      success: true,
+      source: "FINANCIAL_DATASETS",
+      fetchedAt: Date.now(),
+      ticker,
+      snapshot,
+      metrics,
+      financials,
+    });
+  } catch (error: any) {
+    const message = String(error?.message || error);
+    const status = message.includes("not configured") ? 503 : 502;
+    return res.status(status).json({
+      success: false,
+      error: status === 503 ? "DATA_SOURCE_NOT_CONFIGURED" : "DATA_SOURCE_ERROR",
+      source: "FINANCIAL_DATASETS",
+      ticker,
+      message,
+    });
+  }
+});
+
 const SYMBOL_MAP: Record<string, string> = {
   "BTC/USD": "BTCUSDT",
   "ETH/USD": "ETHUSDT",
   "SOL/USD": "SOLUSDT",
   "DOGE/USD": "DOGEUSDT",
   "XRP/USD": "XRPUSDT",
-  "EUR/USD": "EURUSDT",
-  "GBP/USD": "GBPUSDT",
+  // FX symbols are intentionally not mapped to crypto pairs.
 };
 
 const BASE_PRICES: Record<string, { price: number; category: "CRYPTO" | "STOCK" | "INDEX" | "FOREX"; name: string }> = {
@@ -356,116 +333,194 @@ const BASE_PRICES: Record<string, { price: number; category: "CRYPTO" | "STOCK" 
   "GBP/USD": { price: 1.305, category: "FOREX", name: "British Pound / USD" },
 };
 
+function calculateRsiFromCloses(closes: number[], period = 14): number | null {
+  if (closes.length <= period) return null;
+  let gain = 0;
+  let loss = 0;
+  for (let i = 1; i <= period; i += 1) {
+    const delta = closes[i] - closes[i - 1];
+    gain += Math.max(delta, 0);
+    loss += Math.max(-delta, 0);
+  }
+  let avgGain = gain / period;
+  let avgLoss = loss / period;
+  for (let i = period + 1; i < closes.length; i += 1) {
+    const delta = closes[i] - closes[i - 1];
+    avgGain = ((period - 1) * avgGain + Math.max(delta, 0)) / period;
+    avgLoss = ((period - 1) * avgLoss + Math.max(-delta, 0)) / period;
+  }
+  if (avgLoss === 0) return avgGain === 0 ? 50 : 100;
+  return 100 - 100 / (1 + avgGain / avgLoss);
+}
+
+function calculateEmaFromCloses(closes: number[], period: number): number | null {
+  if (closes.length < period) return null;
+  const k = 2 / (period + 1);
+  let ema = closes[0];
+  for (let i = 1; i < closes.length; i += 1) ema = closes[i] * k + ema * (1 - k);
+  return ema;
+}
+
 // Endpoint: Multi-Market Cross-Asset Opportunity Scanner
 app.get("/api/market/multi-scan", async (req: Request, res: Response) => {
   try {
-    const minConfidence = parseInt(req.query.minConfidence as string) || 75;
+    const minConfidence = Math.max(50, Math.min(95, parseInt(req.query.minConfidence as string) || 75));
+    const cryptoSymbols = ["BTC/USD", "ETH/USD", "SOL/USD", "DOGE/USD", "XRP/USD"];
+    const scanTimestamp = Date.now();
 
-    // Fetch Binance tickers for crypto & forex in one fast batch request
-    let binanceTickerMap: Record<string, any> = {};
-    try {
-      const bRes = await fetch("https://api.binance.com/api/v3/ticker/24hr", {
-        headers: { "User-Agent": "AutonomousTradingBot/1.0" },
-      });
-      if (bRes.ok) {
-        const list = await bRes.json();
-        for (const item of list) {
-          binanceTickerMap[item.symbol] = item;
+    const cryptoResults = await Promise.all(
+      cryptoSymbols.map(async (symbol) => {
+        const pair = SYMBOL_MAP[symbol];
+        try {
+          const [tickerRes, klinesRes] = await Promise.all([
+            fetch("https://api.binance.com/api/v3/ticker/24hr?symbol=" + pair, {
+              headers: { "User-Agent": "JarvisFinance/1.0" },
+            }),
+            fetch("https://api.binance.com/api/v3/klines?symbol=" + pair + "&interval=1h&limit=100", {
+              headers: { "User-Agent": "JarvisFinance/1.0" },
+            }),
+          ]);
+
+          if (!tickerRes.ok || !klinesRes.ok) throw new Error("Binance market data request failed");
+          const ticker = await tickerRes.json();
+          const rawKlines = await klinesRes.json();
+          const closes = rawKlines.map((k: any) => Number(k[4])).filter((n: number) => Number.isFinite(n));
+          const volumes = rawKlines.map((k: any) => Number(k[5])).filter((n: number) => Number.isFinite(n));
+
+          const rsiValue = calculateRsiFromCloses(closes);
+          const ema9 = calculateEmaFromCloses(closes, 9);
+          const ema21 = calculateEmaFromCloses(closes, 21);
+          const ema50 = calculateEmaFromCloses(closes, 50);
+          const price = Number(ticker.lastPrice);
+          const change24hPercent = Number(ticker.priceChangePercent);
+          const averageVolume = volumes.length ? volumes.reduce((a: number, b: number) => a + b, 0) / volumes.length : 0;
+          const currentVolume = volumes[volumes.length - 1] || 0;
+
+          if (![price, change24hPercent, rsiValue, ema9, ema21, ema50].every((v) => Number.isFinite(v))) {
+            throw new Error("Insufficient technical history");
+          }
+
+          let longScore = 0;
+          let shortScore = 0;
+          const reasons: string[] = [];
+
+          if (ema9 > ema21 && ema21 > ema50 && price > ema9) {
+            longScore += 35;
+            reasons.push("9/21/50 EMA alignment supports trend continuation");
+          } else if (ema9 < ema21 && ema21 < ema50 && price < ema9) {
+            shortScore += 35;
+            reasons.push("9/21/50 EMA alignment supports downside continuation");
+          }
+
+          if (rsiValue < 35) {
+            longScore += 25;
+            reasons.push("RSI is oversold");
+          } else if (rsiValue > 65) {
+            shortScore += 25;
+            reasons.push("RSI is overbought");
+          }
+
+          if (change24hPercent > 1) {
+            longScore += 20;
+            reasons.push("24h momentum is positive");
+          } else if (change24hPercent < -1) {
+            shortScore += 20;
+            reasons.push("24h momentum is negative");
+          }
+
+          if (averageVolume > 0 && currentVolume >= averageVolume * 1.2) {
+            if (longScore > shortScore) longScore += 20;
+            else if (shortScore > longScore) shortScore += 20;
+            reasons.push("latest hourly volume is above its 100-bar average");
+          }
+
+          const score = Math.min(95, Math.max(longScore, shortScore));
+          const direction: "LONG" | "SHORT" | "NEUTRAL" =
+            longScore > shortScore ? "LONG" : shortScore > longScore ? "SHORT" : "NEUTRAL";
+          const eligible = score >= minConfidence && direction !== "NEUTRAL";
+
+          return {
+            symbol,
+            name: BASE_PRICES[symbol].name,
+            category: "CRYPTO" as const,
+            price,
+            change24hPercent,
+            score,
+            bestDirection: direction,
+            rsi: Number(rsiValue.toFixed(2)),
+            trend:
+              ema9 > ema21 && ema21 > ema50
+                ? "BULLISH"
+                : ema9 < ema21 && ema21 < ema50
+                  ? "BEARISH"
+                  : "SIDEWAYS",
+            volatility: Math.abs(change24hPercent),
+            isEligible: eligible,
+            scanVerdict: eligible ? "QUALIFIED FOR REVIEW" : "INSUFFICIENT CONFLUENCE",
+            rationale: reasons.length ? reasons.join("; ") + "." : "No independent confluence passed.",
+            dataSource: "BINANCE" as const,
+            dataTimestamp: scanTimestamp,
+          };
+        } catch (error: any) {
+          return {
+            symbol,
+            name: BASE_PRICES[symbol].name,
+            category: "CRYPTO" as const,
+            price: 0,
+            change24hPercent: 0,
+            score: 0,
+            bestDirection: "NEUTRAL" as const,
+            rsi: 50,
+            trend: "SIDEWAYS" as const,
+            volatility: 0,
+            isEligible: false,
+            scanVerdict: "DATA UNAVAILABLE",
+            rationale: error?.message || "Market data unavailable.",
+            dataSource: "UNAVAILABLE" as const,
+            dataTimestamp: scanTimestamp,
+          };
         }
-      }
-    } catch {
-      // Non-fatal, fallback to realistic stochastic pricing
-    }
+      }),
+    );
 
-    const opportunities = Object.entries(BASE_PRICES).map(([symbol, info]) => {
-      const bPair = SYMBOL_MAP[symbol];
-      const liveBinance = bPair ? binanceTickerMap[bPair] : null;
-
-      let currentPrice = info.price;
-      let change24hPercent = 0;
-      let volume = 150000;
-
-      if (liveBinance) {
-        currentPrice = parseFloat(liveBinance.lastPrice);
-        change24hPercent = parseFloat(liveBinance.priceChangePercent);
-        volume = parseFloat(liveBinance.volume);
-      } else {
-        // High fidelity variance for stocks/forex
-        const seed = Math.sin(Date.now() / 15000 + symbol.charCodeAt(0));
-        currentPrice = Number((info.price * (1 + seed * 0.008)).toFixed(info.category === "FOREX" ? 4 : 2));
-        change24hPercent = Number((seed * 3.8).toFixed(2));
-      }
-
-      // Compute technical setup confluence
-      const rsi = Math.round(48 + Math.sin(currentPrice * 17) * 26);
-      const isBullishTrend = change24hPercent > 0.4 || rsi < 36;
-      const isBearishTrend = change24hPercent < -0.4 || rsi > 64;
-
-      let score = 50;
-      let bestDirection: "LONG" | "SHORT" | "NEUTRAL" = "NEUTRAL";
-      let rationale = "";
-
-      if (rsi <= 33) {
-        score += 35;
-        bestDirection = "LONG";
-        rationale = `Oversold RSI (${rsi}) touching lower Bollinger band with high reversal potential.`;
-      } else if (rsi >= 68) {
-        score += 33;
-        bestDirection = "SHORT";
-        rationale = `Overbought RSI (${rsi}) at structural resistance with volume exhaustion.`;
-      } else if (isBullishTrend) {
-        score += 28;
-        bestDirection = "LONG";
-        rationale = `Strong 9/21 EMA golden slope with positive 24h momentum (+${change24hPercent}%).`;
-      } else if (isBearishTrend) {
-        score += 26;
-        bestDirection = "SHORT";
-        rationale = `Bearish breakdown below 50 EMA with descending momentum (${change24hPercent}%).`;
-      } else {
-        score += 5;
-        bestDirection = "NEUTRAL";
-        rationale = `Consolidation zone. Low directional edge.`;
-      }
-
-      // Add category volatility bonus
-      if (info.category === "CRYPTO") score += 6;
-      if (Math.abs(change24hPercent) > 2.5) score += 5;
-
-      score = Math.min(96, Math.max(25, score));
-      const isEligible = score >= minConfidence && bestDirection !== "NEUTRAL";
-
-      return {
+    const unsupported = Object.entries(BASE_PRICES)
+      .filter(([symbol]) => !cryptoSymbols.includes(symbol))
+      .map(([symbol, info]) => ({
         symbol,
         name: info.name,
         category: info.category,
-        price: currentPrice,
-        change24hPercent,
-        score,
-        bestDirection,
-        rsi,
-        trend: isBullishTrend ? "BULLISH" : isBearishTrend ? "BEARISH" : "SIDEWAYS",
-        volatility: Math.abs(change24hPercent),
-        isEligible,
-        scanVerdict: isEligible
-          ? `HIGH-CONFLUENCE ${bestDirection} (${score}%)`
-          : `LOW EDGE (${score}%) - ABSTAIN`,
-        rationale,
-      };
-    });
+        price: 0,
+        change24hPercent: 0,
+        score: 0,
+        bestDirection: "NEUTRAL" as const,
+        rsi: 50,
+        trend: "SIDEWAYS" as const,
+        volatility: 0,
+        isEligible: false,
+        scanVerdict: "DATA SOURCE NOT CONNECTED",
+        rationale:
+          "Jarvis intentionally refuses to synthesize stock/forex prices. Connect a licensed stock/FX data provider before using these instruments for research or trading.",
+        dataSource: "UNAVAILABLE" as const,
+        dataTimestamp: scanTimestamp,
+      }));
 
-    // Sort opportunities by highest score first
-    opportunities.sort((a, b) => b.score - a.score);
+    const opportunities = [...cryptoResults, ...unsupported].sort((a, b) => b.score - a.score);
+    const eligible = opportunities.filter((op) => op.isEligible);
 
     return res.json({
       success: true,
-      timestamp: Date.now(),
+      timestamp: scanTimestamp,
       totalScanned: opportunities.length,
-      topOpportunity: opportunities[0],
+      eligibleCount: eligible.length,
+      topOpportunity: eligible[0] || null,
       opportunities,
     });
   } catch (err: any) {
     console.error("Error in multi-scan:", err);
-    return res.status(500).json({ error: "Failed to scan assets", message: err.message });
+    return res.status(502).json({
+      error: "Verified market scan unavailable",
+      message: "No synthetic fallback was used. Retry when the configured market-data source is available.",
+    });
   }
 });
 
@@ -522,53 +577,16 @@ app.get("/api/market/live-feed", async (req: Request, res: Response) => {
       }
     }
 
-    // Fallback or Synthetic Stock Symbols (NVDA, SPY, AAPL, etc.)
-    const baseInfo = BASE_PRICES[symbolParam] || { price: 100, category: "STOCK", name: symbolParam };
-    const base = baseInfo.price;
-    const now = Date.now();
-    const intervalMs = 60 * 1000;
-    const candles = [];
-    let cur = base;
-
-    for (let i = limit; i >= 0; i--) {
-      const t = now - i * intervalMs;
-      const change = (Math.random() - 0.49) * 0.003 * cur;
-      const open = cur;
-      const close = cur + change;
-      const high = Math.max(open, close) + Math.random() * 0.002 * cur;
-      const low = Math.min(open, close) - Math.random() * 0.002 * cur;
-      const volume = Math.floor(50 + Math.random() * 200);
-      candles.push({
-        timestamp: t,
-        open: Number(open.toFixed(baseInfo.category === "FOREX" ? 4 : 2)),
-        high: Number(high.toFixed(baseInfo.category === "FOREX" ? 4 : 2)),
-        low: Number(low.toFixed(baseInfo.category === "FOREX" ? 4 : 2)),
-        close: Number(close.toFixed(baseInfo.category === "FOREX" ? 4 : 2)),
-        volume,
-      });
-      cur = close;
-    }
-
-    const last = candles[candles.length - 1];
-    const ticker = {
+        return res.status(503).json({
+      error: "MARKET_DATA_UNAVAILABLE",
+      message:
+        "No verified live feed exists for " +
+        symbolParam +
+        ". Jarvis intentionally refuses to substitute synthetic prices into a live-data view.",
       symbol: symbolParam,
-      price: last.close,
-      bid: Number((last.close * 0.9998).toFixed(baseInfo.category === "FOREX" ? 4 : 2)),
-      ask: Number((last.close * 1.0002).toFixed(baseInfo.category === "FOREX" ? 4 : 2)),
-      high24h: Number((last.close * 1.025).toFixed(baseInfo.category === "FOREX" ? 4 : 2)),
-      low24h: Number((last.close * 0.975).toFixed(baseInfo.category === "FOREX" ? 4 : 2)),
-      volume24h: 184500,
-      change24hPercent: 1.84,
-      lastUpdated: now,
-      source: "SYNTHETIC" as const,
-    };
-
-    return res.json({
-      success: true,
-      symbol: symbolParam,
-      candles,
-      ticker,
+      dataSource: "UNAVAILABLE",
     });
+
   } catch (err: any) {
     console.error("Error fetching live market feed:", err);
     return res.status(500).json({ error: "Failed to fetch live feed", message: err.message });
@@ -577,79 +595,55 @@ app.get("/api/market/live-feed", async (req: Request, res: Response) => {
 
 // Helper: Local Intelligent Fallback for Copilot & App Knowledge
 function generateLocalCopilotResponse(query: string, ctx?: any): string {
-  const q = (query || "").toLowerCase();
-  const asset = ctx?.currentAsset || "BTC/USD";
-  const price = ctx?.currentPrice ? `$${Number(ctx.currentPrice).toLocaleString()}` : "$65,000";
-  const cash = ctx?.cash ? `$${Number(ctx.cash).toLocaleString()}` : "$10,000";
-  const equity = ctx?.currentEquity ? `$${Number(ctx.currentEquity).toLocaleString()}` : "$10,000";
-  const drawdown = ctx?.currentDrawdownPercent ? `${ctx.currentDrawdownPercent}%` : "0.00%";
-  const circuit = ctx?.circuitBreakerThresholdPercent ? `${ctx.circuitBreakerThresholdPercent}%` : "2.5%";
-  const winRate = ctx?.winRate ? `${ctx.winRate}%` : "100%";
-  const vault = ctx?.vaultBalance ? `$${Number(ctx.vaultBalance).toLocaleString()}` : "$0.00";
-  const activeTrade = ctx?.activeTrade;
+  const q = String(query || "").toLowerCase();
+  const asset = ctx?.currentAsset || "UNKNOWN";
+  const n = (value: any) => (typeof value === "number" && Number.isFinite(value) ? value : null);
+  const currentPrice = n(ctx?.currentPrice);
+  const cash = n(ctx?.cash);
+  const equity = n(ctx?.currentEquity);
+  const drawdown = n(ctx?.currentDrawdownPercent);
+  const circuit = n(ctx?.circuitBreakerThresholdPercent);
+  const trades = n(ctx?.totalTrades);
 
-  if (q.includes("circuit breaker") || q.includes("capital preservation") || q.includes("protect capital") || q.includes("drawdown")) {
-    return `### **AEGIS Capital Preservation & Circuit Breaker Architecture**\n\n` +
-      `The AEGIS Terminal is built upon an existential capital preservation mandate. Here is how the protection mechanism operates:\n\n` +
-      `- **Max Drawdown Limit**: Currently calibrated at **${circuit}** drawdown from the peak equity baseline.\n` +
-      `- **Real-Time Drawdown Tracking**: Your current drawdown is **${drawdown}** (Cash: **${cash}**, Total Equity: **${equity}**).\n` +
-      `- **Automated Hard Termination**: If adverse price movement drives cumulative drawdown to ${circuit}, the engine **instantly liquidates open exposure** and engages a cryptographic hardware lock.\n` +
-      `- **Zero-Ruin Guarantee**: Trading cannot resume until you manually inspect the circuit attribution logs and recalibrate in settings.\n\n` +
-      `*This ensures an absolute mathematical guarantee that your primary portfolio can never suffer catastrophic ruin.*`;
+  if (q.includes("circuit breaker") || q.includes("drawdown") || q.includes("protect capital")) {
+    return (
+      "### Risk Controls\n\n" +
+      "Current equity: **" + (equity === null ? "unavailable" : "$" + equity.toLocaleString()) + "**\n\n" +
+      "Current drawdown: **" + (drawdown === null ? "unavailable" : drawdown.toFixed(2) + "%") + "**\n\n" +
+      "Paper circuit-breaker: **" + (circuit === null ? "unavailable" : circuit.toFixed(2) + "%") + "**\n\n" +
+      "The breaker blocks new automated paper entries after the configured drawdown threshold. It cannot guarantee real-world fills, liquidity, broker behavior, or protection of an external account."
+    );
   }
 
-  if (q.includes("withdraw") || q.includes("profit") || q.includes("vault") || q.includes("sweep")) {
-    return `### **Automated Profit Withdrawal & Cold Storage Vault**\n\n` +
-      `AEGIS features an automated profit harvesting engine that sweeps realized gains out of the active trading pool:\n\n` +
-      `- **Automated Profit Sweep**: When any automated trade closes in positive territory, the system automatically sweeps **50% (configurable up to 100%)** of net profit into the **Cold Storage Profit Vault**.\n` +
-      `- **Current Vault Balance**: **${vault}** secured and insulated from future market drawdowns.\n` +
-      `- **Immutable Documentation**: Every withdrawal generates a timestamped **SHA-256 cryptographic receipt**, tracking trade ID, gross profit, and vault balance.\n` +
-      `- **Audit Export**: You can inspect the complete withdrawal ledger in the **Profit Vault** modal and export audit statements in CSV format anytime.\n\n` +
-      `*By locking harvested profits away from trading balance, your gains compound safely while your risk capital remains strictly bounded.*`;
+  if (q.includes("profit") || q.includes("vault") || q.includes("withdraw")) {
+    return (
+      "### Paper Profit Reserve\n\n" +
+      "The reserve is local paper-accounting only. It is not a bank transfer, wallet, custodian, or cold-storage service. A positive paper outcome is evidence, not a guarantee of future profit."
+    );
   }
 
-  if (q.includes("operate by itself") || q.includes("autonomous") || q.includes("automatic") || q.includes("hands free") || q.includes("touch") || q.includes("phone")) {
-    return `### **24/7 Autonomous Operation Without Manual Touch**\n\n` +
-      `The AEGIS Terminal is designed to operate completely autonomously around the clock on desktop and mobile devices (Android/iOS PWA):\n\n` +
-      `1. **Continuous Quantitative Scanning**: Evaluates incoming 1-minute candlestick ticks across EMA trends (9/21/50), RSI (14), Bollinger Bands (20, 2), MACD momentum, and Volume SMA.\n` +
-      `2. **Strict Confluence Threshold**: Only enters positions when multi-indicator alignment exceeds your minimum confidence threshold (e.g. 78%+).\n` +
-      `3. **Active Bracket Execution**: Automatically calculates entry, dynamic trailing stop-loss, and take-profit targets.\n` +
-      `4. **Automated Profit Realization & Sweeping**: Closes positions at profit targets, automatically sweeps profits into the **Cold Storage Vault**, and records immutable documentation.\n` +
-      `5. **Global Market Routing**: Routes trades across US Regular, London, Asian, and 24/7 Crypto sessions, keeping you updated via push notifications and haptic alerts.`;
+  if (q.includes("autonomous") || q.includes("24/7") || q.includes("hands free") || q.includes("phone")) {
+    return (
+      "### Automation Boundary\n\n" +
+      "A browser or mobile PWA is not a reliable always-on trading server. Jarvis can process paper logic while its execution process is alive; dependable background operation requires a persistent backend/worker. The phone should act as a dashboard and control surface."
+    );
   }
 
-  if (q.includes("confluence") || q.includes("indicator") || q.includes("ema") || q.includes("rsi") || q.includes("macd")) {
-    return `### **Algorithmic Indicator Confluence Scoring**\n\n` +
-      `The algorithm combines 5 independent mathematical signals to establish an institutional edge:\n\n` +
-      `- **EMA 9/21/50 Alignment (30 pts)**: Detects macro trend direction. Longs require Price > EMA 9 > EMA 21 > EMA 50; Shorts require inverse.\n` +
-      `- **RSI 14 Mean-Reversion / Exhaustion (25 pts)**: Identifies oversold rebounds (RSI 28-36) or overbought rejections (RSI 64-72).\n` +
-      `- **Bollinger Bands 20, 2 (20 pts)**: Flags band touches and volatility squeezes.\n` +
-      `- **MACD Histogram Crossover (15 pts)**: Confirms momentum velocity and histogram expansion.\n` +
-      `- **Volume SMA Confirmation (10 pts)**: Ensures high institutional liquidity (>110% of 20-period average volume).\n\n` +
-      `*A minimum confluence score of 78% is strictly required before an order is dispatched to ensure capital preservation.*`;
+  if (q.includes("stat") || q.includes("pnl") || q.includes("win rate") || q.includes("portfolio") || q.includes("balance")) {
+    return (
+      "### Paper Telemetry\n\n" +
+      "Asset: **" + asset + "** @ **" + (currentPrice === null ? "unavailable" : "$" + currentPrice.toLocaleString()) + "**\n\n" +
+      "Cash: **" + (cash === null ? "unavailable" : "$" + cash.toLocaleString()) + "**\n\n" +
+      "Equity: **" + (equity === null ? "unavailable" : "$" + equity.toLocaleString()) + "**\n\n" +
+      "Recorded trades: **" + (trades === null ? 0 : trades) + "**\n\n" +
+      "A small or synthetic sample is not sufficient evidence of a durable trading edge."
+    );
   }
 
-  if (q.includes("stat") || q.includes("pnl") || q.includes("win rate") || q.includes("portfolio") || q.includes("balance") || q.includes("my")) {
-    return `### **Live Portfolio Telemetry & Risk Attribution**\n\n` +
-      `Here is the real-time status of your quantitative account:\n\n` +
-      `- **Monitored Asset**: **${asset}** @ **${price}**\n` +
-      `- **Cash Balance**: **${cash}**\n` +
-      `- **Total Portfolio Equity**: **${equity}**\n` +
-      `- **Current Drawdown**: **${drawdown}** (Circuit Breaker Limit: **${circuit}**)\n` +
-      `- **Win Rate**: **${winRate}**\n` +
-      `- **Cold Storage Profit Vault**: **${vault}** secured\n` +
-      `- **Active Exposure**: ${activeTrade ? `**${activeTrade.type} on ${activeTrade.asset}** (Entry: $${activeTrade.entryPrice}, Size: $${activeTrade.sizeUsd})` : "**No open position** — algorithmic scanner actively seeking high-confidence setups"}\n\n` +
-      `*Risk parameters are healthy and defensive buffers remain fully engaged.*`;
-  }
-
-  return `### **AEGIS Quantitative Terminal Intelligence**\n\n` +
-    `Hello! I am your **AEGIS AI Copilot**. I assist with everything related to this trading terminal and quantitative market operations:\n\n` +
-    `- **Autonomous Trading**: How the automated scanner executes orders without manual intervention.\n` +
-    `- **Capital Preservation**: How the circuit breaker guarantees zero ruin by enforcing hard drawdown halts.\n` +
-    `- **Automated Profit Withdrawals**: How profits are swept automatically into the protected Cold Storage Vault and documented with SHA-256 receipts.\n` +
-    `- **Strategy & Indicators**: Real-time breakdown of EMA, RSI, Bollinger Bands, MACD, and Volume confluence.\n` +
-    `- **Current Telemetry**: Active asset: **${asset}** (${price}), Cash: **${cash}**, Equity: **${equity}**, Vault: **${vault}**.\n\n` +
-    `Feel free to ask any specific question about the terminal's architecture, trading formulas, or current positions!`;
+  return (
+    "### Jarvis Finance AI\n\n" +
+    "I can explain the paper engine, risk controls, backtests, strategy evidence, market data, or current telemetry. I will not fabricate prices, news, order flow, performance, or guarantees when source data is unavailable."
+  );
 }
 
 // Endpoint: Multi-Turn AI Copilot & Terminal Advisor
@@ -660,8 +654,8 @@ app.post("/api/copilot/chat", async (req: Request, res: Response) => {
     return res.status(400).json({ error: "Message is required" });
   }
 
-  const validModels = ["gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-3.1-pro-preview"];
-  const selectedModel = validModels.includes(modelPreference) ? modelPreference : "gemini-3.5-flash";
+  const validModels = ["gemini-3.8-flash", "gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-3.1-pro-preview"];
+  const selectedModel = validModels.includes(modelPreference) ? modelPreference : "gemini-3.8-flash";
 
   const localReply = generateLocalCopilotResponse(message, terminalContext);
 
@@ -676,7 +670,7 @@ app.post("/api/copilot/chat", async (req: Request, res: Response) => {
       });
     }
 
-    const systemInstruction = `You are AEGIS Copilot, the built-in AI quantitative trading advisor, risk controller, and terminal educator for the AEGIS Autonomous Quantitative Trading Terminal.
+    const systemInstruction = `You are Jarvis Finance Copilot, a research assistant, quantitative explainer, and risk-focused educator for a paper-trading application.
 Your capabilities and responsibilities:
 1. Terminal Expert: You can explain every feature in the application in clear, practical terms:
    - Autonomous Execution Core: How the algorithm operates automatically without user touch, analyzing continuous 1-minute market feeds for multi-indicator confluence.
