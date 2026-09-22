@@ -18,7 +18,11 @@ Jarvis Finance is a research and paper-trading terminal for evidence-driven mark
 
 The browser/PWA is the control and visualization surface. Server-side code protects provider credentials and performs provider/AI calls.
 
-Android and laptop browsers are not treated as reliable unattended workers. A future unattended scheduler/worker belongs server-side.
+The repository now includes a server-owned autonomous **paper** runtime for supported 24/7 crypto data. It consumes the reconnecting Binance websocket gateway and processes completed candles without requiring the phone or laptop to stay open.
+
+Android and laptop browsers are not treated as reliable unattended workers. The phone app is therefore a monitoring/control surface; the long-lived trading process belongs on an always-on server.
+
+Set `JARVIS_PAPER_AUTOSTART=true` only after the strategy has completed the research/validation lifecycle. Runtime state is currently process-local, so a production deployment still needs durable state and restart reconciliation before unattended real-money execution.
 
 ## Setup
 
