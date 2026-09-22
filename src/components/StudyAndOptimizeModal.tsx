@@ -40,7 +40,7 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
     survivalStatus?: string;
     regimeAssessment?: string;
     thoughtLog?: string;
-    survivalVow?: string;
+    riskDisciplineNote?: string;
     keyTakeaway?: string;
     recommendedStrategy?: StrategyConfig;
   } | null>(null);
@@ -190,7 +190,7 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
 
                 <div className="bg-neutral-950 p-3 rounded-lg border border-neutral-800/80 text-[11px] space-y-1">
                   <div className="text-amber-400 font-semibold">
-                    Risk Mandate: "{aiAnalysis.survivalVow}"
+                    Risk Discipline: "{aiAnalysis.riskDisciplineNote || "Use configured limits; no model output overrides risk controls."}"
                   </div>
                   <div className="text-neutral-400">
                     Regime Assessment: <strong className="text-neutral-200">{aiAnalysis.regimeAssessment}</strong>
