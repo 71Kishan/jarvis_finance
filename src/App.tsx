@@ -45,6 +45,7 @@ export default function App() {
   const [isAutoTrading, setIsAutoTrading] = useState<boolean>(false);
   const [simulationSpeed, setSimulationSpeed] = useState<number>(2); // 2x default for simulator
   const [liveTicker, setLiveTicker] = useState<LiveExchangeTicker | null>(null);
+  const [liveDataError, setLiveDataError] = useState<string | null>(null);
 
   // Engines refs
   const simulatorRef = useRef<MarketSimulator | null>(null);
@@ -222,6 +223,7 @@ export default function App() {
       } catch (err) {
         console.warn("Live feed unavailable; paper/live mode remains fail-closed:", err);
         setLiveTicker(null);
+        setLiveDataError("Trusted market data is unavailable. Jarvis is fail-closed and will not substitute synthetic prices.");
         setCandles([]);
       }
     };
@@ -430,6 +432,11 @@ export default function App() {
       )}
 
       {/* 3. Main Operational Command Center */}
+      {marketSource === "LIVE_MARKET_DATA" && liveDataError && (
+        <div className="mx-4 mt-3 max-w-7xl w-full self-center rounded-lg border border-amber-900/50 bg-amber-950/20 px-3 py-2 text-xs text-amber-300 font-mono">
+          DATA UNAVAILABLE • {liveDataError}
+        </div>
+      )}
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 flex flex-col gap-4">
         {/* Paper Trading Deck & Order Flow Section */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
