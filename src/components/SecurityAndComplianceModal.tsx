@@ -231,11 +231,11 @@ export const SecurityAndComplianceModal: React.FC<SecurityAndComplianceModalProp
                   RESEARCH & PAPER-TRADING SOFTWARE
                 </h4>
                 <p className="text-neutral-400 text-xs leading-relaxed font-sans">
-                  This software is an autonomous quantitative simulation and educational platform. It does not act as a broker-dealer, registered investment advisor (RIA), or custodian of user funds. All financial computations, backtests, and paper orders occur in simulated sandboxes using deterministic market simulators or public ticker relays. Past paper results do not establish future profitability.
+                  This build is a research and paper-trading application. It is not connected to a broker, does not custody funds, and does not place real-money orders. Paper results and backtests are hypothetical and can differ materially from live execution because of costs, liquidity, gaps, data quality, and model assumptions.
                 </p>
               </div>
 
-              {/* GDPR & CCPA Zero-Knowledge Privacy Policy */}
+              {/* LOCAL DATA & PRIVACY NOTES */}
               <div className="p-4 rounded-xl bg-neutral-900/50 border border-neutral-800/80 space-y-2">
                 <h4 className="text-xs font-mono font-bold text-white flex items-center gap-2">
                   <EyeOff className="w-4 h-4 text-sky-400" />
@@ -246,10 +246,10 @@ export const SecurityAndComplianceModal: React.FC<SecurityAndComplianceModalProp
                     &bull; <strong>Local-First Paper State:</strong> Current paper state is primarily client-side. Cross-device synchronization requires a server-side journal, which is not yet enabled.
                   </p>
                   <p>
-                    &bull; <strong>No Personal Telemetry:</strong> We do not collect, monetize, track, or distribute your IP address, device identifiers, or trading strategies.
+                    &bull; <strong>Local-first state:</strong> The current paper journal and security settings are primarily stored on the device. A durable cross-device journal is not enabled in this build.
                   </p>
                   <p>
-                    &bull; <strong>Right to Immediate Erasure:</strong> You retain complete cryptographic sovereignty. You may purge all local database stores instantly via the Reset Data option in the Risk Settings panel.
+                    &bull; <strong>Data clearing:</strong> Local application data can be cleared from the app settings. Local storage is not an immutable audit system or a custody layer.
                   </p>
                 </div>
               </div>
@@ -617,7 +617,7 @@ export const SecurityAndComplianceModal: React.FC<SecurityAndComplianceModalProp
                   </div>
                   <div className="flex items-center gap-1.5">
                     <Check className="w-3.5 h-3.5 text-emerald-400" />
-                    <span>Zero Key Transmission / Client Sovereignty</span>
+                    <span>Broker/API credentials remain server-side; this client is not a credential vault.</span>
                   </div>
                 </div>
               </div>
