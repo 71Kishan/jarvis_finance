@@ -29,8 +29,10 @@ export interface CryptographicTradeBlock {
 
 const PIN_HASH_STORAGE_KEY = "survival_bot_pin_hash_v1";
 const PIN_SALT_STORAGE_KEY = "survival_bot_pin_salt_v1";
-const AUTO_LOCK_STORAGE_KEY = "survival_bot_autolock_min";
-const LEDGER_STORAGE_KEY = "survival_bot_audit_ledger_v1";
+const AUTO_LOCK_STORAGE_KEY = "jarvis_autolock_min_v2";
+const PIN_FAILED_STORAGE_KEY = "jarvis_pin_failed_v2";
+const PIN_LOCKOUT_UNTIL_STORAGE_KEY = "jarvis_pin_lockout_until_v2";
+const LEDGER_STORAGE_KEY = "jarvis_local_audit_ledger_v2";
 const LEGAL_TERMS_ACCEPTED_KEY = "survival_bot_legal_terms_ack_v1";
 
 class CryptoSecurityService {
@@ -38,13 +40,16 @@ class CryptoSecurityService {
   private lastActivity: number = Date.now();
   private autoLockMinutes: number = 15;
   private failedAttempts: number = 0;
+  private lockoutUntil = 0;
+  private static readonly MAX_FAILED_ATTEMPTS = 8;
+  private static readonly BASE_LOCKOUT_MS = 15 * 60_000;
 
   constructor() {
     if (typeof window !== "undefined") {
       const savedAutoLock = localStorage.getItem(AUTO_LOCK_STORAGE_KEY);
-      if (savedAutoLock) {
-        this.autoLockMinutes = parseInt(savedAutoLock, 10) || 15;
-      }
+      if (savedAutoLock) this.autoLockMinutes = Math.max(1, parseInt(savedAutoLock, 10) || 15);
+      this.failedAttempts = Number(localStorage.getItem(PIN_FAILED_STORAGE_KEY) || 0) || 0;
+      this.lockoutUntil = Number(localStorage.getItem(PIN_LOCKOUT_UNTIL_STORAGE_KEY) || 0) || 0;
       // If PIN is configured, lock on initial app launch
       if (this.isPinConfigured()) {
         this.isLocked = true;
@@ -66,7 +71,7 @@ class CryptoSecurityService {
    */
   public async sha256(message: string): Promise<string> {
     if (!this.isWebCryptoAvailable()) {
-      return this.fallbackHash(message);
+      throw new Error("Web Crypto API is unavailable; cryptographic verification is disabled.");
     }
     const encoder = new TextEncoder();
     const data = encoder.encode(message);
@@ -107,7 +112,7 @@ class CryptoSecurityService {
    */
   public async encrypt(plaintext: string, secretPass: string): Promise<string> {
     if (!this.isWebCryptoAvailable()) {
-      return btoa(unescape(encodeURIComponent(plaintext)));
+      throw new Error("Web Crypto API is unavailable; encrypted storage is disabled.");
     }
     const salt = window.crypto.getRandomValues(new Uint8Array(16));
     const iv = window.crypto.getRandomValues(new Uint8Array(12));
@@ -133,13 +138,10 @@ class CryptoSecurityService {
    * Decrypts AES-GCM-256 ciphertext payload
    */
   public async decrypt(encryptedPayload: string, secretPass: string): Promise<string> {
-    if (!this.isWebCryptoAvailable() || !encryptedPayload.includes(":")) {
-      try {
-        return decodeURIComponent(escape(atob(encryptedPayload)));
-      } catch {
-        return encryptedPayload;
-      }
+    if (!this.isWebCryptoAvailable()) {
+      throw new Error("Web Crypto API is unavailable; encrypted storage is disabled.");
     }
+    if (!encryptedPayload.includes(":")) throw new Error("Invalid encrypted payload.");
     const [saltHex, ivHex, cipherHex] = encryptedPayload.split(":");
     if (!saltHex || !ivHex || !cipherHex) throw new Error("Invalid cipher format");
 
@@ -164,7 +166,7 @@ class CryptoSecurityService {
   }
 
   public async setPin(pin: string): Promise<boolean> {
-    if (!pin || pin.length < 4) return false;
+    if (!/^[0-9]{6}$/.test(pin)) return false;
     const salt = window.crypto.getRandomValues(new Uint8Array(16));
     const saltHex = Array.from(salt).map((b) => b.toString(16).padStart(2, "0")).join("");
     const pinHash = await this.sha256(`${saltHex}:${pin}`);
@@ -173,24 +175,45 @@ class CryptoSecurityService {
     localStorage.setItem(PIN_HASH_STORAGE_KEY, pinHash);
     this.isLocked = false;
     this.failedAttempts = 0;
+    this.lockoutUntil = 0;
+    localStorage.removeItem(PIN_FAILED_STORAGE_KEY);
+    localStorage.removeItem(PIN_LOCKOUT_UNTIL_STORAGE_KEY);
     return true;
   }
 
   public async verifyPin(enteredPin: string): Promise<boolean> {
     const saltHex = localStorage.getItem(PIN_SALT_STORAGE_KEY);
     const expectedHash = localStorage.getItem(PIN_HASH_STORAGE_KEY);
-    if (!saltHex || !expectedHash) return true; // No PIN set
+    if (!saltHex || !expectedHash) return true;
+    if (!/^[0-9]{6}$/.test(enteredPin)) return false;
+
+    const now = Date.now();
+    if (this.lockoutUntil > now) return false;
+    if (this.lockoutUntil > 0) {
+      this.lockoutUntil = 0;
+      localStorage.removeItem(PIN_LOCKOUT_UNTIL_STORAGE_KEY);
+    }
 
     const enteredHash = await this.sha256(`${saltHex}:${enteredPin}`);
     if (enteredHash === expectedHash) {
       this.isLocked = false;
       this.failedAttempts = 0;
+      this.lockoutUntil = 0;
+      localStorage.removeItem(PIN_FAILED_STORAGE_KEY);
+      localStorage.removeItem(PIN_LOCKOUT_UNTIL_STORAGE_KEY);
       this.touchActivity();
       return true;
-    } else {
-      this.failedAttempts++;
-      return false;
     }
+
+    this.failedAttempts += 1;
+    localStorage.setItem(PIN_FAILED_STORAGE_KEY, String(this.failedAttempts));
+    if (this.failedAttempts >= CryptoSecurityService.MAX_FAILED_ATTEMPTS) {
+      const multiplier = Math.min(4, 1 + Math.floor((this.failedAttempts - CryptoSecurityService.MAX_FAILED_ATTEMPTS) / 2));
+      this.lockoutUntil = now + CryptoSecurityService.BASE_LOCKOUT_MS * multiplier;
+      localStorage.setItem(PIN_LOCKOUT_UNTIL_STORAGE_KEY, String(this.lockoutUntil));
+      this.isLocked = true;
+    }
+    return false;
   }
 
   public removePin(): void {
@@ -198,6 +221,9 @@ class CryptoSecurityService {
     localStorage.removeItem(PIN_HASH_STORAGE_KEY);
     this.isLocked = false;
     this.failedAttempts = 0;
+    this.lockoutUntil = 0;
+    localStorage.removeItem(PIN_FAILED_STORAGE_KEY);
+    localStorage.removeItem(PIN_LOCKOUT_UNTIL_STORAGE_KEY);
   }
 
   public lockSession(): void {
@@ -328,16 +354,7 @@ class CryptoSecurityService {
     }
   }
 
-  // Internal deterministic hash fallback
-  private fallbackHash(msg: string): string {
-    let hash = 0;
-    for (let i = 0; i < msg.length; i++) {
-      const char = msg.charCodeAt(i);
-      hash = (hash << 5) - hash + char;
-      hash |= 0;
-    }
-    return Math.abs(hash).toString(16).padStart(64, "0");
-  }
+
 }
 
 export const cryptoSecurityService = new CryptoSecurityService();
