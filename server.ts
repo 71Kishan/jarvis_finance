@@ -5,6 +5,7 @@ import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, LiveServerMessage, Modality } from "@google/genai";
 import { WebSocketServer, WebSocket } from "ws";
 import dotenv from "dotenv";
+import { attachIndicators } from "./src/engine/indicators";
 
 dotenv.config();
 
@@ -330,248 +331,322 @@ Return valid JSON:
   }
 });
 
-// Map symbols to Binance pairs where available
+// Provider configuration is explicit. Synthetic prices are never returned from a "live" endpoint.
 const SYMBOL_MAP: Record<string, string> = {
   "BTC/USD": "BTCUSDT",
   "ETH/USD": "ETHUSDT",
   "SOL/USD": "SOLUSDT",
   "DOGE/USD": "DOGEUSDT",
   "XRP/USD": "XRPUSDT",
-  "EUR/USD": "EURUSDT",
-  "GBP/USD": "GBPUSDT",
 };
 
-const BASE_PRICES: Record<string, { price: number; category: "CRYPTO" | "STOCK" | "INDEX" | "FOREX"; name: string }> = {
-  "BTC/USD": { price: 80800, category: "CRYPTO", name: "Bitcoin / USD" },
-  "ETH/USD": { price: 3480, category: "CRYPTO", name: "Ethereum / USD" },
-  "SOL/USD": { price: 154.2, category: "CRYPTO", name: "Solana / USD" },
-  "DOGE/USD": { price: 0.165, category: "CRYPTO", name: "Dogecoin / USD" },
-  "XRP/USD": { price: 0.58, category: "CRYPTO", name: "Ripple / USD" },
-  NVDA: { price: 124.8, category: "STOCK", name: "NVIDIA Corp" },
-  AAPL: { price: 228.5, category: "STOCK", name: "Apple Inc" },
-  TSLA: { price: 242.6, category: "STOCK", name: "Tesla Inc" },
-  SPY: { price: 562.4, category: "INDEX", name: "S&P 500 ETF" },
-  QQQ: { price: 486.2, category: "INDEX", name: "Nasdaq 100 QQQ" },
-  "EUR/USD": { price: 1.085, category: "FOREX", name: "Euro / US Dollar" },
-  "GBP/USD": { price: 1.305, category: "FOREX", name: "British Pound / USD" },
+const STOCK_SYMBOLS: Record<string, { category: "STOCK" | "INDEX"; name: string }> = {
+  NVDA: { category: "STOCK", name: "NVIDIA Corp" },
+  AAPL: { category: "STOCK", name: "Apple Inc" },
+  TSLA: { category: "STOCK", name: "Tesla Inc" },
+  SPY: { category: "INDEX", name: "SPDR S&P 500 ETF Trust" },
+  QQQ: { category: "INDEX", name: "Invesco QQQ Trust" },
 };
 
-// Endpoint: Multi-Market Cross-Asset Opportunity Scanner
+function financialDatasetsKey() {
+  return process.env.FINANCIAL_DATASETS_API_KEY || "";
+}
+
+function dateOnly(daysAgo = 0) {
+  const date = new Date(Date.now() - daysAgo * 86400000);
+  return date.toISOString().slice(0, 10);
+}
+
+async function fetchFinancialDatasets<T>(path: string): Promise<T> {
+  const key = financialDatasetsKey();
+  if (!key) {
+    const err = new Error("FINANCIAL_DATASETS_API_KEY is not configured");
+    (err as any).code = "DATA_PROVIDER_NOT_CONFIGURED";
+    throw err;
+  }
+
+  const response = await fetch(`https://api.financialdatasets.ai${path}`, {
+    headers: {
+      "X-API-KEY": key,
+      "Accept": "application/json",
+      "User-Agent": "JarvisFinance/1.0",
+    },
+  });
+
+  if (!response.ok) {
+    const err = new Error(`Financial Datasets responded with HTTP ${response.status}`);
+    (err as any).status = response.status;
+    throw err;
+  }
+
+  return response.json() as Promise<T>;
+}
+
+async function getCryptoFeed(symbol: string, limit: number) {
+  const pair = SYMBOL_MAP[symbol];
+  if (!pair) throw new Error("Unsupported crypto symbol");
+
+  const [klinesRes, tickerRes] = await Promise.all([
+    fetch(`https://api.binance.com/api/v3/klines?symbol=${pair}&interval=1m&limit=${limit}`, {
+      headers: { "User-Agent": "JarvisFinance/1.0" },
+    }),
+    fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${pair}`, {
+      headers: { "User-Agent": "JarvisFinance/1.0" },
+    }),
+  ]);
+
+  if (!klinesRes.ok || !tickerRes.ok) {
+    throw new Error("Crypto market provider unavailable");
+  }
+
+  const rawKlines: any[] = await klinesRes.json();
+  const rawTicker: any = await tickerRes.json();
+
+  const candles = attachIndicators(
+    rawKlines.map((k) => ({
+      timestamp: Number(k[0]),
+      open: Number(k[1]),
+      high: Number(k[2]),
+      low: Number(k[3]),
+      close: Number(k[4]),
+      volume: Number(k[5]),
+    }))
+  );
+
+  const last = candles[candles.length - 1];
+  const updated = Number(rawTicker.closeTime || Date.now());
+
+  return {
+    success: true,
+    symbol,
+    candles,
+    ticker: {
+      symbol,
+      price: Number(rawTicker.lastPrice),
+      bid: Number(rawTicker.bidPrice),
+      ask: Number(rawTicker.askPrice),
+      high24h: Number(rawTicker.highPrice),
+      low24h: Number(rawTicker.lowPrice),
+      volume24h: Number(rawTicker.volume),
+      change24hPercent: Number(rawTicker.priceChangePercent),
+      lastUpdated: updated,
+      source: "BINANCE" as const,
+      dataQuality: Date.now() - updated <= 15000 ? "LIVE" as const : "STALE" as const,
+    },
+    meta: {
+      source: "BINANCE" as const,
+      quality: Date.now() - updated <= 15000 ? "LIVE" as const : "STALE" as const,
+      asOf: updated,
+      staleAfterMs: 15000,
+      symbol,
+    },
+  };
+}
+
+async function getEquityFeed(symbol: string, limit: number) {
+  const info = STOCK_SYMBOLS[symbol];
+  if (!info) throw new Error("Unsupported equity symbol");
+
+  const data = await fetchFinancialDatasets<{ prices?: any[] }> (
+    `/prices/?ticker=${encodeURIComponent(symbol)}&interval=minute&interval_multiplier=1&start_date=${dateOnly(3)}&end_date=${dateOnly(0)}&limit=5000`
+  );
+
+  const rows = Array.isArray(data.prices) ? data.prices : [];
+  const candles = rows
+    .map((p) => ({
+      timestamp: Number(p.time_milliseconds || Date.parse(p.time) || 0),
+      open: Number(p.open),
+      high: Number(p.high),
+      low: Number(p.low),
+      close: Number(p.close),
+      volume: Number(p.volume || 0),
+    }))
+    .filter((p) => p.timestamp > 0 && [p.open, p.high, p.low, p.close].every(Number.isFinite))
+    .sort((a, b) => a.timestamp - b.timestamp)
+    .slice(-limit);
+
+  if (candles.length < 20) {
+    const err = new Error(`Insufficient historical price data for ${symbol}`);
+    (err as any).code = "INSUFFICIENT_MARKET_DATA";
+    throw err;
+  }
+
+  const withIndicators = attachIndicators(candles);
+  const last = withIndicators[withIndicators.length - 1];
+  const updated = last.timestamp;
+  const age = Date.now() - updated;
+
+  return {
+    success: true,
+    symbol,
+    candles: withIndicators,
+    ticker: {
+      symbol,
+      price: last.close,
+      bid: last.close,
+      ask: last.close,
+      high24h: Math.max(...withIndicators.slice(-390).map((c) => c.high)),
+      low24h: Math.min(...withIndicators.slice(-390).map((c) => c.low)),
+      volume24h: withIndicators.slice(-390).reduce((sum, c) => sum + c.volume, 0),
+      change24hPercent:
+        withIndicators.length > 2
+          ? ((last.close / withIndicators[Math.max(0, withIndicators.length - 390)].close) - 1) * 100
+          : 0,
+      lastUpdated: updated,
+      source: "FINANCIAL_DATASETS" as const,
+      dataQuality: age <= 300000 ? "LIVE" as const : "STALE" as const,
+    },
+    meta: {
+      source: "FINANCIAL_DATASETS" as const,
+      quality: age <= 300000 ? "LIVE" as const : "STALE" as const,
+      asOf: updated,
+      staleAfterMs: 300000,
+      symbol,
+    },
+    quoteNote: "Financial Datasets price history does not provide an executable bid/ask quote in this response.",
+  };
+}
+
+function scoreOpportunity(candles: any[]) {
+  const latest = candles[candles.length - 1];
+  const ind = latest?.indicators;
+  if (!ind) return null;
+
+  let longScore = 0;
+  let shortScore = 0;
+
+  if (latest.close > ind.ema9 && ind.ema9 > ind.ema21 && ind.ema21 > ind.ema50) longScore += 30;
+  if (latest.close < ind.ema9 && ind.ema9 < ind.ema21 && ind.ema21 < ind.ema50) shortScore += 30;
+
+  if (ind.rsi < 35) longScore += 20;
+  if (ind.rsi > 65) shortScore += 20;
+
+  if (latest.close <= ind.bbandLower) longScore += 15;
+  if (latest.close >= ind.bbandUpper) shortScore += 15;
+
+  if (ind.macdHist > 0) longScore += 15;
+  if (ind.macdHist < 0) shortScore += 15;
+
+  if (ind.volumeSMA > 0 && latest.volume > ind.volumeSMA * 1.2) {
+    if (longScore > shortScore) longScore += 10;
+    if (shortScore > longScore) shortScore += 10;
+  }
+
+  const score = Math.max(longScore, shortScore);
+  const bestDirection = longScore > shortScore ? "LONG" : shortScore > longScore ? "SHORT" : "NEUTRAL";
+
+  return {
+    score,
+    bestDirection,
+    rsi: Number(ind.rsi.toFixed(1)),
+    trend:
+      latest.close > ind.ema50 && ind.ema9 > ind.ema21
+        ? "BULLISH"
+        : latest.close < ind.ema50 && ind.ema9 < ind.ema21
+        ? "BEARISH"
+        : "SIDEWAYS",
+    volatility: Number(((ind.atr / latest.close) * 100).toFixed(2)),
+    rationale:
+      bestDirection === "LONG"
+        ? "Technical confluence favors the long side; score is a heuristic signal strength, not a probability."
+        : bestDirection === "SHORT"
+        ? "Technical confluence favors the short side; score is a heuristic signal strength, not a probability."
+        : "No directional edge from the configured technical signals.",
+  };
+}
+
+// Endpoint: Multi-market scanner using real provider data only.
 app.get("/api/market/multi-scan", async (req: Request, res: Response) => {
   try {
-    const minConfidence = parseInt(req.query.minConfidence as string) || 75;
+    const minScore = Number(req.query.minConfidence || 75);
+    const symbols = [...Object.keys(SYMBOL_MAP), ...Object.keys(STOCK_SYMBOLS)];
 
-    // Fetch Binance tickers for crypto & forex in one fast batch request
-    let binanceTickerMap: Record<string, any> = {};
-    try {
-      const bRes = await fetch("https://api.binance.com/api/v3/ticker/24hr", {
-        headers: { "User-Agent": "AutonomousTradingBot/1.0" },
-      });
-      if (bRes.ok) {
-        const list = await bRes.json();
-        for (const item of list) {
-          binanceTickerMap[item.symbol] = item;
+    const results = await Promise.all(
+      symbols.map(async (symbol) => {
+        try {
+          const feed = SYMBOL_MAP[symbol]
+            ? await getCryptoFeed(symbol, 80)
+            : await getEquityFeed(symbol, 80);
+          const analysis = scoreOpportunity(feed.candles);
+          if (!analysis) return null;
+
+          const info = SYMBOL_MAP[symbol]
+            ? { name: symbol, category: "CRYPTO" }
+            : STOCK_SYMBOLS[symbol];
+
+          return {
+            symbol,
+            name: info.name,
+            category: info.category,
+            price: feed.ticker.price,
+            change24hPercent: feed.ticker.change24hPercent,
+            score: analysis.score,
+            bestDirection: analysis.bestDirection,
+            rsi: analysis.rsi,
+            trend: analysis.trend,
+            volatility: analysis.volatility,
+            isEligible: analysis.score >= minScore && analysis.bestDirection !== "NEUTRAL",
+            scanVerdict:
+              analysis.score >= minScore && analysis.bestDirection !== "NEUTRAL"
+                ? "Candidate for review"
+                : "No trade edge",
+            rationale: analysis.rationale,
+            dataQuality: feed.meta.quality,
+          };
+        } catch (error: any) {
+          if (error?.code === "DATA_PROVIDER_NOT_CONFIGURED" || error?.status === 401 || error?.status === 402) {
+            return null;
+          }
+          console.warn(`Scanner failed for ${symbol}:`, error?.message || error);
+          return null;
         }
-      }
-    } catch {
-      // Non-fatal, fallback to realistic stochastic pricing
-    }
+      })
+    );
 
-    const opportunities = Object.entries(BASE_PRICES).map(([symbol, info]) => {
-      const bPair = SYMBOL_MAP[symbol];
-      const liveBinance = bPair ? binanceTickerMap[bPair] : null;
-
-      let currentPrice = info.price;
-      let change24hPercent = 0;
-      let volume = 150000;
-
-      if (liveBinance) {
-        currentPrice = parseFloat(liveBinance.lastPrice);
-        change24hPercent = parseFloat(liveBinance.priceChangePercent);
-        volume = parseFloat(liveBinance.volume);
-      } else {
-        // High fidelity variance for stocks/forex
-        const seed = Math.sin(Date.now() / 15000 + symbol.charCodeAt(0));
-        currentPrice = Number((info.price * (1 + seed * 0.008)).toFixed(info.category === "FOREX" ? 4 : 2));
-        change24hPercent = Number((seed * 3.8).toFixed(2));
-      }
-
-      // Compute technical setup confluence
-      const rsi = Math.round(48 + Math.sin(currentPrice * 17) * 26);
-      const isBullishTrend = change24hPercent > 0.4 || rsi < 36;
-      const isBearishTrend = change24hPercent < -0.4 || rsi > 64;
-
-      let score = 50;
-      let bestDirection: "LONG" | "SHORT" | "NEUTRAL" = "NEUTRAL";
-      let rationale = "";
-
-      if (rsi <= 33) {
-        score += 35;
-        bestDirection = "LONG";
-        rationale = `Oversold RSI (${rsi}) touching lower Bollinger band with high reversal potential.`;
-      } else if (rsi >= 68) {
-        score += 33;
-        bestDirection = "SHORT";
-        rationale = `Overbought RSI (${rsi}) at structural resistance with volume exhaustion.`;
-      } else if (isBullishTrend) {
-        score += 28;
-        bestDirection = "LONG";
-        rationale = `Strong 9/21 EMA golden slope with positive 24h momentum (+${change24hPercent}%).`;
-      } else if (isBearishTrend) {
-        score += 26;
-        bestDirection = "SHORT";
-        rationale = `Bearish breakdown below 50 EMA with descending momentum (${change24hPercent}%).`;
-      } else {
-        score += 5;
-        bestDirection = "NEUTRAL";
-        rationale = `Consolidation zone. Low directional edge.`;
-      }
-
-      // Add category volatility bonus
-      if (info.category === "CRYPTO") score += 6;
-      if (Math.abs(change24hPercent) > 2.5) score += 5;
-
-      score = Math.min(96, Math.max(25, score));
-      const isEligible = score >= minConfidence && bestDirection !== "NEUTRAL";
-
-      return {
-        symbol,
-        name: info.name,
-        category: info.category,
-        price: currentPrice,
-        change24hPercent,
-        score,
-        bestDirection,
-        rsi,
-        trend: isBullishTrend ? "BULLISH" : isBearishTrend ? "BEARISH" : "SIDEWAYS",
-        volatility: Math.abs(change24hPercent),
-        isEligible,
-        scanVerdict: isEligible
-          ? `HIGH-CONFLUENCE ${bestDirection} (${score}%)`
-          : `LOW EDGE (${score}%) - ABSTAIN`,
-        rationale,
-      };
-    });
-
-    // Sort opportunities by highest score first
-    opportunities.sort((a, b) => b.score - a.score);
+    const opportunities = results
+      .filter(Boolean)
+      .sort((a: any, b: any) => b.score - a.score);
 
     return res.json({
       success: true,
-      timestamp: Date.now(),
-      totalScanned: opportunities.length,
-      topOpportunity: opportunities[0],
       opportunities,
+      scannedAt: Date.now(),
+      providerStatus: {
+        binance: true,
+        financialDatasets: Boolean(financialDatasetsKey()),
+      },
+      note: "Scores are heuristic signal-strength measures, not win probabilities or forecasts.",
     });
-  } catch (err: any) {
-    console.error("Error in multi-scan:", err);
-    return res.status(500).json({ error: "Failed to scan assets", message: err.message });
+  } catch (error: any) {
+    return res.status(503).json({
+      success: false,
+      code: error?.code || "MARKET_DATA_UNAVAILABLE",
+      error: "Market data unavailable",
+      message: error?.message || "No configured provider could supply the requested market data.",
+    });
   }
 });
 
-// Endpoint: Live Market Data Feed (Real-World Exchange Klines & Ticker)
+// Endpoint: Live market data using a real source for each supported asset.
 app.get("/api/market/live-feed", async (req: Request, res: Response) => {
+  const symbol = (req.query.symbol as string) || "BTC/USD";
+  const limit = Math.min(100, Math.max(20, Number(req.query.limit) || 80));
+
   try {
-    const symbolParam = (req.query.symbol as string) || "BTC/USD";
-    const limit = Math.min(100, Math.max(20, parseInt(req.query.limit as string) || 60));
-    const binanceSymbol = SYMBOL_MAP[symbolParam];
+    const feed = SYMBOL_MAP[symbol]
+      ? await getCryptoFeed(symbol, limit)
+      : await getEquityFeed(symbol, limit);
 
-    if (binanceSymbol) {
-      // Fetch live 1-minute klines and 24h ticker in parallel
-      const [klinesRes, tickerRes] = await Promise.all([
-        fetch(`https://api.binance.com/api/v3/klines?symbol=${binanceSymbol}&interval=1m&limit=${limit}`, {
-          headers: { "User-Agent": "AutonomousTradingBot/1.0" },
-        }),
-        fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${binanceSymbol}`, {
-          headers: { "User-Agent": "AutonomousTradingBot/1.0" },
-        }),
-      ]);
-
-      if (klinesRes.ok && tickerRes.ok) {
-        const rawKlines = await klinesRes.json();
-        const rawTicker = await tickerRes.json();
-
-        const candles = rawKlines.map((k: any) => ({
-          timestamp: Number(k[0]),
-          open: parseFloat(k[1]),
-          high: parseFloat(k[2]),
-          low: parseFloat(k[3]),
-          close: parseFloat(k[4]),
-          volume: parseFloat(k[5]),
-        }));
-
-        const ticker = {
-          symbol: symbolParam,
-          price: parseFloat(rawTicker.lastPrice),
-          bid: parseFloat(rawTicker.bidPrice) || parseFloat(rawTicker.lastPrice) * 0.9999,
-          ask: parseFloat(rawTicker.askPrice) || parseFloat(rawTicker.lastPrice) * 1.0001,
-          high24h: parseFloat(rawTicker.highPrice),
-          low24h: parseFloat(rawTicker.lowPrice),
-          volume24h: parseFloat(rawTicker.volume),
-          change24hPercent: parseFloat(rawTicker.priceChangePercent),
-          lastUpdated: Date.now(),
-          source: "BINANCE" as const,
-        };
-
-        return res.json({
-          success: true,
-          symbol: symbolParam,
-          candles,
-          ticker,
-        });
-      }
-    }
-
-    // Fallback or Synthetic Stock Symbols (NVDA, SPY, AAPL, etc.)
-    const baseInfo = BASE_PRICES[symbolParam] || { price: 100, category: "STOCK", name: symbolParam };
-    const base = baseInfo.price;
-    const now = Date.now();
-    const intervalMs = 60 * 1000;
-    const candles = [];
-    let cur = base;
-
-    for (let i = limit; i >= 0; i--) {
-      const t = now - i * intervalMs;
-      const change = (Math.random() - 0.49) * 0.003 * cur;
-      const open = cur;
-      const close = cur + change;
-      const high = Math.max(open, close) + Math.random() * 0.002 * cur;
-      const low = Math.min(open, close) - Math.random() * 0.002 * cur;
-      const volume = Math.floor(50 + Math.random() * 200);
-      candles.push({
-        timestamp: t,
-        open: Number(open.toFixed(baseInfo.category === "FOREX" ? 4 : 2)),
-        high: Number(high.toFixed(baseInfo.category === "FOREX" ? 4 : 2)),
-        low: Number(low.toFixed(baseInfo.category === "FOREX" ? 4 : 2)),
-        close: Number(close.toFixed(baseInfo.category === "FOREX" ? 4 : 2)),
-        volume,
-      });
-      cur = close;
-    }
-
-    const last = candles[candles.length - 1];
-    const ticker = {
-      symbol: symbolParam,
-      price: last.close,
-      bid: Number((last.close * 0.9998).toFixed(baseInfo.category === "FOREX" ? 4 : 2)),
-      ask: Number((last.close * 1.0002).toFixed(baseInfo.category === "FOREX" ? 4 : 2)),
-      high24h: Number((last.close * 1.025).toFixed(baseInfo.category === "FOREX" ? 4 : 2)),
-      low24h: Number((last.close * 0.975).toFixed(baseInfo.category === "FOREX" ? 4 : 2)),
-      volume24h: 184500,
-      change24hPercent: 1.84,
-      lastUpdated: now,
-      source: "SYNTHETIC" as const,
-    };
-
-    return res.json({
-      success: true,
-      symbol: symbolParam,
-      candles,
-      ticker,
+    return res.json(feed);
+  } catch (error: any) {
+    const status = error?.code === "DATA_PROVIDER_NOT_CONFIGURED" ? 503 : error?.status === 401 || error?.status === 402 ? 503 : 502;
+    return res.status(status).json({
+      success: false,
+      code: error?.code || "MARKET_DATA_UNAVAILABLE",
+      error: "Verified market data is unavailable for this symbol.",
+      message: error?.message || "Configure a supported market-data provider and try again.",
+      symbol,
     });
-  } catch (err: any) {
-    console.error("Error fetching live market feed:", err);
-    return res.status(500).json({ error: "Failed to fetch live feed", message: err.message });
   }
 });
 
