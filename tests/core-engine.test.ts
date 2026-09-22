@@ -87,6 +87,12 @@ describe("automated paper entry timing", () => {
     };
 
     engine.onTick(signalBars[59], signalBars);
+    console.log("DEBUG_AFTER_SIGNAL", JSON.stringify({
+      pending: (engine as any).pendingEntry,
+      lastProcessed: (engine as any).lastProcessedCandleTimestamp,
+      signal: engine.getLastSignal(),
+      state: engine.getBotState(),
+    }));
     expect(engine.getActiveTrade()).toBeNull();
 
     engine.onTick(nextBar, [...signalBars, nextBar]);
