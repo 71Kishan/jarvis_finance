@@ -155,14 +155,13 @@ export const RiskSettingsModal: React.FC<RiskSettingsModalProps> = ({
             </span>
           </div>
           <p className="text-[11px] text-neutral-400 leading-snug">
-            If cumulative equity draws down by this percentage, the circuit breaker terminates automated trading
-            immediately to guarantee remaining funds are protected from catastrophic loss.
+            If cumulative equity drawdown reaches this threshold, Jarvis halts new paper entries. A circuit breaker reduces modeled exposure but cannot guarantee capital protection in real markets.
           </p>
           <div className="flex items-center gap-3 pt-1">
             <input
               type="range"
-              min="1.0"
-              max="10.0"
+              min="0.5"
+              max="6.0"
               step="0.5"
               value={circuitBreaker}
               onChange={(e) => setCircuitBreaker(Number(e.target.value))}
@@ -171,7 +170,7 @@ export const RiskSettingsModal: React.FC<RiskSettingsModalProps> = ({
           </div>
           <div className="flex justify-between text-[10px] font-mono text-neutral-400">
             <span>1.0% (Ultra-Strict)</span>
-            <span>2.5% (Default)</span>
+            <span>6.0% (Policy ceiling)</span>
             <span>10.0% (High Volatility)</span>
           </div>
         </div>
