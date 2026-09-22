@@ -184,7 +184,7 @@ export const VitalityBar: React.FC<VitalityBarProps> = ({
           {/* Execution Win Streak */}
           <div className="bg-neutral-950/60 border border-neutral-800 rounded-xl p-2.5 flex flex-col justify-between">
             <div className="flex items-center justify-between text-neutral-400 text-xs font-mono">
-              <span>Alpha Streak</span>
+              <span>Win Streak</span>
               <Shield className="w-3.5 h-3.5 text-emerald-500" />
             </div>
             <div className="mt-1">
