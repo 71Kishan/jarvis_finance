@@ -63,13 +63,15 @@ export function evaluateSignal(candle: Candle, recentCandles: Candle[], strategy
     reason: bandLong ? "Price is in the upper half of the Bollinger structure." : bandShort ? "Price is in the lower half of the Bollinger structure." : "Price is outside the expected Bollinger structure.",
   });
 
-  const volumeLong = candle.volume >= ind.volumeSMA * 1.1;
-  const volumeShort = volumeLong;
+  const volumeConfirmed = ind.volumeSMA > 0 && candle.volume >= ind.volumeSMA * 1.1;
+  // Participation is a filter, not directional evidence. Volume must never add points to both sides.
   components.push({
     name: "Volume",
-    direction: volumeLong ? "LONG" : volumeShort ? "SHORT" : "NEUTRAL",
-    points: volumeLong ? 100 * weights.volumeConfirmation : 0,
-    reason: volumeLong ? `Volume is ${((candle.volume / Math.max(ind.volumeSMA, 1)) * 100).toFixed(0)}% of its 20-bar average.` : "Volume does not confirm participation.",
+    direction: "NEUTRAL",
+    points: 0,
+    reason: volumeConfirmed
+      ? `Volume is ${((candle.volume / ind.volumeSMA) * 100).toFixed(0)}% of its 20-bar average; participation confirmed.`
+      : "Volume does not confirm participation.",
   });
 
   let longScore = 0;
@@ -81,8 +83,17 @@ export function evaluateSignal(candle: Candle, recentCandles: Candle[], strategy
 
   const direction = longScore === shortScore ? "NEUTRAL" : longScore > shortScore ? "LONG" : "SHORT";
   const score = Math.round(clamp(Math.max(longScore, shortScore)));
+  const losingSideScore = direction === "LONG" ? shortScore : direction === "SHORT" ? longScore : 0;
+  const directionalEdge = score - losingSideScore;
   const reasons = components.filter(c => c.direction === direction).map(c => c.reason);
-  const eligible = direction !== "NEUTRAL" && score >= strategy.minConfidence;
+  const eligible =
+    direction !== "NEUTRAL" &&
+    score >= strategy.minConfidence &&
+    directionalEdge >= 10;
+  if (direction !== "NEUTRAL" && directionalEdge < 10) {
+    reasons.push(`Directional edge is only ${directionalEdge} points; minimum required edge is 10.`);
+  }
+  if (!volumeConfirmed) reasons.push("Volume participation filter failed.");
 
   return { direction, score, components, reasons, eligible };
 }
