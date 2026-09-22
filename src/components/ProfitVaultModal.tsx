@@ -35,7 +35,7 @@ export const ProfitVaultModal: React.FC<ProfitVaultModalProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<"LEDGER" | "SETTINGS" | "MANUAL">("LEDGER");
   const [withdrawPct, setWithdrawPct] = useState<number>(vitality.withdrawPercentage || 50);
-  const [autoEnabled, setAutoEnabled] = useState<boolean>(vitality.autoWithdrawProfitEnabled ?? true);
+  const [autoEnabled, setAutoEnabled] = useState<boolean>(vitality.autoWithdrawProfitEnabled ?? false);
   const [minThreshold, setMinThreshold] = useState<number>(vitality.minProfitThresholdUsd || 5.0);
   const [manualAmount, setManualAmount] = useState<string>("50");
   const [manualMemo, setManualMemo] = useState<string>("");
@@ -67,7 +67,7 @@ export const ProfitVaultModal: React.FC<ProfitVaultModalProps> = ({
     }
     const rec = await engine.manualSweepToVault(amt, manualMemo.trim() || undefined);
     if (rec) {
-      setActionSuccess(`Successfully swept $${amt.toFixed(2)} into the Cold Storage Vault!`);
+      setActionSuccess(`Successfully swept $${amt.toFixed(2)} into the Paper Reserve Vault!`);
       setManualMemo("");
       setTimeout(() => setActionSuccess(null), 4000);
     }
@@ -99,7 +99,7 @@ export const ProfitVaultModal: React.FC<ProfitVaultModalProps> = ({
       "Asset",
       "Policy",
       "Gross Profit USD",
-      "Swept to Vault USD",
+      "Allocated to Reserve USD",
       "Retained in Cash USD",
       "Vault Balance After USD",
       "SHA-256 Proof",
@@ -153,7 +153,7 @@ export const ProfitVaultModal: React.FC<ProfitVaultModalProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <h2 className="text-lg font-bold text-white tracking-wide">
-                  Cold Storage Profit Vault & Withdrawal Ledger
+                  Paper Profit Reserve & Allocation Ledger
                 </h2>
                 <span className="px-2 py-0.5 text-xs font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-full flex items-center gap-1">
                   <ShieldCheck className="w-3 h-3" />
@@ -161,7 +161,7 @@ export const ProfitVaultModal: React.FC<ProfitVaultModalProps> = ({
                 </span>
               </div>
               <p className="text-xs text-slate-400">
-                Autonomous profit taking, automated vault sweeping, and immutable SHA-256 documentation receipts
+                Optional local paper-profit allocation with SHA-256-linked receipts. No custody or external transfer is performed.
               </p>
             </div>
           </div>
@@ -186,7 +186,7 @@ export const ProfitVaultModal: React.FC<ProfitVaultModalProps> = ({
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-5 bg-slate-950/40 border-b border-slate-800">
           <div className="p-4 rounded-xl bg-gradient-to-br from-amber-500/10 to-amber-900/10 border border-amber-500/25">
             <div className="flex items-center justify-between text-xs text-amber-300/80 mb-1">
-              <span>Secured Vault Balance</span>
+              <span>Paper Reserve Balance</span>
               <Lock className="w-3.5 h-3.5 text-amber-400" />
             </div>
             <div className="text-2xl font-black text-amber-400 tracking-tight">
@@ -194,26 +194,26 @@ export const ProfitVaultModal: React.FC<ProfitVaultModalProps> = ({
             </div>
             <div className="text-[11px] text-slate-400 mt-1 flex items-center gap-1">
               <ShieldCheck className="w-3 h-3 text-emerald-400" />
-              100% Protected from drawdown risk
+              Local paper accounting only; not externally protected
             </div>
           </div>
 
           <div className="p-4 rounded-xl bg-slate-800/40 border border-slate-700/60">
             <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
-              <span>Total Lifetime Swept</span>
+              <span>Total Reserve Allocations</span>
               <ArrowDownRight className="w-3.5 h-3.5 text-emerald-400" />
             </div>
             <div className="text-2xl font-black text-white tracking-tight">
               ${totalWithdrawn.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </div>
             <div className="text-[11px] text-slate-400 mt-1">
-              {records.length} documented autonomous withdrawals
+              {records.length} paper reserve records
             </div>
           </div>
 
           <div className="p-4 rounded-xl bg-slate-800/40 border border-slate-700/60">
             <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
-              <span>Auto-Sweep Policy</span>
+              <span>Paper Reserve Policy</span>
               <Sliders className="w-3.5 h-3.5 text-indigo-400" />
             </div>
             <div className="text-2xl font-black text-indigo-300 tracking-tight">
@@ -238,7 +238,7 @@ export const ProfitVaultModal: React.FC<ProfitVaultModalProps> = ({
               }`}
             >
               <History className="w-3.5 h-3.5" />
-              Documented Receipts ({records.length})
+              Paper Allocation Receipts ({records.length})
             </button>
             <button
               id="tab-vault-settings"
@@ -250,7 +250,7 @@ export const ProfitVaultModal: React.FC<ProfitVaultModalProps> = ({
               }`}
             >
               <Sliders className="w-3.5 h-3.5" />
-              Auto-Withdraw Rules
+              Paper Reserve Rules
             </button>
             <button
               id="tab-vault-manual"
@@ -262,7 +262,7 @@ export const ProfitVaultModal: React.FC<ProfitVaultModalProps> = ({
               }`}
             >
               <Coins className="w-3.5 h-3.5" />
-              Capital Sweep & Transfer
+              Paper Reserve & Transfer
             </button>
           </div>
 
@@ -287,10 +287,10 @@ export const ProfitVaultModal: React.FC<ProfitVaultModalProps> = ({
                   <div className="p-3 w-12 h-12 mx-auto rounded-xl bg-slate-800/80 text-slate-400 mb-3 flex items-center justify-center">
                     <FileCheck2 className="w-6 h-6 text-amber-400/80" />
                   </div>
-                  <h3 className="text-sm font-semibold text-white mb-1">No Documented Profit Withdrawals Yet</h3>
+                  <h3 className="text-sm font-semibold text-white mb-1">No Paper Reserve Allocations Yet</h3>
                   <p className="text-xs text-slate-400 max-w-md mx-auto">
-                    The autonomous engine will automatically execute a profit sweep whenever a trade hits take-profit,
-                    moving {vitality.withdrawPercentage}% of realized gain into this Cold Storage Vault with a SHA-256 receipt.
+                    When enabled, the paper engine allocates a percentage of realized paper profit to the local reserve;
+                    moving {vitality.withdrawPercentage}% of realized gain into this local accounting reserve with a SHA-256-linked receipt.
                   </p>
                 </div>
               ) : (
@@ -370,10 +370,10 @@ export const ProfitVaultModal: React.FC<ProfitVaultModalProps> = ({
                 <div className="flex items-center justify-between">
                   <div>
                     <label className="text-sm font-semibold text-white block">
-                      Autonomous Profit Sweep on Winning Trades
+                      Optional Paper Profit Allocation
                     </label>
                     <p className="text-xs text-slate-400">
-                      When enabled, the trading engine automatically withdraws a percentage of realized profits from each win.
+                      When enabled, the paper engine moves a percentage of realized profit from active paper cash to a local accounting reserve.
                     </p>
                   </div>
                   <input
@@ -445,10 +445,10 @@ export const ProfitVaultModal: React.FC<ProfitVaultModalProps> = ({
               <div className="p-5 rounded-xl bg-slate-950/40 border border-slate-800 space-y-4">
                 <div className="flex items-center gap-2 text-white font-semibold text-sm">
                   <ArrowDownRight className="w-4 h-4 text-emerald-400" />
-                  Manual Profit Sweep into Vault
+                  Manual Allocation to Paper Reserve
                 </div>
                 <p className="text-xs text-slate-400">
-                  Transfer realized capital out of active trading liquidity into Cold Storage. Insulates funds from subsequent market volatility.
+                  Move paper accounting balance out of active simulated liquidity. This is not real asset custody and does not guarantee protection from market loss.
                 </p>
 
                 <div>
@@ -490,7 +490,7 @@ export const ProfitVaultModal: React.FC<ProfitVaultModalProps> = ({
                   className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs uppercase tracking-wider rounded-xl transition-colors flex items-center justify-center gap-2"
                 >
                   <Lock className="w-3.5 h-3.5" />
-                  Lock Capital to Vault
+                  Allocate to Paper Reserve
                 </button>
               </div>
 
@@ -498,10 +498,10 @@ export const ProfitVaultModal: React.FC<ProfitVaultModalProps> = ({
               <div className="p-5 rounded-xl bg-slate-950/40 border border-slate-800 space-y-4">
                 <div className="flex items-center gap-2 text-white font-semibold text-sm">
                   <ArrowUpRight className="w-4 h-4 text-amber-400" />
-                  Transfer Vault Capital to Trading Balance
+                  Return Paper Reserve to Trading
                 </div>
                 <p className="text-xs text-slate-400">
-                  Release funds from Cold Storage back into the active trading margin pool to expand buying power.
+                  Return the simulated reserve balance to the active paper cash balance.
                 </p>
 
                 <div>
