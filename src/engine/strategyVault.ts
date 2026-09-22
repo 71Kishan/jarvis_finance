@@ -1,5 +1,4 @@
 import { DailyPerformanceGoal, StrategyConfig, StrategyVaultEntry, Trade } from "../types/trading";
-import { DEFAULT_STRATEGY } from "./tradingEngine";
 
 /**
  * Strategy registry.
