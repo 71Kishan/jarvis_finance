@@ -263,7 +263,7 @@ export const MarketHoursModal: React.FC<MarketHoursModalProps> = ({
               <div>
                 <div className="text-xs font-mono font-bold text-white uppercase flex items-center gap-2">
                   <Zap className="w-4 h-4 text-emerald-400" />
-                  Autonomous Market Adaptation & Asset Rotation
+                  Server Runtime & Research Scheduling
                 </div>
                 <p className="text-[11px] text-neutral-400">
                   A server-side scheduler may change the research universe across market sessions. Do not treat weekend crypto rotation as a promise of continuous profitability or unattended Android execution.
