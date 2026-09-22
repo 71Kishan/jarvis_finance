@@ -45,13 +45,15 @@ export function evaluateSignal(candle: Candle, recentCandles: Candle[], strategy
     reason: momentumLong ? "MACD momentum is positive." : momentumShort ? "MACD momentum is negative." : "MACD does not confirm direction.",
   });
 
-  const rsiLong = ind.rsi >= 52 && ind.rsi <= 68;
-  const rsiShort = ind.rsi <= 48 && ind.rsi >= 32;
+  // Use the configured RSI bounds as a momentum confirmation band. Values outside
+  // the configured extremes are deliberately not treated as a signal by this strategy.
+  const rsiLong = ind.rsi >= 50 && ind.rsi < strategy.rsiOverbought;
+  const rsiShort = ind.rsi <= 50 && ind.rsi > strategy.rsiOversold;
   components.push({
-    name: "RSI",
+    name: "RSI Momentum",
     direction: rsiLong ? "LONG" : rsiShort ? "SHORT" : "NEUTRAL",
     points: rsiLong || rsiShort ? 100 * weights.rsiReversal : 0,
-    reason: rsiLong ? `RSI ${ind.rsi.toFixed(1)} supports positive momentum without an extreme reading.` : rsiShort ? `RSI ${ind.rsi.toFixed(1)} supports negative momentum without an extreme reading.` : `RSI ${ind.rsi.toFixed(1)} is neutral or stretched; no directional confirmation.`,
+    reason: rsiLong ? `RSI ${ind.rsi.toFixed(1)} is inside the configured long-side momentum band.` : rsiShort ? `RSI ${ind.rsi.toFixed(1)} is inside the configured short-side momentum band.` : `RSI ${ind.rsi.toFixed(1)} is outside the configured momentum bands.`,
   });
 
   const bandLong = price >= ind.bbandMiddle && price < ind.bbandUpper;
