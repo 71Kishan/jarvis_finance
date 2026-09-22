@@ -180,7 +180,7 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
                     Quantitative Risk & Regime Assessment
                   </span>
                   <span className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 text-[10px]">
-                    Status: {aiAnalysis.survivalStatus || "OPTIMAL"}
+                    Status: {aiAnalysis.survivalStatus || "MONITOR"}
                   </span>
                 </div>
 
@@ -288,7 +288,7 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
                       </div>
 
                       <div className="flex items-center justify-between text-[10px] text-neutral-400 pt-1 border-t border-neutral-800/60">
-                        <span>Min Confidence: {cand.strategy.minConfidence}%</span>
+                        <span>Signal Threshold: {cand.strategy.minConfidence}%</span>
                         <span>SL: {cand.strategy.stopLossPercent}% | TP: +{cand.strategy.takeProfitPercent}%</span>
                       </div>
                     </div>
