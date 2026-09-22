@@ -143,7 +143,7 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
             <div className="font-bold text-neutral-100 flex items-center gap-2">
               <span>Paper Trading Terminal</span>
               <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-neutral-800 text-neutral-300">
-                Simulated Capital • Real Market Data
+                {marketSource === "LIVE_MARKET_DATA" ? "Simulated Capital • Trusted Market Data" : "Synthetic Capital • Synthetic Market Data"}
               </span>
             </div>
             <div className="text-[11px] text-neutral-400">
@@ -192,7 +192,7 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
       </div>
 
       {/* Ticker Telemetry Strip */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-neutral-950/70 p-2.5 rounded-xl border border-neutral-800/80 font-mono text-xs">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 bg-neutral-950/70 p-2.5 rounded-xl border border-neutral-800/80 font-mono text-xs">
         <div>
           <div className="text-[10px] text-neutral-400 font-sans">Asset Price</div>
           <div className="text-neutral-100 font-bold text-sm">
@@ -215,6 +215,17 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
           <div className="text-neutral-300 text-[11px]">
             {ticker?.high24h ? `${ticker.high24h.toFixed(1)}` : "—"} / {ticker?.low24h ? `${ticker.low24h.toFixed(1)}` : "—"}
           </div>
+        </div>
+        <div>
+          <div className="text-[10px] text-neutral-400 font-sans">Data Source</div>
+          <div className="text-neutral-300 text-[11px]">
+            {ticker?.source || (marketSource === "SIMULATED" ? "SIMULATOR" : "UNAVAILABLE")}
+          </div>
+          {marketSource === "LIVE_MARKET_DATA" && ticker?.lastUpdated ? (
+            <div className="text-[10px] text-neutral-500">
+              {Math.max(0, Math.round((Date.now() - ticker.lastUpdated) / 1000))}s old
+            </div>
+          ) : null}
         </div>
         <div>
           <div className="text-[10px] text-neutral-400 font-sans">Available Cash</div>
