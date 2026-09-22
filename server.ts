@@ -595,79 +595,55 @@ app.get("/api/market/live-feed", async (req: Request, res: Response) => {
 
 // Helper: Local Intelligent Fallback for Copilot & App Knowledge
 function generateLocalCopilotResponse(query: string, ctx?: any): string {
-  const q = (query || "").toLowerCase();
-  const asset = ctx?.currentAsset || "BTC/USD";
-  const price = ctx?.currentPrice ? `$${Number(ctx.currentPrice).toLocaleString()}` : "$65,000";
-  const cash = ctx?.cash ? `$${Number(ctx.cash).toLocaleString()}` : "$10,000";
-  const equity = ctx?.currentEquity ? `$${Number(ctx.currentEquity).toLocaleString()}` : "$10,000";
-  const drawdown = ctx?.currentDrawdownPercent ? `${ctx.currentDrawdownPercent}%` : "0.00%";
-  const circuit = ctx?.circuitBreakerThresholdPercent ? `${ctx.circuitBreakerThresholdPercent}%` : "2.5%";
-  const winRate = ctx?.winRate ? `${ctx.winRate}%` : "100%";
-  const vault = ctx?.vaultBalance ? `$${Number(ctx.vaultBalance).toLocaleString()}` : "$0.00";
-  const activeTrade = ctx?.activeTrade;
+  const q = String(query || "").toLowerCase();
+  const asset = ctx?.currentAsset || "UNKNOWN";
+  const n = (value: any) => (typeof value === "number" && Number.isFinite(value) ? value : null);
+  const currentPrice = n(ctx?.currentPrice);
+  const cash = n(ctx?.cash);
+  const equity = n(ctx?.currentEquity);
+  const drawdown = n(ctx?.currentDrawdownPercent);
+  const circuit = n(ctx?.circuitBreakerThresholdPercent);
+  const trades = n(ctx?.totalTrades);
 
-  if (q.includes("circuit breaker") || q.includes("capital preservation") || q.includes("protect capital") || q.includes("drawdown")) {
-    return `### **AEGIS Capital Preservation & Circuit Breaker Architecture**\n\n` +
-      `The AEGIS Terminal is built upon an existential capital preservation mandate. Here is how the protection mechanism operates:\n\n` +
-      `- **Max Drawdown Limit**: Currently calibrated at **${circuit}** drawdown from the peak equity baseline.\n` +
-      `- **Real-Time Drawdown Tracking**: Your current drawdown is **${drawdown}** (Cash: **${cash}**, Total Equity: **${equity}**).\n` +
-      `- **Automated Hard Termination**: If adverse price movement drives cumulative drawdown to ${circuit}, the engine **instantly liquidates open exposure** and engages a cryptographic hardware lock.\n` +
-      `- **Zero-Ruin Guarantee**: Trading cannot resume until you manually inspect the circuit attribution logs and recalibrate in settings.\n\n` +
-      `*This ensures an absolute mathematical guarantee that your primary portfolio can never suffer catastrophic ruin.*`;
+  if (q.includes("circuit breaker") || q.includes("drawdown") || q.includes("protect capital")) {
+    return (
+      "### Risk Controls\n\n" +
+      "Current equity: **" + (equity === null ? "unavailable" : "$" + equity.toLocaleString()) + "**\n\n" +
+      "Current drawdown: **" + (drawdown === null ? "unavailable" : drawdown.toFixed(2) + "%") + "**\n\n" +
+      "Paper circuit-breaker: **" + (circuit === null ? "unavailable" : circuit.toFixed(2) + "%") + "**\n\n" +
+      "The breaker blocks new automated paper entries after the configured drawdown threshold. It cannot guarantee real-world fills, liquidity, broker behavior, or protection of an external account."
+    );
   }
 
-  if (q.includes("withdraw") || q.includes("profit") || q.includes("vault") || q.includes("sweep")) {
-    return `### **Automated Profit Withdrawal & Cold Storage Vault**\n\n` +
-      `AEGIS features an automated profit harvesting engine that sweeps realized gains out of the active trading pool:\n\n` +
-      `- **Automated Profit Sweep**: When any automated trade closes in positive territory, the system automatically sweeps **50% (configurable up to 100%)** of net profit into the **Cold Storage Profit Vault**.\n` +
-      `- **Current Vault Balance**: **${vault}** secured and insulated from future market drawdowns.\n` +
-      `- **Immutable Documentation**: Every withdrawal generates a timestamped **SHA-256 cryptographic receipt**, tracking trade ID, gross profit, and vault balance.\n` +
-      `- **Audit Export**: You can inspect the complete withdrawal ledger in the **Profit Vault** modal and export audit statements in CSV format anytime.\n\n` +
-      `*By locking harvested profits away from trading balance, your gains compound safely while your risk capital remains strictly bounded.*`;
+  if (q.includes("profit") || q.includes("vault") || q.includes("withdraw")) {
+    return (
+      "### Paper Profit Reserve\n\n" +
+      "The reserve is local paper-accounting only. It is not a bank transfer, wallet, custodian, or cold-storage service. A positive paper outcome is evidence, not a guarantee of future profit."
+    );
   }
 
-  if (q.includes("operate by itself") || q.includes("autonomous") || q.includes("automatic") || q.includes("hands free") || q.includes("touch") || q.includes("phone")) {
-    return `### **24/7 Autonomous Operation Without Manual Touch**\n\n` +
-      `The AEGIS Terminal is designed to operate completely autonomously around the clock on desktop and mobile devices (Android/iOS PWA):\n\n` +
-      `1. **Continuous Quantitative Scanning**: Evaluates incoming 1-minute candlestick ticks across EMA trends (9/21/50), RSI (14), Bollinger Bands (20, 2), MACD momentum, and Volume SMA.\n` +
-      `2. **Strict Confluence Threshold**: Only enters positions when multi-indicator alignment exceeds your minimum confidence threshold (e.g. 78%+).\n` +
-      `3. **Active Bracket Execution**: Automatically calculates entry, dynamic trailing stop-loss, and take-profit targets.\n` +
-      `4. **Automated Profit Realization & Sweeping**: Closes positions at profit targets, automatically sweeps profits into the **Cold Storage Vault**, and records immutable documentation.\n` +
-      `5. **Global Market Routing**: Routes trades across US Regular, London, Asian, and 24/7 Crypto sessions, keeping you updated via push notifications and haptic alerts.`;
+  if (q.includes("autonomous") || q.includes("24/7") || q.includes("hands free") || q.includes("phone")) {
+    return (
+      "### Automation Boundary\n\n" +
+      "A browser or mobile PWA is not a reliable always-on trading server. Jarvis can process paper logic while its execution process is alive; dependable background operation requires a persistent backend/worker. The phone should act as a dashboard and control surface."
+    );
   }
 
-  if (q.includes("confluence") || q.includes("indicator") || q.includes("ema") || q.includes("rsi") || q.includes("macd")) {
-    return `### **Algorithmic Indicator Confluence Scoring**\n\n` +
-      `The algorithm combines 5 independent mathematical signals to establish an institutional edge:\n\n` +
-      `- **EMA 9/21/50 Alignment (30 pts)**: Detects macro trend direction. Longs require Price > EMA 9 > EMA 21 > EMA 50; Shorts require inverse.\n` +
-      `- **RSI 14 Mean-Reversion / Exhaustion (25 pts)**: Identifies oversold rebounds (RSI 28-36) or overbought rejections (RSI 64-72).\n` +
-      `- **Bollinger Bands 20, 2 (20 pts)**: Flags band touches and volatility squeezes.\n` +
-      `- **MACD Histogram Crossover (15 pts)**: Confirms momentum velocity and histogram expansion.\n` +
-      `- **Volume SMA Confirmation (10 pts)**: Ensures high institutional liquidity (>110% of 20-period average volume).\n\n` +
-      `*A minimum confluence score of 78% is strictly required before an order is dispatched to ensure capital preservation.*`;
+  if (q.includes("stat") || q.includes("pnl") || q.includes("win rate") || q.includes("portfolio") || q.includes("balance")) {
+    return (
+      "### Paper Telemetry\n\n" +
+      "Asset: **" + asset + "** @ **" + (currentPrice === null ? "unavailable" : "$" + currentPrice.toLocaleString()) + "**\n\n" +
+      "Cash: **" + (cash === null ? "unavailable" : "$" + cash.toLocaleString()) + "**\n\n" +
+      "Equity: **" + (equity === null ? "unavailable" : "$" + equity.toLocaleString()) + "**\n\n" +
+      "Recorded trades: **" + (trades === null ? 0 : trades) + "**\n\n" +
+      "A small or synthetic sample is not sufficient evidence of a durable trading edge."
+    );
   }
 
-  if (q.includes("stat") || q.includes("pnl") || q.includes("win rate") || q.includes("portfolio") || q.includes("balance") || q.includes("my")) {
-    return `### **Live Portfolio Telemetry & Risk Attribution**\n\n` +
-      `Here is the real-time status of your quantitative account:\n\n` +
-      `- **Monitored Asset**: **${asset}** @ **${price}**\n` +
-      `- **Cash Balance**: **${cash}**\n` +
-      `- **Total Portfolio Equity**: **${equity}**\n` +
-      `- **Current Drawdown**: **${drawdown}** (Circuit Breaker Limit: **${circuit}**)\n` +
-      `- **Win Rate**: **${winRate}**\n` +
-      `- **Cold Storage Profit Vault**: **${vault}** secured\n` +
-      `- **Active Exposure**: ${activeTrade ? `**${activeTrade.type} on ${activeTrade.asset}** (Entry: $${activeTrade.entryPrice}, Size: $${activeTrade.sizeUsd})` : "**No open position** — algorithmic scanner actively seeking high-confidence setups"}\n\n` +
-      `*Risk parameters are healthy and defensive buffers remain fully engaged.*`;
-  }
-
-  return `### **AEGIS Quantitative Terminal Intelligence**\n\n` +
-    `Hello! I am your **AEGIS AI Copilot**. I assist with everything related to this trading terminal and quantitative market operations:\n\n` +
-    `- **Autonomous Trading**: How the automated scanner executes orders without manual intervention.\n` +
-    `- **Capital Preservation**: How the circuit breaker guarantees zero ruin by enforcing hard drawdown halts.\n` +
-    `- **Automated Profit Withdrawals**: How profits are swept automatically into the protected Cold Storage Vault and documented with SHA-256 receipts.\n` +
-    `- **Strategy & Indicators**: Real-time breakdown of EMA, RSI, Bollinger Bands, MACD, and Volume confluence.\n` +
-    `- **Current Telemetry**: Active asset: **${asset}** (${price}), Cash: **${cash}**, Equity: **${equity}**, Vault: **${vault}**.\n\n` +
-    `Feel free to ask any specific question about the terminal's architecture, trading formulas, or current positions!`;
+  return (
+    "### Jarvis Finance AI\n\n" +
+    "I can explain the paper engine, risk controls, backtests, strategy evidence, market data, or current telemetry. I will not fabricate prices, news, order flow, performance, or guarantees when source data is unavailable."
+  );
 }
 
 // Endpoint: Multi-Turn AI Copilot & Terminal Advisor
@@ -678,8 +654,8 @@ app.post("/api/copilot/chat", async (req: Request, res: Response) => {
     return res.status(400).json({ error: "Message is required" });
   }
 
-  const validModels = ["gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-3.1-pro-preview"];
-  const selectedModel = validModels.includes(modelPreference) ? modelPreference : "gemini-3.5-flash";
+  const validModels = ["gemini-3.8-flash", "gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-3.1-pro-preview"];
+  const selectedModel = validModels.includes(modelPreference) ? modelPreference : "gemini-3.8-flash";
 
   const localReply = generateLocalCopilotResponse(message, terminalContext);
 
@@ -694,7 +670,7 @@ app.post("/api/copilot/chat", async (req: Request, res: Response) => {
       });
     }
 
-    const systemInstruction = `You are AEGIS Copilot, the built-in AI quantitative trading advisor, risk controller, and terminal educator for the AEGIS Autonomous Quantitative Trading Terminal.
+    const systemInstruction = `You are Jarvis Finance Copilot, a research assistant, quantitative explainer, and risk-focused educator for a paper-trading application.
 Your capabilities and responsibilities:
 1. Terminal Expert: You can explain every feature in the application in clear, practical terms:
    - Autonomous Execution Core: How the algorithm operates automatically without user touch, analyzing continuous 1-minute market feeds for multi-indicator confluence.
