@@ -6,7 +6,7 @@ import { evaluateSignal } from "../src/engine/signalEngine";
 import { Candle } from "../src/types/trading";
 
 const indicators = {
-  ema9: 105, ema21: 103, ema50: 100, rsi: 58,
+  ema9: 104, ema21: 103, ema50: 100, rsi: 58,
   bbandUpper: 110, bbandMiddle: 102, bbandLower: 94,
   atr: 1.2, macd: 2, macdSignal: 1, macdHist: 1, volumeSMA: 1000,
 };
@@ -87,21 +87,9 @@ describe("automated paper entry timing", () => {
     };
 
     engine.onTick(signalBars[59], signalBars);
-    console.log("DEBUG_AFTER_SIGNAL", JSON.stringify({
-      pending: (engine as any).pendingEntry,
-      lastProcessed: (engine as any).lastProcessedCandleTimestamp,
-      signal: engine.getLastSignal(),
-      state: engine.getBotState(),
-    }));
     expect(engine.getActiveTrade()).toBeNull();
 
     engine.onTick(nextBar, [...signalBars, nextBar]);
-    console.log("DEBUG_AUTO_ENTRY", JSON.stringify({
-      signal: engine.getLastSignal(),
-      state: engine.getBotState(),
-      thoughts: engine.getThoughts().slice(0, 3),
-      vitality: engine.getVitality(),
-    }));
     const trade = engine.getActiveTrade();
     expect(trade).not.toBeNull();
     expect(trade?.entryPrice).toBeGreaterThan(nextBar.open);
