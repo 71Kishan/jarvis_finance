@@ -184,7 +184,7 @@ export default function App() {
     return () => clearInterval(timer);
   }, [marketSource, isAutoTrading, simulationSpeed, botState, stepTick]);
 
-  // Live Exchange Data Polling Loop (when LIVE_EXCHANGE is active)
+  // Live Exchange Data Polling Loop (when LIVE_MARKET_DATA is active)
   useEffect(() => {
     if (marketSource !== "LIVE_MARKET_DATA") return;
 
@@ -352,7 +352,7 @@ export default function App() {
     if (!tradingEngineRef.current) return;
     tradingEngineRef.current.fullResetAccount(initialCapital);
     setIsEmergencyModalOpen(false);
-    setIsAutoTrading(true);
+    setIsAutoTrading(false);
     syncStateFromEngine();
   };
 
