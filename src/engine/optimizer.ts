@@ -373,11 +373,17 @@ export class StrategyOptimizer {
     const barsPerYear = inferBarsPerYear(candles);
     const sharpe = annualizedRatio(periodReturns, barsPerYear, false);
     const sortino = annualizedRatio(periodReturns, barsPerYear, true);
+    const elapsedYears =
+      finalCandle && candles[25]
+        ? Math.max(
+            0,
+            (finalCandle.timestamp - candles[25].timestamp) /
+              (365.25 * 24 * 60 * 60 * 1000)
+          )
+        : 0;
     const annualizedReturn =
-      candles.length > 1 && finalEquity > 0
-        ? (finalEquity / cfg.initialBalance) **
-            (barsPerYear / Math.max(1, candles.length - 1)) -
-          1
+      elapsedYears > 0 && finalEquity > 0
+        ? (finalEquity / cfg.initialBalance) ** (1 / elapsedYears) - 1
         : 0;
     const calmar = maxDrawdown > 0 ? (annualizedReturn * 100) / maxDrawdown : 0;
     const benchmarkReturn =
