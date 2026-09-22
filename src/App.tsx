@@ -140,7 +140,9 @@ export default function App() {
     setActiveTrade(engine.getActiveTrade() ? { ...engine.getActiveTrade()! } : null);
     setTradeHistory([...engine.getTradeHistory()]);
     setThoughts([...engine.getThoughts()]);
-    setCandles([...sim.getCandles()]);
+    if (marketSource === "SIMULATED") {
+      setCandles([...sim.getCandles()]);
+    }
     setPaperSettings(engine.getPaperSettings());
     setDailyGoal(strategyVaultInstance.getDailyGoal());
     setNotifications([...engine.getNotifications()]);
@@ -216,6 +218,7 @@ export default function App() {
           if (simulatorRef.current && tradingEngineRef.current) {
             simulatorRef.current.setExternalCandles(data.candles);
             const allCandles = simulatorRef.current.getCandles();
+            setCandles([...allCandles]);
             const lastCandle = allCandles[allCandles.length - 1];
 
             if (lastCandle) {
