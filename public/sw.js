@@ -1,4 +1,4 @@
-// Service Worker for 24/7 Autonomous Survival Trading Bot PWA
+// Service Worker for 24/7 Jarvis Finance PWA
 const CACHE_NAME = 'survival-bot-cache-v1';
 const STATIC_ASSETS = [
   '/',
@@ -80,4 +80,27 @@ self.addEventListener('notificationclick', (event) => {
       }
     })
   );
+});
+
+
+self.addEventListener("push", (event) => {
+  if (!event.data) return;
+  let payload = {};
+  try {
+    payload = event.data.json();
+  } catch {
+    payload = { title: "Jarvis Finance", body: event.data.text() };
+  }
+
+  const title = payload.title || "Jarvis Finance";
+  const options = {
+    body: payload.body || "",
+    icon: payload.icon || "/icon-192.png",
+    badge: payload.badge || "/icon-192.png",
+    tag: payload.tag || "jarvis-finance-alert",
+    data: payload.data || {},
+    requireInteraction: Boolean(payload.requireInteraction),
+  };
+
+  event.waitUntil(self.registration.showNotification(title, options));
 });
