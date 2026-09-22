@@ -56,6 +56,7 @@ export class TradingEngine {
   private notifications: ActionNotification[] = [];
   private equityCurve: EquityCurvePoint[] = [];
   private profitWithdrawals: ProfitWithdrawalRecord[] = [];
+  private lastProcessedCandleTimestamp = 0;
   private onStateChange?: () => void;
   private paperSettings: PaperTradingSettings = {
     slippageBps: 2,
@@ -344,6 +345,7 @@ export class TradingEngine {
     this.vitality.currentDrawdownPercent = 0;
     this.vitality.health = 100;
     this.activeTrade = null;
+    this.lastProcessedCandleTimestamp = 0;
     this.botState = "HUNTING";
 
     this.addNotification({
@@ -506,7 +508,7 @@ export class TradingEngine {
       pnl: 0,
       pnlPercent: 0,
       status: "OPEN",
-      confidence: 90,
+      confidence: 0,
       rationale: manualNote || `Manual paper order: ${safeLeverage}x leverage. SL ${stopLossPercent}%, TP ${takeProfitPercent}%.`,
       botSurvivalNote: `User-authorized paper order. Simulated execution only; no broker order was sent.`,
     };
@@ -614,7 +616,7 @@ export class TradingEngine {
         bestType,
         price,
         bestScore,
-        `Forced Signal: Confluence score ${bestScore}% met minimum survival requirement (${this.strategy.minConfidence}%).`
+        `Forced Signal: Confluence score ${bestScore}% met minimum signal threshold (${this.strategy.minConfidence}%).`
       );
       this.notify();
       return { entered: true, confidence: bestScore, reason: `Confluence ${bestScore}% met required ${this.strategy.minConfidence}%. Position opened.` };
@@ -666,6 +668,11 @@ export class TradingEngine {
 
   // Core Tick Processing Loop
   public onTick(currentCandle: Candle, recentCandles: Candle[]) {
+    if (!currentCandle || !Number.isFinite(currentCandle.timestamp)) return;
+    if (currentCandle.timestamp <= this.lastProcessedCandleTimestamp) return;
+    this.lastProcessedCandleTimestamp = currentCandle.timestamp;
+
+    // One normalized candle should be processed exactly once.
     // 1. If circuit breaker tripped, automated trading is halted to preserve capital
     if (this.botState === "HALTED_DEAD") {
       return;
@@ -857,7 +864,7 @@ export class TradingEngine {
         price,
         rawConfidence,
         isLong
-          ? `High confluence: EMA trend aligned, RSI (${ind.rsi.toFixed(1)}) healthy, volume ${Math.round(
+          ? `Technical confluence: EMA trend aligned, RSI (${ind.rsi.toFixed(1)}) healthy, volume ${Math.round(
               (currentCandle.volume / ind.volumeSMA) * 100
             )}% of avg.`
           : `Bearish setup: Price below EMAs, RSI (${ind.rsi.toFixed(1)}) declining, MACD negative momentum.`
@@ -896,26 +903,49 @@ export class TradingEngine {
         ? Number((entryPrice * (1 + this.strategy.takeProfitPercent / 100)).toFixed(2))
         : Number((entryPrice * (1 - this.strategy.takeProfitPercent / 100)).toFixed(2));
 
+    const entryFeeUsd = sizeUsd * (this.paperSettings.feeTierPercent / 100);
+    const entrySlippageUsd = sizeUsd * (this.paperSettings.slippageBps / 10000);
+    const simulatedEntryPrice =
+      type === "LONG"
+        ? entryPrice * (1 + this.paperSettings.slippageBps / 10000)
+        : entryPrice * (1 - this.paperSettings.slippageBps / 10000);
+
+    if (!Number.isFinite(entryFeeUsd) || !Number.isFinite(entrySlippageUsd)) return;
+    if (this.vitality.cash <= entryFeeUsd) return;
+
+    this.vitality.cash = Number((this.vitality.cash - entryFeeUsd).toFixed(2));
+
+    const finalEntryPrice = Number(simulatedEntryPrice.toFixed(2));
+    const finalAmount = Number((sizeUsd / finalEntryPrice).toFixed(6));
+
     const trade: Trade = {
       id: `TRD-${Date.now().toString().slice(-6)}`,
       asset: this.strategy.asset,
       type,
-      entryPrice,
-      amount,
+      entryPrice: finalEntryPrice,
+      amount: finalAmount,
       sizeUsd,
+      marginUsd: sizeUsd,
+      leverage: 1,
+      entryFeeUsd: Number(entryFeeUsd.toFixed(2)),
+      slippageUsd: Number(entrySlippageUsd.toFixed(2)),
       entryTime: Date.now(),
-      stopLoss,
-      takeProfit,
-      highestPrice: entryPrice,
-      lowestPrice: entryPrice,
+      stopLoss:
+        type === "LONG"
+          ? Number((finalEntryPrice * (1 - this.strategy.stopLossPercent / 100)).toFixed(2))
+          : Number((finalEntryPrice * (1 + this.strategy.stopLossPercent / 100)).toFixed(2)),
+      takeProfit:
+        type === "LONG"
+          ? Number((finalEntryPrice * (1 + this.strategy.takeProfitPercent / 100)).toFixed(2))
+          : Number((finalEntryPrice * (1 - this.strategy.takeProfitPercent / 100)).toFixed(2)),
+      highestPrice: finalEntryPrice,
+      lowestPrice: finalEntryPrice,
       pnl: 0,
       pnlPercent: 0,
       status: "OPEN",
       confidence,
       rationale,
-      botSurvivalNote: `Risk strictly contained to $${maxLossBudget.toFixed(
-        2
-      )}. Survival depends on this trade executing flawlessly.`,
+      botSurvivalNote: `Modeled stop-loss exposure is approximately ${maxLossBudget.toFixed(2)} before transaction costs. Paper execution only.`,
     };
 
     this.activeTrade = trade;
@@ -924,7 +954,7 @@ export class TradingEngine {
     this.addNotification({
       type: "TRADE_OPENED",
       title: `AI Signal Executed: ${type} ${this.strategy.asset}`,
-      message: `Confluence ${confidence}% | Entry @ $${entryPrice.toLocaleString()} | Size: $${sizeUsd.toFixed(2)} | SL: $${stopLoss} | TP: $${takeProfit}`,
+      message: `Signal score ${confidence} | Entry @ $${entryPrice.toLocaleString()} | Size: $${sizeUsd.toFixed(2)} | SL: $${stopLoss} | TP: $${takeProfit}`,
       badgeText: "AUTO",
       details: {
         asset: this.strategy.asset,
@@ -938,7 +968,7 @@ export class TradingEngine {
     this.logThought(
       "EXECUTION",
       `Executed ${type} on ${this.strategy.asset}`,
-      `Entry @ $${entryPrice.toLocaleString()} | Size: $${sizeUsd.toFixed(2)} | Confidence: ${confidence}% | SL: $${stopLoss.toLocaleString()} | TP: $${takeProfit.toLocaleString()}. Rationale: ${rationale}`,
+      `Entry @ $${entryPrice.toLocaleString()} | Size: $${sizeUsd.toFixed(2)} | Signal score: ${confidence} | SL: $${stopLoss.toLocaleString()} | TP: $${takeProfit.toLocaleString()}. Rationale: ${rationale}`,
       confidence
     );
 
@@ -965,19 +995,25 @@ export class TradingEngine {
     trade.exitTime = Date.now();
     trade.status = status;
 
-    let pnl = 0;
-    if (trade.type === "LONG") {
-      pnl = (exitPrice - trade.entryPrice) * trade.amount;
-    } else {
-      pnl = (trade.entryPrice - exitPrice) * trade.amount;
-    }
+    const grossPnl =
+      trade.type === "LONG"
+        ? (exitPrice - trade.entryPrice) * trade.amount
+        : (trade.entryPrice - exitPrice) * trade.amount;
 
-    trade.pnl = Number(pnl.toFixed(2));
-    trade.pnlPercent = Number(((pnl / trade.sizeUsd) * 100).toFixed(2));
+    const exitFeeUsd = trade.sizeUsd * (this.paperSettings.feeTierPercent / 100);
+    const exitSlippageUsd = trade.sizeUsd * (this.paperSettings.slippageBps / 10000);
+    const netPnl = grossPnl - exitFeeUsd - exitSlippageUsd;
 
-    this.vitality.cash += pnl;
+    trade.exitFeeUsd = Number(exitFeeUsd.toFixed(2));
+    trade.slippageUsd = Number(
+      ((trade.slippageUsd || 0) + exitSlippageUsd).toFixed(2)
+    );
+    trade.pnl = Number(netPnl.toFixed(2));
+    trade.pnlPercent = Number(((netPnl / Math.max(0.0001, trade.sizeUsd)) * 100).toFixed(2));
+
+    this.vitality.cash = Number((this.vitality.cash + netPnl).toFixed(2));
     this.vitality.totalTrades++;
-    this.vitality.totalPnl = Number((this.vitality.totalPnl + pnl).toFixed(2));
+    this.vitality.totalPnl = Number((this.vitality.totalPnl + netPnl).toFixed(2));
 
     if (pnl > 0) {
       this.vitality.winningTrades++;
@@ -1002,7 +1038,7 @@ export class TradingEngine {
       this.logThought(
         "SIGNAL",
         `Trade Closed: +$${pnl.toFixed(2)} (+${trade.pnlPercent}%)`,
-        `Victory secured. Vitality increased. Strict adherence to edge proved successful.`,
+        `Positive paper result recorded. Continue evaluating the full distribution of outcomes.`,
         96,
         5
       );
@@ -1015,7 +1051,7 @@ export class TradingEngine {
       this.vitality.survivalStreak = 0;
       trade.botSurvivalNote = `Loss incurred (-$${Math.abs(pnl).toFixed(
         2
-      )}). Hard stop contained damage. Analyzing mistake to avoid fatal ruin.`;
+      )}). Loss recorded. Review the trade context, costs, and regime rather than attributing causality to one trade.`;
 
       this.addNotification({
         type: status === "CLOSED_STOP_LOSS" ? "STOP_LOSS" : "MANUAL_CLOSE",
@@ -1042,7 +1078,12 @@ export class TradingEngine {
     this.vitality.winRate =
       this.vitality.totalTrades > 0
         ? Number(((this.vitality.winningTrades / this.vitality.totalTrades) * 100).toFixed(1))
-        : 100;
+        : 0;
+
+    const realizedWins = this.tradeHistory.filter((t) => t.pnl > 0).reduce((s, t) => s + t.pnl, 0) + (trade.pnl > 0 ? trade.pnl : 0);
+    const realizedLosses = this.tradeHistory.filter((t) => t.pnl < 0).reduce((s, t) => s + Math.abs(t.pnl), 0) + (trade.pnl < 0 ? Math.abs(trade.pnl) : 0);
+    this.vitality.profitFactor =
+      realizedLosses > 0 ? Number((realizedWins / realizedLosses).toFixed(2)) : realizedWins > 0 ? Number.POSITIVE_INFINITY : 0;
 
     this.tradeHistory.unshift(trade);
     strategyVaultInstance.recordTradeOutcome(this.strategy, trade);
