@@ -270,7 +270,7 @@ function computeQuantitativeStudy(data: any) {
     survivalStatus: Number.isFinite(drawdown) && drawdown >= 2 ? "DEFENSIVE" : "MONITOR",
     regimeAssessment: "Data-driven regime classification pending a sufficiently long, trusted history.",
     thoughtLog: factual,
-    survivalVow: "Research-only mode: no strategy is treated as proven from a small sample, and no model output authorizes live-money execution.",
+    riskDisciplineNote: "Research-only mode: no strategy is treated as proven from a small sample, and no model output authorizes live-money execution.",
     keyTakeaway: "Use walk-forward, out-of-sample and forward-paper evidence before changing an active strategy.",
     recommendedStrategy: { ...currentStrategy },
   };
@@ -288,7 +288,7 @@ function computeQuantitativeCritique(trade: any, marketSnapshot: any) {
       ? `Trade ${tradeId} on ${asset} realized ${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)} according to the supplied paper-trade record. No conclusion about future edge is implied.`
       : "The supplied trade record does not contain a reliable realized PnL value.",
     lesson: marketSnapshot ? "Compare the entry/exit against the contemporaneous market snapshot, fees, slippage, and strategy rules before changing the system." : "Market context was not supplied; do not invent a causal explanation.",
-    survivalHealthImpact: "No automatic risk-budget increase is authorized by a single trade outcome.",
+    riskControlImpact: "No automatic risk-budget increase is authorized by a single trade outcome.",
   };
 }
 
@@ -304,8 +304,9 @@ function computeQuantitativeMarketIntelligence(asset: string, marketSnapshot: an
     headline: marketSnapshot
       ? `${cleanAsset}: supplied market snapshot available; deeper liquidity data is not assumed.`
       : `${cleanAsset}: market-structure intelligence unavailable without a trusted snapshot.`,
-    sentimentScore: Number.isFinite(change) ? Math.max(0, Math.min(100, 50 + change * 5)) : null,
-    sentimentLabel: label,
+    // A 24h return is price momentum, not sentiment. Do not manufacture a sentiment score from price change.
+    sentimentScore: null,
+    sentimentLabel: Number.isFinite(change) ? "PRICE CHANGE ONLY" : label,
     hazardAlert: Number.isFinite(price)
       ? "Price snapshot available. Order-book depth, institutional flow and liquidity imbalance require separately sourced data."
       : "No trusted market snapshot supplied.",
