@@ -56,6 +56,20 @@ bun run lint
 bun run build
 ```
 
+## 24/7 server deployment
+
+For an always-on paper runtime, deploy the production container on an always-on machine/VPS rather than relying on the phone or laptop browser.
+
+Build and start with:
+
+```bash
+docker compose up -d --build
+```
+
+The compose file persists the paper runtime snapshot in a Docker volume. Keep `JARVIS_PAPER_AUTOSTART=false` until the strategy has completed its validation lifecycle; switch it to `true` only for an intentionally unattended paper run.
+
+The server does not require a Gemini key for deterministic trading. Gemini is an optional research/copilot dependency. Public Binance market data is also consumed without an API key; account credentials will only be required in a later live-execution phase.
+
 ## Android
 
 Use the deployed HTTPS site as a PWA for the phone UI. Installation gives a more app-like experience, but Android/browser lifecycle rules do not make a PWA a guaranteed 24/7 execution process.
