@@ -75,7 +75,7 @@ export const SecurityPinLockScreen: React.FC<SecurityPinLockScreenProps> = ({ on
         {/* Text Prompt */}
         <div className="text-center space-y-1">
           <h2 className="text-lg font-bold font-mono text-white tracking-wide">
-            AEGIS Institutional Vault
+            Jarvis Local Session Lock
           </h2>
           <p className="text-xs text-neutral-400 font-sans">
             Enter your six-digit PIN to unlock the local paper-trading session
