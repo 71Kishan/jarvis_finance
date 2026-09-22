@@ -1,6 +1,7 @@
 import express, { Request, Response } from "express";
 import http from "http";
 import path from "path";
+import { timingSafeEqual } from "crypto";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, LiveServerMessage, Modality } from "@google/genai";
 import { WebSocketServer, WebSocket } from "ws";
@@ -714,18 +715,37 @@ app.get("/api/market/live-feed", async (req: Request, res: Response) => {
   }
 });
 
+function requireControlToken(req: Request, res: Response, next: () => void) {
+  const configured = process.env.JARVIS_CONTROL_TOKEN;
+  if (!configured) {
+    return res.status(503).json({ error: "Runtime control is not configured." });
+  }
+
+  const supplied = typeof req.headers["x-jarvis-control-token"] === "string"
+    ? req.headers["x-jarvis-control-token"]
+    : "";
+  const expected = Buffer.from(configured);
+  const actual = Buffer.from(supplied);
+
+  if (expected.length === 0 || actual.length !== expected.length || !timingSafeEqual(actual, expected)) {
+    return res.status(401).json({ error: "Unauthorized runtime control request." });
+  }
+
+  next();
+}
+
 // Server-owned autonomous paper runtime controls.
 // Execution remains paper-only. Live-money broker connectivity is a separate future phase.
-app.get("/api/runtime/paper/status", (_req: Request, res: Response) => {
+app.get("/api/runtime/paper/status", requireControlToken, (_req: Request, res: Response) => {
   res.json(autonomousPaperRuntime.getStatus());
 });
 
-app.post("/api/runtime/paper/start", (_req: Request, res: Response) => {
+app.post("/api/runtime/paper/start", requireControlToken, (_req: Request, res: Response) => {
   autonomousPaperRuntime.start();
   res.json(autonomousPaperRuntime.getStatus());
 });
 
-app.post("/api/runtime/paper/stop", (_req: Request, res: Response) => {
+app.post("/api/runtime/paper/stop", requireControlToken, (_req: Request, res: Response) => {
   autonomousPaperRuntime.stop("Paper runtime stopped by operator.");
   res.json(autonomousPaperRuntime.getStatus());
 });
