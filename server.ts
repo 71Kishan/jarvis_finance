@@ -6,6 +6,7 @@ import { GoogleGenAI, LiveServerMessage, Modality } from "@google/genai";
 import { WebSocketServer, WebSocket } from "ws";
 import dotenv from "dotenv";
 import { BinanceMarketDataService } from "./src/server/binanceMarketData";
+import { AutonomousPaperRuntime } from "./src/server/paperRuntime";
 
 dotenv.config();
 
@@ -249,6 +250,11 @@ app.get("/api/health", (_req: Request, res: Response) => {
       provider: "BINANCE_WEBSOCKET",
       ...market,
     },
+    autonomousPaper: {
+      status: autonomousPaperRuntime.getStatus().status,
+      symbol: autonomousPaperRuntime.getStatus().symbol,
+      lastProcessedCandleAt: autonomousPaperRuntime.getStatus().lastProcessedCandleAt,
+    },
     timestamp: Date.now(),
   });
 });
@@ -323,7 +329,16 @@ const STOCK_UNIVERSE: Record<string, { name: string; category: "STOCK" | "INDEX"
 // One server-owned websocket gateway supplies crypto market data to every client.
 // The mobile/desktop UI is intentionally not responsible for keeping the market connection alive.
 const binanceMarketData = new BinanceMarketDataService(SYMBOL_MAP);
+const autonomousPaperRuntime = new AutonomousPaperRuntime(binanceMarketData, {
+  symbol: process.env.JARVIS_PAPER_SYMBOL || "BTC/USD",
+  initialCapital: Number(process.env.JARVIS_PAPER_INITIAL_CAPITAL) || 10_000,
+  pollIntervalMs: Number(process.env.JARVIS_PAPER_POLL_MS) || 1000,
+});
 void binanceMarketData.start();
+
+if (process.env.JARVIS_PAPER_AUTOSTART === "true") {
+  autonomousPaperRuntime.start();
+}
 
 
 function computeQuantitativeMarketIntelligence(asset: string, marketSnapshot: any = null) {
@@ -697,6 +712,22 @@ app.get("/api/market/live-feed", async (req: Request, res: Response) => {
     console.error("Live market data error:", error?.message || error);
     return res.status(503).json({ success: false, status: "DATA_UNAVAILABLE", error: error?.message || "Trusted market data provider unavailable." });
   }
+});
+
+// Server-owned autonomous paper runtime controls.
+// Execution remains paper-only. Live-money broker connectivity is a separate future phase.
+app.get("/api/runtime/paper/status", (_req: Request, res: Response) => {
+  res.json(autonomousPaperRuntime.getStatus());
+});
+
+app.post("/api/runtime/paper/start", (_req: Request, res: Response) => {
+  autonomousPaperRuntime.start();
+  res.json(autonomousPaperRuntime.getStatus());
+});
+
+app.post("/api/runtime/paper/stop", (_req: Request, res: Response) => {
+  autonomousPaperRuntime.stop("Paper runtime stopped by operator.");
+  res.json(autonomousPaperRuntime.getStatus());
 });
 
 // Setup Vite/static serving and the long-lived WebSocket gateway only inside the async server bootstrap.
