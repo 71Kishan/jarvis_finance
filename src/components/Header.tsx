@@ -283,7 +283,7 @@ export const Header: React.FC<HeaderProps> = ({
                 id="header-open-voice-btn"
                 type="button"
                 onClick={() => onOpenCopilot("VOICE")}
-                title="Direct Live Voice Interaction (gemini-3.8-live)"
+                title="Live voice research assistant"
                 className="px-2 py-1.5 border-l border-indigo-500/30 hover:bg-indigo-600/30 text-indigo-300 transition-colors"
               >
                 <Mic className="w-3.5 h-3.5 text-indigo-400" />
@@ -291,7 +291,7 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
           )}
 
-          {/* Cold Storage Profit Vault Button */}
+          {/* Paper Profit Reserve Button */}
           {onOpenProfitVault && (
             <button
               id="header-open-profit-vault-btn"
@@ -309,7 +309,7 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               id="header-open-radar-btn"
               onClick={onOpenRadar}
-              title="Autonomous Multi-Market Opportunity Scanner"
+              title="Review supported assets from connected market-data sources"
               className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-neutral-900 hover:bg-neutral-800 text-neutral-300 border border-neutral-800 text-xs font-mono transition-colors"
             >
               <Radar className="w-3.5 h-3.5 text-indigo-400" />
@@ -322,7 +322,7 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               id="header-open-vault-btn"
               onClick={onOpenVault}
-              title="Strategy Memory Vault & Anti-Duplication"
+              title="Strategy evidence journal and validation states"
               className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-neutral-900 hover:bg-neutral-800 text-neutral-300 border border-neutral-800 text-xs font-mono transition-colors"
             >
               <BookOpen className="w-3.5 h-3.5 text-emerald-400" />
@@ -343,7 +343,7 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
           )}
 
-          {/* 24/7 Market Hours & Android Auto-Pilot Button */}
+          {/* Market Sessions & Runtime Button */}
           {onOpenMarketHours && (
             <button
               id="header-open-market-hours-btn"
@@ -361,7 +361,7 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               id="header-open-security-vault-btn"
               onClick={onOpenSecurityVault}
-              title="Security Vault, Legal Compliance & Cryptographic Ledger"
+              title="Security controls, disclosures and local audit checks"
               className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs font-mono transition-colors cursor-pointer"
             >
               <Shield className="w-3.5 h-3.5 text-emerald-400" />
