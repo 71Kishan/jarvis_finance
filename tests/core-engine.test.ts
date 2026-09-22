@@ -24,6 +24,11 @@ describe("execution model", () => {
     const result = resolveStopTarget("LONG", { open: 100, high: 105, low: 95, close: 101 }, 97, 103);
     expect(result).toEqual({ kind: "STOP", price: 97, ambiguous: true });
   });
+
+  test("models a gap-through stop at the bar open", () => {
+    const result = resolveStopTarget("LONG", { open: 94, high: 101, low: 93, close: 96 }, 97, 103);
+    expect(result).toEqual({ kind: "STOP", price: 94, ambiguous: false });
+  });
   test("calculates long and short gross PnL", () => {
     expect(grossPnL("LONG", 100, 110, 2)).toBe(20);
     expect(grossPnL("SHORT", 100, 90, 2)).toBe(20);
@@ -78,9 +83,21 @@ describe("signal engine", () => {
   });
   test("requires multi-factor confluence", () => {
     const rows = Array.from({ length: 60 }, (_, i) => candle(i + 1));
-    const result = evaluateSignal(rows[rows.length - 1], rows, DEFAULT_STRATEGY);
+    const testStrategy = {
+      ...DEFAULT_STRATEGY,
+      minConfidence: 70,
+      indicatorWeights: {
+        trendEMA: 1,
+        rsiReversal: 1,
+        bollingerMeanReversion: 1,
+        macdMomentum: 1,
+        volumeConfirmation: 1,
+      },
+    };
+    const result = evaluateSignal(rows[rows.length - 1], rows, testStrategy);
     expect(result.direction).toBe("LONG");
-    expect(result.score).toBeGreaterThanOrEqual(DEFAULT_STRATEGY.minConfidence);
+    expect(result.score).toBe(100);
+    expect(result.score).toBeGreaterThanOrEqual(testStrategy.minConfidence);
     expect(result.eligible).toBe(true);
   });
 });
