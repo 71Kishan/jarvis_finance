@@ -41,7 +41,7 @@ const QUICK_PROMPTS = [
   "Analyze current market regime & indicators",
   "Audit my win rate and active position",
   "Explain the EMA + RSI + BB confluence formula",
-  "Can this terminal run unattended 24/7?",
+  "What can run while my phone is offline?",
 ];
 
 const INITIAL_MESSAGES: ChatMessage[] = [
@@ -49,7 +49,7 @@ const INITIAL_MESSAGES: ChatMessage[] = [
     id: "welcome-1",
     role: "model",
     timestamp: Date.now() - 30000,
-    content: `### **Welcome to Jarvis Finance AI Copilot**\n\nI am your institutional quantitative advisor and terminal specialist. Ask me anything about the **Jarvis Finance Autonomous Terminal**, mathematical formulas, **Circuit Breaker capital preservation**, or **Automated Profit Withdrawals**.\n\n*Select any prompt below or type your inquiry.*`,
+    content: `### **Welcome to Jarvis Finance AI Copilot**\n\nI am your research assistant and terminal specialist. Ask me anything about the **Jarvis Finance Autonomous Terminal**, mathematical formulas, **configured risk controls**, or **paper reserve transfers**.\n\n*Select any prompt below or type your inquiry.*`,
     modelUsed: "gemini-3.5-flash",
   },
 ];
