@@ -18,16 +18,19 @@ app.use(express.json({ limit: "250kb" }));
 app.use((req: Request, res: Response, next) => {
   // Prevent MIME-sniffing exploits
   res.setHeader("X-Content-Type-Options", "nosniff");
-  // Cross-Site Scripting filter
-  res.setHeader("X-XSS-Protection", "1; mode=block");
+  // X-XSS-Protection is obsolete; rely on output encoding and a CSP at the deployment edge.
   // Referrer leakage prevention
   res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
   // Restrict intrusive hardware permissions (allow microphone for voice interactions)
   res.setHeader("Permissions-Policy", "camera=(), microphone=(self), geolocation=(), payment=()");
   // Prevent unauthorized file execution in older IE/Edge
   res.setHeader("X-Download-Options", "noopen");
-  // DNS prefetch control
-  res.setHeader("X-DNS-Prefetch-Control", "off");
+  // API responses are time-sensitive and should not be cached.
+  res.setHeader("Cache-Control", "no-store");
+  res.setHeader("Cross-Origin-Resource-Policy", "same-origin");
+  if (process.env.NODE_ENV === "production") {
+    res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+  }
   // Remove X-Powered-By to prevent technology fingerprinting
   res.removeHeader("X-Powered-By");
   next();
@@ -102,7 +105,8 @@ function computeQuantitativeStudy(data: any) {
   const currentStrategy = data?.currentStrategy || {};
   const equityStats = data?.equityStats || {};
   const drawdown = Number(data?.drawdownPercent || 0);
-  const winRate = Number(equityStats?.winRate || 62);
+  const hasTradeEvidence = Number.isFinite(equityStats?.winRate) && Number(equityStats?.totalTrades) > 0;
+  const winRate = hasTradeEvidence ? Number(equityStats.winRate) : 0;
   const rsi = Number(data?.marketContext?.rsi || 50);
 
   let regime = "Volatility Compression & Mean-Reverting Channel";
@@ -112,16 +116,13 @@ function computeQuantitativeStudy(data: any) {
     regime = "Bearish Breakdown with Volume Divergence";
   }
 
-  let survivalStatus: "THRIVING" | "ALERT" | "DEFENSIVE" = "THRIVING";
-  if (drawdown > 2.0) {
-    survivalStatus = "DEFENSIVE";
-  } else if (winRate < 50) {
-    survivalStatus = "ALERT";
-  }
+  let survivalStatus: "THRIVING" | "ALERT" | "DEFENSIVE" = hasTradeEvidence ? "ALERT" : "DEFENSIVE";
+  if (drawdown > 2.0) survivalStatus = "DEFENSIVE";
+  else if (hasTradeEvidence && winRate >= 50) survivalStatus = "THRIVING";
 
-  const minConfidence = Math.min(88, Math.max(74, winRate < 50 ? 82 : (currentStrategy.minConfidence || 75) + 1));
-  const stopLossPercent = Number(Math.max(0.6, Math.min(1.4, (currentStrategy.stopLossPercent || 1.1) * (drawdown > 1.5 ? 0.92 : 1.0))).toFixed(2));
-  const takeProfitPercent = Number(Math.max(2.4, Math.min(4.5, stopLossPercent * 2.6)).toFixed(2));
+  const minConfidence = Number(currentStrategy.minConfidence || 78);
+  const stopLossPercent = Number(currentStrategy.stopLossPercent || 1);
+  const takeProfitPercent = Number(currentStrategy.takeProfitPercent || 2);
 
   return {
     survivalStatus,
@@ -159,8 +160,8 @@ function computeQuantitativeCritique(trade: any, marketSnapshot: any) {
   return {
     verdict: isWin ? "PROFIT TARGET EXECUTED - ASYMMETRIC ALPHA SECURED" : "CAPITAL PRESERVATION DEFENSE - LOSS HARD-CAPPED",
     autopsy: isWin
-      ? `Position ${tradeId} on ${asset} executed within projected risk parameters. Captured +$${pnl.toFixed(2)} return with positive statistical expectancy.`
-      : `Position ${tradeId} on ${asset} reached defensive stop boundary at -$${Math.abs(pnl).toFixed(2)}. Automated circuit mitigation prevented further drawdown.`,
+      ? `Position ${tradeId} on ${asset} executed within projected risk parameters. Captured +$${pnl.toFixed(2)} return with one winning outcome does not establish statistical expectancy.`
+      : `Position ${tradeId} on ${asset} reached defensive stop boundary at -$${Math.abs(pnl).toFixed(2)}. The recorded stop or exit is a simulation assumption; it does not prove real-world fill quality.`,
     lesson: isWin
       ? "Reinforce entry patience when momentum oscillators and exponential moving averages converge with order-book depth."
       : "Ensure multi-period ATR volatility filters are satisfied prior to placing breakout orders.",
@@ -337,8 +338,7 @@ const SYMBOL_MAP: Record<string, string> = {
   "SOL/USD": "SOLUSDT",
   "DOGE/USD": "DOGEUSDT",
   "XRP/USD": "XRPUSDT",
-  "EUR/USD": "EURUSDT",
-  "GBP/USD": "GBPUSDT",
+  // FX symbols are intentionally not mapped to crypto pairs.
 };
 
 const BASE_PRICES: Record<string, { price: number; category: "CRYPTO" | "STOCK" | "INDEX" | "FOREX"; name: string }> = {
