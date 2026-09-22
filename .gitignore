@@ -6,3 +6,8 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Local durable paper-runtime state (never commit account state)
+data/paper-runtime.json
+data/paper-runtime.json.tmp-*
+data/paper-runtime.json.corrupt-*
