@@ -455,20 +455,6 @@ Snapshot: ${JSON.stringify(marketSnapshot || {}, null, 2)}`;
 });
 
 app.get("/api/market/multi-scan", async (req: Request, res: Response) => {
-  try {
-    const minConfidence = parseInt(req.query.minConfidence as string) || 75;
-
-    // Fetch Binance tickers for crypto & forex in one fast batch request
-    let binanceTickerMap: Record<string, any> = {};
-    try {
-      const bRes = await fetch("https://api.binance.com/api/v3/ticker/24hr", {
-        headers: { "User-Agent": "AutonomousTradingBot/1.0" },
-      });
-      if (bRes.ok) {
-        const list = await bRes.json();
-        for (const item of list) {
-          binanceTickerMap[item.symbol] = item;
-        app.get("/api/market/multi-scan", async (req: Request, res: Response) => {
   const minScore = Math.min(95, Math.max(50, Number(req.query.minConfidence) || 70));
   const symbols = [...Object.keys(SYMBOL_MAP), ...Object.keys(STOCK_UNIVERSE)];
   try {
