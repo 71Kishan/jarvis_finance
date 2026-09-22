@@ -216,8 +216,7 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
         <div>
           <div className="text-[10px] text-neutral-400 font-sans">24h High / Low</div>
           <div className="text-neutral-300 text-[11px]">
-            ${ticker?.high24h?.toFixed(1) || (currentPrice * 1.02).toFixed(1)} / $
-            {ticker?.low24h?.toFixed(1) || (currentPrice * 0.98).toFixed(1)}
+            {ticker?.high24h ? `${ticker.high24h.toFixed(1)}` : "—"} / {ticker?.low24h ? `${ticker.low24h.toFixed(1)}` : "—"}
           </div>
         </div>
         <div>
@@ -238,7 +237,7 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
           <div>
             <div className="flex items-center gap-2">
               <span className="text-xs font-bold text-neutral-200">
-                Daily Goal: ${dailyGoal.dailyTargetUsd.toFixed(0)}/day
+                Daily Process: risk discipline & evidence
               </span>
               <span
                 className={`text-[10px] font-mono font-bold px-1.5 py-0.2 rounded ${
@@ -274,7 +273,7 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
             title="Runs one fresh rules-based paper scan; it will not enter unless the signal and risk gates both pass"
           >
             <Zap className="w-4 h-4 fill-white" />
-            <span>⚡ Run 1 Trade to Verify</span>
+            <span>⚡ Run Qualified Scan</span>
           </button>
 
           {/* MULTI-ASSET RADAR BUTTON */}
@@ -283,7 +282,7 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
             type="button"
             onClick={onOpenMultiAssetRadar}
             className="px-3 py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 font-semibold text-xs rounded-xl flex items-center gap-1.5 transition-colors border border-neutral-700"
-            title="Scan 12 assets across Crypto, Stocks, Forex & Indices"
+            title="Review supported assets from trusted market-data sources"
           >
             <Radar className="w-4 h-4 text-indigo-400" />
             <span>Multi-Market Radar</span>
