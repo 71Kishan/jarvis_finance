@@ -304,3 +304,18 @@ export interface EquityCurvePoint {
   cumulativePnl: number;
   tradeEvent?: string;
 }
+
+export interface TradingEngineRuntimeState {
+  version: 1;
+  savedAt: number;
+  vitality: BotVitality;
+  botState: BotState;
+  strategy: StrategyConfig;
+  activeTrade: Trade | null;
+  tradeHistory: Trade[];
+  thoughts: BotThoughtLog[];
+  notifications: ActionNotification[];
+  equityCurve: EquityCurvePoint[];
+  profitWithdrawals: ProfitWithdrawalRecord[];
+  lastProcessedCandleTimestamp: number;
+}
