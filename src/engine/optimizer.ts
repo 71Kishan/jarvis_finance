@@ -109,19 +109,19 @@ export class StrategyOptimizer {
             consecutiveLosses += 1;
             lastLossAtMs = candle.timestamp;
           }
-        }
-      } else {
-        // No exit occurred on this bar. Update the trailing stop only now so it
-        // becomes effective starting with the next bar.
-        if (position.type === "LONG") {
-          position.highestPrice = Math.max(position.highestPrice, candle.high);
-          if (s.trailingStop) {
-            position.stopLoss = Math.max(position.stopLoss, position.highestPrice * (1 - s.trailingStopPercent / 100));
-          }
         } else {
-          position.lowestPrice = Math.min(position.lowestPrice, candle.low);
-          if (s.trailingStop) {
-            position.stopLoss = Math.min(position.stopLoss, position.lowestPrice * (1 + s.trailingStopPercent / 100));
+          // No exit occurred on this bar. Update the trailing stop only now so it
+          // becomes effective starting with the next bar.
+          if (position.type === "LONG") {
+            position.highestPrice = Math.max(position.highestPrice, candle.high);
+            if (s.trailingStop) {
+              position.stopLoss = Math.max(position.stopLoss, position.highestPrice * (1 - s.trailingStopPercent / 100));
+            }
+          } else {
+            position.lowestPrice = Math.min(position.lowestPrice, candle.low);
+            if (s.trailingStop) {
+              position.stopLoss = Math.min(position.stopLoss, position.lowestPrice * (1 + s.trailingStopPercent / 100));
+            }
           }
         }
       }
