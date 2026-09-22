@@ -90,6 +90,12 @@ describe("automated paper entry timing", () => {
     expect(engine.getActiveTrade()).toBeNull();
 
     engine.onTick(nextBar, [...signalBars, nextBar]);
+    console.log("DEBUG_AUTO_ENTRY", JSON.stringify({
+      signal: engine.getLastSignal(),
+      state: engine.getBotState(),
+      thoughts: engine.getThoughts().slice(0, 3),
+      vitality: engine.getVitality(),
+    }));
     const trade = engine.getActiveTrade();
     expect(trade).not.toBeNull();
     expect(trade?.entryPrice).toBeGreaterThan(nextBar.open);
