@@ -585,28 +585,28 @@ app.get("/api/market/multi-scan", async (req: Request, res: Response) => {
   try {
     const opportunities = await Promise.all(symbols.map(async (symbol) => {
       const cryptoPair = SYMBOL_MAP[symbol];
-      if (cryptoPair && binanceTickerMap[cryptoPair]) {
-        const raw = binanceTickerMap[cryptoPair];
-        const price = Number(raw.lastPrice);
-        const change = Number(raw.priceChangePercent);
-        const score = Math.min(95, Math.round(50 + Math.min(30, Math.abs(change) * 4)));
-        const direction = change > 0 ? "LONG" : change < 0 ? "SHORT" : "NEUTRAL";
-        return {
-          symbol,       const cryptoTicker = binanceMarketData.getTicker(symbol);
+      const cryptoTicker = cryptoPair ? binanceMarketData.getTicker(symbol) : null;
       if (cryptoPair && cryptoTicker) {
         const change = Number(cryptoTicker.change24hPercent);
         const price = Number(cryptoTicker.price);
         const score = Math.min(95, Math.round(50 + Math.min(30, Math.abs(change) * 4)));
         const direction = change > 0 ? "LONG" : change < 0 ? "SHORT" : "NEUTRAL";
         return {
-          symbol, name: symbol.replace("/", " / "), category: "CRYPTO", price, change24hPercent: change,
-          score, bestDirection: direction, rsi: null, trend: direction === "LONG" ? "BULLISH" : direction === "SHORT" ? "BEARISH" : "SIDEWAYS",
-          volatility: Math.abs(change), isEligible: false,
+          symbol,
+          name: symbol.replace("/", " / "),
+          category: "CRYPTO",
+          price,
+          change24hPercent: change,
+          score,
+          bestDirection: direction,
+          rsi: null,
+          trend: direction === "LONG" ? "BULLISH" : direction === "SHORT" ? "BEARISH" : "SIDEWAYS",
+          volatility: Math.abs(change),
+          isEligible: false,
           scanVerdict: score >= minScore ? "REVIEW — MOMENTUM SCREEN" : "ABSTAIN — LOW MOMENTUM",
           rationale: "24h momentum screen only. A trade requires the full deterministic candle-based signal and risk checks.",
           dataSource: "BINANCE",
         };
-      } };
       }
 
       try {
