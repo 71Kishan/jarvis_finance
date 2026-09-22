@@ -148,7 +148,7 @@ export default function App() {
     if (newState === "HALTED_DEAD") {
       setIsEmergencyModalOpen(true);
     }
-  }, []);
+  }, [marketSource]);
 
   // Hook state sync callback to engine
   useEffect(() => {
