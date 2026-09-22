@@ -269,19 +269,9 @@ export const MarketHoursModal: React.FC<MarketHoursModalProps> = ({
                   A server-side scheduler may change the research universe across market sessions. Do not treat weekend crypto rotation as a promise of continuous profitability or unattended Android execution.
                 </p>
               </div>
-
-              <button
-                id="toggle-modal-auto-rotate-btn"
-                type="button"
-                onClick={onToggleAutoRotate}
-                className={`px-3 py-1.5 rounded-xl font-mono text-xs font-bold transition-all cursor-pointer ${
-                  autoRotateAssets
-                    ? "bg-emerald-500 text-black shadow-md shadow-emerald-500/20"
-                    : "bg-neutral-800 text-neutral-400 hover:text-white"
-                }`}
-              >
-                {autoRotateAssets ? "AUTO-SWITCH ACTIVE" : "DISABLED"}
-              </button>
+              <span className="px-3 py-1.5 rounded-xl font-mono text-xs font-bold bg-neutral-800 text-neutral-400 border border-neutral-700">
+                SERVER SCHEDULER NOT CONNECTED
+              </span>
             </div>
           </div>
         </div>
