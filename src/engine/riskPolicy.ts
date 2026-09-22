@@ -1,5 +1,7 @@
 import { Candle, RiskPolicyConfig, StrategyConfig } from "../types/trading";
 
+export type { RiskPolicyConfig };
+
 export const DEFAULT_RISK_POLICY: RiskPolicyConfig = {
   maxDailyLossPercent: 2,
   maxPeakDrawdownPercent: 6,
