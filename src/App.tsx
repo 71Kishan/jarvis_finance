@@ -257,6 +257,16 @@ export default function App() {
 
   // Handle Asset Switch
   const handleSelectAsset = (asset: AssetSymbol) => {
+    if (activeTrade) {
+      tradingEngineRef.current?.addNotification({
+        type: "RISK_ALERT",
+        title: "Asset switch blocked",
+        message: "Close the active paper position before changing assets. Position context must remain fixed until exit.",
+        badgeText: "LOCKED",
+      });
+      syncStateFromEngine();
+      return;
+    }
     setCurrentAsset(asset);
     if (simulatorRef.current && tradingEngineRef.current) {
       simulatorRef.current.setAsset(asset, 80);
