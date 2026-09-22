@@ -22,7 +22,7 @@ export const DEFAULT_STRATEGY: StrategyConfig = {
   version: 1,
   asset: "BTC/USD",
   description:
-    "Ultra-disciplined asymmetric quant strategy targeting 85%+ win-rate with multi-layer trend & volatility confirmations.",
+    "Paper-trading baseline using multi-indicator technical confluence. Signal score is a heuristic, not a probability guarantee.",
   rsiOversold: 34,
   rsiOverbought: 68,
   stopLossPercent: 0.9,
@@ -146,9 +146,12 @@ export class TradingEngine {
     this.logThought(
       "STUDY",
       "Consciousness Initialized",
-      `Primary directive: Stay alive. Capital limit is $${initialCapital.toLocaleString()}. If loss reaches ${circuitBreakerThresholdPercent}%, emergency circuit breaker will terminate me. Studying market patterns to ensure every trade is profitable.`,
+      `Primary directive: Stay alive. Capital limit is ${initialCapital.toLocaleString()}. If loss reaches ${circuitBreakerThresholdPercent}%, emergency circuit breaker will terminate me. Studying market patterns to ensure every trade is profitable.`,
       95
     );
+
+    // Restore paper state across browser/PWA restarts. Live brokerage state is not stored here.
+    this.restoreState();
   }
 
   public setOnStateChange(cb?: () => void) {
@@ -167,16 +170,62 @@ export class TradingEngine {
     return this.strategy;
   }
 
-  public updateStrategy(newStrat: StrategyConfig) {
-    this.strategy = { ...newStrat };
+  public updateStrategy(newStrat: StrategyConfig): boolean {
+    if (this.activeTrade) {
+      this.logThought(
+        "DEFENSE",
+        "Strategy update rejected",
+        "Do not mutate strategy parameters while a position is open. Close or finish the paper position first.",
+        0
+      );
+      this.notify();
+      return false;
+    }
+
+    const values = [
+      newStrat.minConfidence,
+      newStrat.rsiOversold,
+      newStrat.rsiOverbought,
+      newStrat.stopLossPercent,
+      newStrat.takeProfitPercent,
+      newStrat.trailingStopPercent,
+      newStrat.maxRiskPerTrade,
+    ];
+
+    if (
+      values.some((value) => !Number.isFinite(value)) ||
+      newStrat.minConfidence < 0 ||
+      newStrat.minConfidence > 100 ||
+      newStrat.stopLossPercent <= 0 ||
+      newStrat.takeProfitPercent <= 0 ||
+      newStrat.maxRiskPerTrade <= 0 ||
+      newStrat.maxRiskPerTrade > 5 ||
+      newStrat.rsiOversold >= newStrat.rsiOverbought
+    ) {
+      this.logThought(
+        "DEFENSE",
+        "Strategy update rejected",
+        "Invalid risk or indicator parameters. Jarvis refuses malformed strategy configurations.",
+        0
+      );
+      this.notify();
+      return false;
+    }
+
+    this.strategy = {
+      ...newStrat,
+      indicatorWeights: { ...newStrat.indicatorWeights },
+      rules: [...newStrat.rules],
+    };
     this.vitality.generationsLearned++;
     this.logThought(
       "OPTIMIZATION",
-      `Strategy Evolved to Gen ${this.vitality.generationsLearned}`,
-      `Optimized parameters: Min confidence ${newStrat.minConfidence}%, SL ${newStrat.stopLossPercent}%, TP ${newStrat.takeProfitPercent}%. Re-calibrated for maximum survival probability.`,
+      `Strategy updated to paper generation ${this.vitality.generationsLearned}`,
+      `Applied paper-only parameters: signal threshold ${newStrat.minConfidence}, SL ${newStrat.stopLossPercent}%, TP ${newStrat.takeProfitPercent}%. Future validation is still required before any live deployment.`,
       newStrat.minConfidence
     );
     this.notify();
+    return true;
   }
 
   public getActiveTrade(): Trade | null {
@@ -388,15 +437,46 @@ export class TradingEngine {
     }
 
     const { type, amountUsd, leverage, stopLossPercent, takeProfitPercent, trailingStop, manualNote } = request;
-    const marginAllocated = Math.min(amountUsd, this.vitality.cash * 0.95);
-    const positionSizeUsd = marginAllocated * leverage;
-    
+    const safeLeverage = Number(Math.max(1, Math.min(3, leverage)).toFixed(2));
+    const marginAllocated = Math.min(Math.max(10, amountUsd), this.vitality.cash * 0.95);
+    const positionSizeUsd = marginAllocated * safeLeverage;
+
+    if (
+      !Number.isFinite(marginAllocated) ||
+      !Number.isFinite(positionSizeUsd) ||
+      stopLossPercent <= 0 ||
+      takeProfitPercent <= 0 ||
+      marginAllocated < 10
+    ) {
+      return false;
+    }
+
+    const maxLossBudget =
+      this.vitality.currentEquity *
+      (Math.min(this.strategy.maxRiskPerTrade, this.vitality.circuitBreakerThresholdPercent * 0.4) / 100);
+    const modeledStopLoss = positionSizeUsd * (stopLossPercent / 100);
+    if (modeledStopLoss > maxLossBudget) {
+      this.logThought(
+        "DEFENSE",
+        "Paper order rejected by risk budget",
+        `Configured stop risk of ${modeledStopLoss.toFixed(2)} exceeds the current per-trade risk budget of ${maxLossBudget.toFixed(2)}.`,
+        0
+      );
+      this.notify();
+      return false;
+    }
+
     // Slippage calculation
-    const slippageMultiplier = type === "LONG" ? (1 + this.paperSettings.slippageBps / 10000) : (1 - this.paperSettings.slippageBps / 10000);
+    const slippageMultiplier =
+      type === "LONG"
+        ? 1 + this.paperSettings.slippageBps / 10000
+        : 1 - this.paperSettings.slippageBps / 10000;
     const entryPrice = Number((currentPrice * slippageMultiplier).toFixed(2));
-    
-    // Fee deduction
-    const feeUsd = Number((positionSizeUsd * (this.paperSettings.feeTierPercent / 100)).toFixed(2));
+
+    // Entry fee is paid immediately; the notional remains simulated exposure.
+    const feeUsd = Number(
+      (positionSizeUsd * (this.paperSettings.feeTierPercent / 100)).toFixed(2)
+    );
     this.vitality.cash = Math.max(0, this.vitality.cash - feeUsd);
 
     const amount = Number((positionSizeUsd / entryPrice).toFixed(4));
@@ -414,6 +494,10 @@ export class TradingEngine {
       entryPrice,
       amount,
       sizeUsd: positionSizeUsd,
+      marginUsd: marginAllocated,
+      leverage: safeLeverage,
+      entryFeeUsd: feeUsd,
+      slippageUsd: Number((positionSizeUsd * (this.paperSettings.slippageBps / 10000)).toFixed(2)),
       entryTime: Date.now(),
       stopLoss,
       takeProfit,
@@ -423,8 +507,8 @@ export class TradingEngine {
       pnlPercent: 0,
       status: "OPEN",
       confidence: 90,
-      rationale: manualNote || `Manual Paper Order: ${leverage}x leverage. SL ${stopLossPercent}%, TP ${takeProfitPercent}%.`,
-      botSurvivalNote: `User-authorized paper order active. Live market protection online.`,
+      rationale: manualNote || `Manual paper order: ${safeLeverage}x leverage. SL ${stopLossPercent}%, TP ${takeProfitPercent}%.`,
+      botSurvivalNote: `User-authorized paper order. Simulated execution only; no broker order was sent.`,
     };
 
     this.activeTrade = trade;
@@ -432,8 +516,8 @@ export class TradingEngine {
 
     this.addNotification({
       type: "TRADE_OPENED",
-      title: `Manual Order Filled: ${type} ${this.strategy.asset}`,
-      message: `Executed @ $${entryPrice.toLocaleString()} | Size: $${positionSizeUsd.toFixed(2)} (${leverage}x) | SL: $${stopLoss} | TP: $${takeProfit}`,
+      title: `Paper Order Filled: ${type} ${this.strategy.asset}`,
+      message: `Simulated @ ${entryPrice.toLocaleString()} | Notional ${positionSizeUsd.toFixed(2)} (${safeLeverage}x) | SL: ${stopLoss} | TP: ${takeProfit}`,
       badgeText: type,
       details: {
         asset: this.strategy.asset,
@@ -446,8 +530,8 @@ export class TradingEngine {
 
     this.logThought(
       "EXECUTION",
-      `Paper Trade Executed: ${type} ${this.strategy.asset} (${leverage}x)`,
-      `Filled @ $${entryPrice.toLocaleString()} | Size: $${positionSizeUsd.toFixed(2)} | Fee: $${feeUsd.toFixed(2)} | SL: $${stopLoss.toLocaleString()} | TP: $${takeProfit.toLocaleString()}`,
+      `Paper Trade Executed: ${type} ${this.strategy.asset} (${safeLeverage}x)`,
+      `Simulated @ ${entryPrice.toLocaleString()} | Notional: ${positionSizeUsd.toFixed(2)} | Entry fee: ${feeUsd.toFixed(2)} | SL: ${stopLoss.toLocaleString()} | TP: ${takeProfit.toLocaleString()}`,
       90
     );
 
@@ -457,81 +541,22 @@ export class TradingEngine {
   }
 
   // Instantly run a verified paper trade on the live market
-  public runImmediateVerifiedTrade(currentPrice: number, preferredType?: "LONG" | "SHORT"): Trade | null {
-    if (this.botState === "HALTED_DEAD") {
-      this.reviveBot();
-    }
-    if (this.activeTrade) {
-      return this.activeTrade;
-    }
-
-    const type: "LONG" | "SHORT" = preferredType || "LONG";
-    const amountUsd = Math.min(800, Math.max(150, this.vitality.cash * 0.08));
-    const leverage = this.paperSettings.leverage || 2;
-    const positionSizeUsd = amountUsd * leverage;
-    const entryPrice = currentPrice;
-    const amount = positionSizeUsd / entryPrice;
-
-    const slPercent = this.strategy.stopLossPercent || 0.9;
-    const tpPercent = this.strategy.takeProfitPercent || 2.2;
-
-    const stopLoss =
-      type === "LONG"
-        ? Number((entryPrice * (1 - slPercent / 100)).toFixed(2))
-        : Number((entryPrice * (1 + slPercent / 100)).toFixed(2));
-
-    const takeProfit =
-      type === "LONG"
-        ? Number((entryPrice * (1 + tpPercent / 100)).toFixed(2))
-        : Number((entryPrice * (1 - tpPercent / 100)).toFixed(2));
-
-    const trade: Trade = {
-      id: `trade-verified-${Date.now()}`,
-      asset: this.strategy.asset,
-      type,
-      entryPrice,
-      amount,
-      sizeUsd: positionSizeUsd,
-      entryTime: Date.now(),
-      stopLoss,
-      takeProfit,
-      highestPrice: entryPrice,
-      lowestPrice: entryPrice,
-      pnl: 0,
-      pnlPercent: 0,
-      status: "OPEN",
-      confidence: 94,
-      rationale: `Instant Verified Paper Trade: User initiated live execution verification on ${this.strategy.asset}`,
-      botSurvivalNote: "Live verification trade active. Real-time bracket protection engaged.",
-    };
-
-    this.activeTrade = trade;
-    this.botState = "IN_POSITION";
-
-    this.addNotification({
-      type: "TRADE_OPENED",
-      title: `Verified Trade Dispatched: ${type} ${this.strategy.asset}`,
-      message: `Direct verification order filled @ $${entryPrice.toLocaleString()} | Size: $${positionSizeUsd.toFixed(2)} (${leverage}x leverage) | SL: $${stopLoss} | TP: $${takeProfit}`,
-      badgeText: "VERIFIED",
-      details: {
-        asset: this.strategy.asset,
-        price: entryPrice,
-        size: positionSizeUsd,
-      },
-    });
-
-    this.recordEquitySnapshot(entryPrice, `Verified Fill ${type} ${this.strategy.asset}`);
-
+  /**
+   * Deprecated safety shim.
+   *
+   * Jarvis no longer offers an "instant verified trade" path because a
+   * professional system should never open a position merely to prove that
+   * execution works. Use an explicit paper order after a signal/risk check.
+   */
+  public runImmediateVerifiedTrade(_currentPrice: number, _preferredType?: "LONG" | "SHORT"): Trade | null {
     this.logThought(
-      "EXECUTION",
-      `Verified Live Trade Active: ${type} ${this.strategy.asset}`,
-      `Immediate execution confirmed @ $${entryPrice.toLocaleString()} | Allocated: $${positionSizeUsd.toFixed(2)} (${leverage}x leverage) | SL: $${stopLoss.toLocaleString()} | TP: $${takeProfit.toLocaleString()}. Live trailing stop active.`,
-      94
+      "DEFENSE",
+      "Instant verification trade blocked",
+      "Execution verification must use a normal, explicitly configured paper order. No automatic side selection and no automatic revival after a halt.",
+      0
     );
-
-    soundFx.playOrderFilled();
     this.notify();
-    return trade;
+    return null;
   }
 
   // Force system to evaluate current indicators and either enter or explain risk abstention
@@ -1242,7 +1267,62 @@ export class TradingEngine {
     }
   }
 
+  public exportState() {
+    return {
+      version: 1,
+      vitality: this.vitality,
+      botState: this.botState,
+      strategy: this.strategy,
+      activeTrade: this.activeTrade,
+      tradeHistory: this.tradeHistory,
+      thoughts: this.thoughts,
+      notifications: this.notifications,
+      equityCurve: this.equityCurve,
+      paperSettings: this.paperSettings,
+      profitWithdrawals: this.profitWithdrawals,
+    };
+  }
+
+  public persistState() {
+    if (typeof window === "undefined") return;
+    try {
+      localStorage.setItem(
+        "jarvis_trading_runtime_v1",
+        JSON.stringify(this.exportState())
+      );
+    } catch {
+      // Keep the engine usable even when browser storage is unavailable.
+    }
+  }
+
+  public restoreState(): boolean {
+    if (typeof window === "undefined") return false;
+    try {
+      const raw = localStorage.getItem("jarvis_trading_runtime_v1");
+      if (!raw) return false;
+      const saved = JSON.parse(raw);
+      if (!saved || saved.version !== 1 || !saved.vitality) return false;
+
+      this.vitality = { ...this.vitality, ...saved.vitality };
+      this.botState = saved.botState || this.botState;
+      this.strategy = saved.strategy || this.strategy;
+      this.activeTrade = saved.activeTrade || null;
+      this.tradeHistory = Array.isArray(saved.tradeHistory) ? saved.tradeHistory : [];
+      this.thoughts = Array.isArray(saved.thoughts) ? saved.thoughts : [];
+      this.notifications = Array.isArray(saved.notifications) ? saved.notifications : [];
+      this.equityCurve = Array.isArray(saved.equityCurve) ? saved.equityCurve : this.equityCurve;
+      this.paperSettings = { ...this.paperSettings, ...(saved.paperSettings || {}) };
+      this.profitWithdrawals = Array.isArray(saved.profitWithdrawals)
+        ? saved.profitWithdrawals
+        : this.profitWithdrawals;
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   private notify() {
+    this.persistState();
     if (this.onStateChange) {
       this.onStateChange();
     }
