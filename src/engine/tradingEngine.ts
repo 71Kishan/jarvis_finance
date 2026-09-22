@@ -1,4 +1,4 @@
-import { ActionNotification, BotState, BotThoughtLog, BotVitality, Candle, EquityCurvePoint, PaperOrderRequest, PaperTradingSettings, ProfitWithdrawalRecord, StrategyConfig, Trade } from "../types/trading";
+import { ActionNotification, BotState, BotThoughtLog, BotVitality, Candle, EquityCurvePoint, PaperOrderRequest, PaperTradingSettings, ProfitWithdrawalRecord, StrategyConfig, Trade, TradingEngineRuntimeState } from "../types/trading";
 import { soundFx } from "../utils/soundEffects";
 import { systemNotificationService } from "../utils/systemNotifications";
 import { cryptoSecurityService } from "../utils/cryptoSecurity";
@@ -70,6 +70,62 @@ export class TradingEngine {
   public getNotifications() { return [...this.notifications]; }
   public getEquityCurve() { return [...this.equityCurve]; }
   public getLastSignal() { return this.lastSignal; }
+  public getLastProcessedCandleTimestamp() { return this.lastProcessedCandleTimestamp; }
+
+  public exportRuntimeState(): TradingEngineRuntimeState {
+    return {
+      version: 1,
+      savedAt: Date.now(),
+      vitality: JSON.parse(JSON.stringify(this.vitality)),
+      botState: this.botState,
+      strategy: JSON.parse(JSON.stringify(this.strategy)),
+      activeTrade: this.activeTrade ? JSON.parse(JSON.stringify(this.activeTrade)) : null,
+      tradeHistory: JSON.parse(JSON.stringify(this.tradeHistory.slice(0, 1000))),
+      thoughts: JSON.parse(JSON.stringify(this.thoughts.slice(0, 200))),
+      notifications: JSON.parse(JSON.stringify(this.notifications.slice(0, 100))),
+      equityCurve: JSON.parse(JSON.stringify(this.equityCurve.slice(-2000))),
+      profitWithdrawals: JSON.parse(JSON.stringify(this.profitWithdrawals.slice(0, 200))),
+      lastProcessedCandleTimestamp: this.lastProcessedCandleTimestamp,
+    };
+  }
+
+  public hydrateRuntimeState(state: TradingEngineRuntimeState): boolean {
+    if (!state || state.version !== 1) return false;
+    if (!state.vitality || !state.strategy || !Number.isFinite(state.lastProcessedCandleTimestamp)) return false;
+
+    this.vitality = JSON.parse(JSON.stringify(state.vitality));
+    this.strategy = {
+      ...JSON.parse(JSON.stringify(state.strategy)),
+      indicatorWeights: { ...state.strategy.indicatorWeights },
+    };
+    this.activeTrade = state.activeTrade ? JSON.parse(JSON.stringify(state.activeTrade)) : null;
+    this.tradeHistory = Array.isArray(state.tradeHistory) ? JSON.parse(JSON.stringify(state.tradeHistory.slice(0, 1000))) : [];
+    this.thoughts = Array.isArray(state.thoughts) ? JSON.parse(JSON.stringify(state.thoughts.slice(0, 200))) : [];
+    this.notifications = Array.isArray(state.notifications) ? JSON.parse(JSON.stringify(state.notifications.slice(0, 100))) : [];
+    this.equityCurve = Array.isArray(state.equityCurve) ? JSON.parse(JSON.stringify(state.equityCurve.slice(-2000))) : [];
+    this.profitWithdrawals = Array.isArray(state.profitWithdrawals) ? JSON.parse(JSON.stringify(state.profitWithdrawals.slice(0, 200))) : [];
+    this.lastProcessedCandleTimestamp = Math.max(0, Number(state.lastProcessedCandleTimestamp) || 0);
+
+    // A queued signal is intentionally not persisted across restarts. Requiring a
+    // fresh completed-bar signal is safer than replaying an order after an outage.
+    this.pendingEntry = null;
+    this.lastSignal = null;
+    this.lastSpreadBps = undefined;
+    this.lastMarketDataTimestamp = 0;
+    this.lastMarketOpen = undefined;
+
+    if (this.botState === "HALTED_DEAD") {
+      this.vitality.health = 0;
+    } else if (this.activeTrade) {
+      this.botState = "IN_POSITION";
+    } else if (this.vitality.health <= 40) {
+      this.botState = "DEFENSIVE";
+    } else {
+      this.botState = "HUNTING";
+    }
+
+    return true;
+  }
 
   public markAllNotificationsRead() { this.notifications = this.notifications.map(n => ({ ...n, read: true })); this.notify(); }
   public clearNotifications() { this.notifications = []; this.notify(); }
