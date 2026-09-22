@@ -686,6 +686,5 @@ const httpServer = http.createServer(app);
   httpServer.listen(PORT, "0.0.0.0", () => {
     console.log(`Jarvis Finance server running on http://0.0.0.0:${PORT}`);
   });
-}
 
 startServer();
