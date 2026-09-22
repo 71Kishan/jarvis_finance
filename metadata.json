@@ -1,0 +1,6 @@
+{
+  "name": "Autonomous Survival Trading Bot",
+  "description": "An autonomous quantitative execution terminal with algorithmic risk management, continuous strategy optimization, and strict capital preservation circuit breakers.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
