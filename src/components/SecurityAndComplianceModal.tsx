@@ -145,7 +145,7 @@ export const SecurityAndComplianceModal: React.FC<SecurityAndComplianceModalProp
                 Security Vault, Legal Disclosures & Quant Defense
               </h2>
               <p className="text-xs text-neutral-400 font-sans">
-                Financial law compliance, SHA-256 trade provenance, and AES-256-GCM encryption
+                Risk disclosures, local audit hashes, and session encryption
               </p>
             </div>
           </div>
@@ -211,7 +211,7 @@ export const SecurityAndComplianceModal: React.FC<SecurityAndComplianceModalProp
               <div className="p-4 rounded-xl bg-neutral-900/70 border border-neutral-800 space-y-2">
                 <div className="flex items-center gap-2 text-amber-400 text-xs font-mono font-bold">
                   <AlertTriangle className="w-4 h-4 shrink-0" />
-                  <span>CFTC RULE 4.41 STATUTORY MANDATED DISCLAIMER</span>
+                  <span>SIMULATED-PERFORMANCE DISCLOSURE</span>
                 </div>
                 <div className="text-neutral-300 text-xs leading-relaxed space-y-2 font-sans">
                   <p>
@@ -224,14 +224,14 @@ export const SecurityAndComplianceModal: React.FC<SecurityAndComplianceModalProp
                 </div>
               </div>
 
-              {/* SEC, FINRA & Non-Custodial Software Notice */}
+              {/* Software & Risk Notice */}
               <div className="p-4 rounded-xl bg-neutral-900/50 border border-neutral-800/80 space-y-2">
                 <h4 className="text-xs font-mono font-bold text-white flex items-center gap-2">
                   <Scale className="w-4 h-4 text-emerald-400" />
                   NON-CUSTODIAL ALGORITHMIC SIMULATION SOFTWARE
                 </h4>
                 <p className="text-neutral-400 text-xs leading-relaxed font-sans">
-                  This software is an autonomous quantitative simulation and educational platform. It does not act as a broker-dealer, registered investment advisor (RIA), or custodian of user funds. All financial computations, backtests, and paper orders occur in simulated sandboxes using deterministic market simulators or public ticker relays. Past algorithmic survival does not guarantee future profitability.
+                  Jarvis Finance is currently a paper-trading research application. It does not submit broker orders or take custody of user funds. Backtests and paper orders are simulated; data and execution assumptions may differ from live markets. This is not a statement of regulatory registration or legal compliance in any jurisdiction.
                 </p>
               </div>
 
@@ -239,17 +239,17 @@ export const SecurityAndComplianceModal: React.FC<SecurityAndComplianceModalProp
               <div className="p-4 rounded-xl bg-neutral-900/50 border border-neutral-800/80 space-y-2">
                 <h4 className="text-xs font-mono font-bold text-white flex items-center gap-2">
                   <EyeOff className="w-4 h-4 text-sky-400" />
-                  GDPR & CCPA ZERO-KNOWLEDGE PRIVACY POLICY
+                  LOCAL DATA & PRIVACY NOTICE
                 </h4>
                 <div className="text-neutral-400 text-xs leading-relaxed space-y-1.5 font-sans">
                   <p>
-                    &bull; <strong>Zero Server Storage:</strong> Your private configurations, strategy weights, and trade history remain strictly stored on your local client device within your browser or Android PWA container.
+                    &bull; <strong>Client-side paper state:</strong> Paper configurations and history are stored locally in the browser/PWA storage used by this application. Server endpoints may receive requests and telemetry necessary to answer them.
                   </p>
                   <p>
-                    &bull; <strong>No Personal Telemetry:</strong> We do not collect, monetize, track, or distribute your IP address, device identifiers, or trading strategies.
+                    &bull; <strong>No product-level claim of zero telemetry:</strong> The current application does not intentionally send your paper ledger to a separate analytics service, but normal web/server networking can expose connection metadata such as an IP address to infrastructure providers.
                   </p>
                   <p>
-                    &bull; <strong>Right to Immediate Erasure:</strong> You retain complete cryptographic sovereignty. You may purge all local database stores instantly via the Reset Data option in the Risk Settings panel.
+                    &bull; <strong>Local Data Reset:</strong> You can clear locally stored paper data from the Risk Settings reset controls. Export any records you want to keep first.
                   </p>
                 </div>
               </div>

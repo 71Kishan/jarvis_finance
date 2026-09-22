@@ -54,7 +54,7 @@ export const ProfitVaultModal: React.FC<ProfitVaultModalProps> = ({
     engine.setAutoWithdrawProfitEnabled(autoEnabled);
     engine.setWithdrawPercentage(withdrawPct);
     engine.setMinProfitThresholdUsd(minThreshold);
-    setActionSuccess("Autonomous profit withdrawal settings saved successfully.");
+    setActionSuccess("Paper reserve settings saved locally. No external transfer occurred.");
     setTimeout(() => setActionSuccess(null), 3500);
   };
 
@@ -67,7 +67,7 @@ export const ProfitVaultModal: React.FC<ProfitVaultModalProps> = ({
     }
     const rec = await engine.manualSweepToVault(amt, manualMemo.trim() || undefined);
     if (rec) {
-      setActionSuccess(`Successfully swept $${amt.toFixed(2)} into the Paper Reserve Vault!`);
+      setActionSuccess(`Successfully swept $${amt.toFixed(2)} in the local paper reserve.`);
       setManualMemo("");
       setTimeout(() => setActionSuccess(null), 4000);
     }
@@ -82,7 +82,7 @@ export const ProfitVaultModal: React.FC<ProfitVaultModalProps> = ({
     }
     const ok = engine.transferVaultToTrading(amt);
     if (ok) {
-      setActionSuccess(`Transferred $${amt.toFixed(2)} from Vault back to active trading liquidity.`);
+      setActionSuccess(`Returned $${amt.toFixed(2)} from the paper reserve to active paper cash.`);
       setTimeout(() => setActionSuccess(null), 4000);
     }
   };
@@ -157,7 +157,7 @@ export const ProfitVaultModal: React.FC<ProfitVaultModalProps> = ({
                 </h2>
                 <span className="px-2 py-0.5 text-xs font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-full flex items-center gap-1">
                   <ShieldCheck className="w-3 h-3" />
-                  Insulated Capital
+                  Local Paper Reserve
                 </span>
               </div>
               <p className="text-xs text-slate-400">
@@ -302,7 +302,7 @@ export const ProfitVaultModal: React.FC<ProfitVaultModalProps> = ({
                           <th className="py-3 px-4">Receipt / Date</th>
                           <th className="py-3 px-4">Asset & Policy</th>
                           <th className="py-3 px-4 text-right">Gross Profit</th>
-                          <th className="py-3 px-4 text-right">Swept to Vault</th>
+                          <th className="py-3 px-4 text-right">Allocated to Reserve</th>
                           <th className="py-3 px-4 text-right">Vault Total</th>
                           <th className="py-3 px-4 text-center">SHA-256 Proof</th>
                           <th className="py-3 px-4 text-center">Details</th>
@@ -580,7 +580,7 @@ export const ProfitVaultModal: React.FC<ProfitVaultModalProps> = ({
                   <span className="font-mono text-emerald-400 font-bold">+${selectedReceipt.grossProfit.toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between py-1.5 border-b border-slate-800/80">
-                  <span className="text-slate-400">Swept to Cold Storage:</span>
+                  <span className="text-slate-400">Swept to Paper Reserve:</span>
                   <span className="font-mono text-amber-400 font-bold">+${selectedReceipt.withdrawnAmount.toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between py-1.5 border-b border-slate-800/80">
