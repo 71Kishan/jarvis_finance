@@ -252,8 +252,9 @@ class CryptoSecurityService {
   }
 
   public setAutoLockMinutes(min: number): void {
-    this.autoLockMinutes = min;
-    localStorage.setItem(AUTO_LOCK_STORAGE_KEY, String(min));
+    const safeMinutes = Math.max(1, Math.min(120, Math.floor(Number(min) || 15)));
+    this.autoLockMinutes = safeMinutes;
+    localStorage.setItem(AUTO_LOCK_STORAGE_KEY, String(safeMinutes));
   }
 
   public getAutoLockMinutes(): number {
