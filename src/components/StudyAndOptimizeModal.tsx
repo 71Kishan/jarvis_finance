@@ -146,7 +146,7 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
                 <span>Execute Quantitative Strategy Optimization Cycle</span>
               </div>
               <p className="text-[11px] text-neutral-400 max-w-xl">
-                Evaluates {candles.length} historical candles, performs parameter surface search, backtests risk-to-reward ratios, and recalibrates algorithmic execution thresholds.
+                Evaluates {candles.length} historical candles, tests a small set of strategy variants against historical data using the configured risk and execution model.
               </p>
             </div>
 
@@ -212,7 +212,7 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
                   Simulated Strategy Candidates ({optimizationData.candidatesTested.length} tested across historical data)
                 </h3>
                 <span className="text-[10px] text-neutral-500">
-                  Sorted by Win-Rate & Survival Score
+                  Order shown: validation evidence and held-out test results
                 </span>
               </div>
 
@@ -238,7 +238,7 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
                             </span>
                             {isTop && (
                               <span className="px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 text-[9px] font-bold border border-emerald-500/40">
-                                TOP PERFORMER
+                                SELECTED RESEARCH CANDIDATE
                               </span>
                             )}
                           </div>
@@ -313,7 +313,7 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
         {/* Modal Footer */}
         <div className="px-5 py-3 border-t border-neutral-800 bg-neutral-900/70 flex items-center justify-between">
           <span className="text-neutral-500 text-[11px]">
-            Adopting updates the terminal's live execution matrix immediately.
+            Loading a candidate updates the paper terminal configuration and pauses automated paper execution.
           </span>
 
           <div className="flex items-center gap-2">
