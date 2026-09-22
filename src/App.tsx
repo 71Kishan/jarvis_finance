@@ -23,6 +23,7 @@ import { AssetSymbol, MarketSimulator } from "./engine/marketSimulator";
 import { DEFAULT_STRATEGY, TradingEngine } from "./engine/tradingEngine";
 import { strategyVaultInstance } from "./engine/strategyVault";
 import { cryptoSecurityService } from "./utils/cryptoSecurity";
+import { isUsRegularMarketOpen } from "./utils/marketHours";
 import {
   BotState,
   BotThoughtLog,
@@ -211,6 +212,7 @@ export default function App() {
         tradingEngineRef.current?.setMarketQuality({
           spreadBps,
           dataTimestamp: Number(data.ticker.lastUpdated) || Date.now(),
+          marketOpen: currentAsset.includes("/USD") ? true : isUsRegularMarketOpen(),
         });
         setLiveTicker(data.ticker);
         setLiveDataError(null);
