@@ -35,7 +35,7 @@ export const StrategyVaultModal: React.FC<StrategyVaultModalProps> = ({
   currentStrategy,
   onApplyStrategy,
 }) => {
-  const [activeTab, setActiveTab] = useState<"PROVEN" | "ALL" | "TESTING" | "DISCARDED">("PROVEN");
+  const [activeTab, setActiveTab] = useState<"PROVEN" | "ALL" | "TESTING" | "DISCARDED">("ALL");
   const [strategies, setStrategies] = useState<StrategyVaultEntry[]>(() =>
     strategyVaultInstance.getAllStrategies()
   );
@@ -60,17 +60,15 @@ export const StrategyVaultModal: React.FC<StrategyVaultModalProps> = ({
 
   const handleActivate = (strat: StrategyVaultEntry) => {
     onApplyStrategy({ ...strat.config });
-    setFeedback(`Activated "${strat.name}" as live paper strategy!`);
+    setFeedback(`Applied "${strat.name}" as the current PAPER candidate. No live order capability is enabled.`);
     setTimeout(() => setFeedback(null), 3000);
   };
 
   const handleScanBestModel = () => {
-    const proven = strategyVaultInstance.getProvenStrategies();
-    if (proven.length > 0) {
-      // Pick strategy with highest profit factor
-      proven.sort((a, b) => b.profitFactor - a.profitFactor);
-      handleActivate(proven[0]);
-    }
+    setFeedback(
+      "Automatic winner deployment is disabled. Review out-of-sample and walk-forward evidence before treating any strategy as validated."
+    );
+    setTimeout(() => setFeedback(null), 4500);
   };
 
   const progressPercent = Math.min(
@@ -93,14 +91,14 @@ export const StrategyVaultModal: React.FC<StrategyVaultModalProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <h3 className="text-base font-bold text-neutral-100">
-                  Strategy Memory Vault & Anti-Duplication Engine
+                  Strategy Research Registry
                 </h3>
                 <span className="px-2 py-0.5 rounded text-[10px] font-mono uppercase bg-emerald-950 text-emerald-300 border border-emerald-800">
-                  Self-Evolving
+                  Evidence Gated
                 </span>
               </div>
               <p className="text-xs text-neutral-400">
-                Maintains systematic logs of all tested models. Automatically promotes winning strategies and blacklists failed configurations so duplicate parameters are never repeated.
+                Stores tested configurations and outcome statistics. Paper results never promote a strategy automatically; formal validation evidence is required before a strategy is marked validated.
               </p>
             </div>
           </div>
@@ -115,7 +113,7 @@ export const StrategyVaultModal: React.FC<StrategyVaultModalProps> = ({
           </button>
         </div>
 
-        {/* Daily Profit Target Performance Tracker */}
+        {/* Daily Research Journal */}
         <div className="bg-gradient-to-r from-neutral-950 via-emerald-950/20 to-neutral-950 p-4 border-b border-neutral-800">
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-2.5">
             <div className="flex items-center gap-2">
@@ -141,12 +139,12 @@ export const StrategyVaultModal: React.FC<StrategyVaultModalProps> = ({
                 Trades: <span className="text-neutral-200 font-bold">{dailyGoal.tradesCountToday}</span>
               </span>
               <span className="px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800 text-[10px]">
-                {dailyGoal.streakDays}-Day Win Streak 🔥
+                No Daily Profit Quota
               </span>
             </div>
           </div>
 
-          {/* Progress Bar */}
+          {/* No profit-target progress bar: Jarvis measures process, not a required income quota. */}
           <div className="w-full bg-neutral-950 rounded-full h-2 overflow-hidden border border-neutral-800">
             <div
               className={`h-full transition-all duration-500 ${
@@ -158,7 +156,7 @@ export const StrategyVaultModal: React.FC<StrategyVaultModalProps> = ({
           <div className="flex justify-between items-center text-[10px] text-neutral-500 mt-1 font-mono">
             <span>Progress: {progressPercent.toFixed(1)}%</span>
             <span>
-              {dailyGoal.targetAchieved ? "🎉 DAILY TARGET SECURED" : "Executing paper trades toward target"}
+              {dailyGoal.targetAchieved ? "🎉 DAILY TARGET SECURED" : "Research journal only — no trading quota"}
             </span>
           </div>
         </div>
@@ -178,7 +176,7 @@ export const StrategyVaultModal: React.FC<StrategyVaultModalProps> = ({
               }`}
             >
               <Award className="w-3.5 h-3.5" />
-              <span>Proven Working ({strategies.filter((s) => s.status === "PROVEN_PROFITABLE").length})</span>
+              <span>Validated ({strategies.filter((s) => s.status === "PROVEN_PROFITABLE").length})</span>
             </button>
             <button
               id="vault-tab-all"
@@ -215,7 +213,7 @@ export const StrategyVaultModal: React.FC<StrategyVaultModalProps> = ({
               }`}
             >
               <XCircle className="w-3.5 h-3.5" />
-              <span>Blacklisted ({strategies.filter((s) => s.status === "DISCARDED_FAILED").length})</span>
+              <span>Rejected ({strategies.filter((s) => s.status === "DISCARDED_FAILED").length})</span>
             </button>
           </div>
 
@@ -226,7 +224,7 @@ export const StrategyVaultModal: React.FC<StrategyVaultModalProps> = ({
             className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl flex items-center gap-2 transition-colors shadow-md shadow-emerald-950/40"
           >
             <Sparkles className="w-4 h-4" />
-            <span>Deploy #1 Highest Profit Factor Strategy</span>
+            <span>Validation Gate</span>
           </button>
         </div>
 
@@ -288,7 +286,7 @@ export const StrategyVaultModal: React.FC<StrategyVaultModalProps> = ({
                         </span>
                         {isCurrent && (
                           <span className="px-2 py-0.5 bg-emerald-950 text-emerald-300 border border-emerald-800 text-[10px] font-bold rounded-full">
-                            ACTIVE LIVE
+                            ACTIVE PAPER
                           </span>
                         )}
                         <span
@@ -323,7 +321,7 @@ export const StrategyVaultModal: React.FC<StrategyVaultModalProps> = ({
                         onClick={() => handleActivate(item)}
                         className="px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-semibold rounded-lg flex items-center gap-1 transition-colors border border-neutral-700"
                       >
-                        <span>Deploy Strategy</span>
+                        <span>Apply to Paper</span>
                         <ArrowRight className="w-3.5 h-3.5" />
                       </button>
                     )}
@@ -366,7 +364,7 @@ export const StrategyVaultModal: React.FC<StrategyVaultModalProps> = ({
                   </div>
                   <div>
                     <span className="text-[10px] font-sans text-neutral-500 block">Confidence Min</span>
-                    <span className="text-cyan-400 font-bold">{item.config.minConfidence}%</span>
+                    <span className="text-cyan-400 font-bold">{item.config.minConfidence}</span>
                   </div>
                 </div>
 
