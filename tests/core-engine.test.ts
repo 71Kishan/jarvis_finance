@@ -116,6 +116,28 @@ describe("indicator math", () => {
   });
 });
 
+describe("backtest metric integrity", () => {
+  test("withholds annualized statistics on a sub-30-day sample", async () => {
+    const { StrategyOptimizer } = await import("../src/engine/optimizer");
+    const flat = Array.from({ length: 120 }, (_, i) => ({
+      timestamp: 1_700_000_000_000 + i * 60_000,
+      open: 100,
+      high: 100,
+      low: 100,
+      close: 100,
+      volume: 1000,
+    }));
+    const { attachIndicators } = await import("../src/engine/indicators");
+    const result = StrategyOptimizer.backtest(DEFAULT_STRATEGY, attachIndicators(flat));
+    expect(result.sampleDays).toBeLessThan(30);
+    expect(result.annualizationReliable).toBe(false);
+    expect(result.annualizedReturn).toBeUndefined();
+    expect(result.volatilityAnnualized).toBeUndefined();
+    expect(result.sharpeRatio).toBe(0);
+    expect(result.sortinoRatio).toBe(0);
+  });
+});
+
 describe("durable paper state", () => {
   test("restores an open paper position and processed candle after restart", () => {
     const statePath = join(tmpdir(), `jarvis-paper-state-test-${Date.now()}-${Math.random().toString(36).slice(2)}.json`);
