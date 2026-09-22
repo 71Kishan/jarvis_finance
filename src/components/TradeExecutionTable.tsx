@@ -90,7 +90,7 @@ export const TradeExecutionTable: React.FC<TradeExecutionTableProps> = ({
                 ID: {activeTrade.id}
               </span>
               <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-neutral-800 text-neutral-300">
-                Confidence: {activeTrade.confidence}%
+                Signal Score: {activeTrade.signalScore}%
               </span>
             </div>
 
@@ -153,7 +153,7 @@ export const TradeExecutionTable: React.FC<TradeExecutionTableProps> = ({
       ) : (
         <div className="bg-neutral-900/40 border border-dashed border-neutral-800 rounded-xl p-4 text-center">
           <p className="text-xs font-mono text-neutral-400">
-            No active positions. Algorithmic scanner is continuously analyzing indicator confluence and awaiting institutional-grade setups ({strategy.minConfidence}%+ confidence required) to preserve capital.
+            No active positions. Algorithmic scanner is continuously analyzing indicator confluence and awaiting qualified setups ({strategy.minConfidence}%+ signal score required) to preserve capital.
           </p>
         </div>
       )}
@@ -284,7 +284,7 @@ export const TradeExecutionTable: React.FC<TradeExecutionTableProps> = ({
 
             <div className="grid grid-cols-2 gap-2 pt-2 border-t border-neutral-800 text-[11px]">
               <div>
-                <span className="text-neutral-500">Min Entry Confidence:</span>{" "}
+                <span className="text-neutral-500">Minimum Entry Signal Score:</span>{" "}
                 <strong className="text-emerald-400">
                   {strategy.minConfidence}%
                 </strong>
