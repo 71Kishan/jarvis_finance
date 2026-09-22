@@ -4,7 +4,7 @@ import App from './App.tsx';
 import './index.css';
 
 // Register PWA Service Worker for 24/7 background persistence
-if ('serviceWorker' in navigator && process.env.NODE_ENV === 'production') {
+if ("serviceWorker" in navigator && import.meta.env.PROD) {
   window.addEventListener('load', () => {
     navigator.serviceWorker
       .register('/sw.js')
