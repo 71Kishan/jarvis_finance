@@ -86,7 +86,7 @@ export const MultiAssetRadarModal: React.FC<MultiAssetRadarModalProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <h3 className="text-base font-bold text-neutral-100">
-                  Autonomous Multi-Market Opportunity Scanner
+                  Multi-Market Research Radar
                 </h3>
                 <span className="px-2 py-0.5 rounded text-[10px] font-mono uppercase bg-indigo-950 text-indigo-300 border border-indigo-800">
                   Global Universe
@@ -120,7 +120,7 @@ export const MultiAssetRadarModal: React.FC<MultiAssetRadarModalProps> = ({
           </div>
         </div>
 
-        {/* Top Feature Banner: Autonomous Asset Rotator Status */}
+        {/* Top Feature Banner: Research Universe Rotation */}
         <div className="bg-gradient-to-r from-neutral-950 via-indigo-950/40 to-neutral-950 p-4 border-b border-neutral-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-emerald-500/10 text-emerald-400 rounded-lg border border-emerald-500/20">
@@ -138,16 +138,16 @@ export const MultiAssetRadarModal: React.FC<MultiAssetRadarModalProps> = ({
                       : "bg-neutral-800 text-neutral-400"
                   }`}
                 >
-                  {autoRotate ? "ENABLED" : "MANUAL"}
+                  {autoRotate ? "RESEARCH MODE" : "MANUAL"}
                 </span>
               </div>
               <div className="text-[11px] text-neutral-400">
-                Scores below {minConfidence}% are shown for review only. The radar never moves capital automatically.
+                Scores below {minConfidence}% are shown for review only. The radar only changes the research focus; it never moves capital or approves a trade automatically.
               </div>
             </div>
           </div>
 
-          <span className="px-3 py-1.5 rounded-lg text-xs font-bold bg-neutral-800 text-neutral-300 border border-neutral-700">Manual Asset Selection</span>
+          <span className="px-3 py-1.5 rounded-lg text-xs font-bold bg-neutral-800 text-neutral-300 border border-neutral-700">Research Asset Selection</span>
         </div>
 
         {/* Top Opportunity Highlight */}
