@@ -313,6 +313,72 @@ function computeQuantitativeMarketIntelligence(asset: string, marketSnapshot: an
   };
 }
 
+// Endpoint: AI Copilot — research and paper-terminal assistant.
+// This endpoint is advisory only: it cannot place orders or mutate the trading engine.
+app.post("/api/copilot/chat", async (req: Request, res: Response) => {
+  const message = typeof req.body?.message === "string" ? req.body.message.trim() : "";
+  const history = Array.isArray(req.body?.conversationHistory) ? req.body.conversationHistory.slice(-8) : [];
+  const terminalContext = req.body?.terminalContext && typeof req.body.terminalContext === "object"
+    ? req.body.terminalContext
+    : {};
+
+  if (!message || message.length > 4000) {
+    return res.status(400).json({ error: "Invalid message. Supply 1-4000 characters." });
+  }
+
+  const safeHistory = history
+    .filter((m: any) => m && (m.role === "user" || m.role === "model") && typeof m.content === "string")
+    .map((m: any) => `${m.role.toUpperCase()}: ${m.content.slice(0, 2500)}`)
+    .join("\n");
+
+  const localReply =
+    "Jarvis Copilot is advisory-only in this build. " +
+    "It can explain the supplied paper portfolio, strategy rules, risk controls, and market snapshot, " +
+    "but it cannot authorize real-money execution. " +
+    "Verify provider timestamps, strategy version, and risk state before acting on any research conclusion.";
+
+  const ai = getAIClient();
+  if (!ai) {
+    return res.json({ reply: localReply, modelUsed: "LOCAL-SAFE-FALLBACK" });
+  }
+
+  const prompt = `You are Jarvis Finance's research copilot.
+Your job is to explain evidence, calculations, software behavior, and paper-trading state.
+Never invent prices, filings, news, liquidity, institutional activity, or performance.
+Never turn a heuristic score into a probability of profit.
+Never claim a single trade proves an edge.
+Never authorize or submit a real-money trade.
+When the supplied context is insufficient, say what data is missing.
+Treat all trade ideas as research hypotheses and tell the user what would need to be validated.
+
+CURRENT TERMINAL CONTEXT:
+${JSON.stringify(terminalContext, null, 2)}
+
+RECENT CONVERSATION:
+${safeHistory || "No prior conversation supplied."}
+
+USER QUESTION:
+${message}
+
+Return a concise answer with:
+1) what the supplied evidence actually says,
+2) important uncertainty or missing data,
+3) the safest useful next research step when applicable.`;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: "gemini-3.8-flash",
+      contents: prompt,
+    });
+    const reply = response.text?.trim();
+    if (!reply) throw new Error("Empty model response.");
+    return res.json({ reply, modelUsed: "gemini-3.8-flash" });
+  } catch (error: any) {
+    console.warn("Copilot unavailable; using safe local fallback:", error?.message || error);
+    return res.json({ reply: localReply, modelUsed: "LOCAL-SAFE-FALLBACK" });
+  }
+});
+
 // Endpoint: Deep Quantitative Study & Strategy Evolution (Self-Sustaining)
 app.post("/api/bot/study", async (req: Request, res: Response) => {
   const body = req.body || {};
