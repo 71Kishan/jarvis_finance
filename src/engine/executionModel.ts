@@ -51,8 +51,15 @@ export function resolveStopTarget(
 ): { kind: "STOP" | "TARGET" | "NONE"; price: number; ambiguous: boolean } {
   const hitStop = side === "LONG" ? candle.low <= stopLoss : candle.high >= stopLoss;
   const hitTarget = side === "LONG" ? candle.high >= takeProfit : candle.low <= takeProfit;
-  if (hitStop && hitTarget) return { kind: "STOP", price: stopLoss, ambiguous: true };
-  if (hitStop) return { kind: "STOP", price: stopLoss, ambiguous: false };
+
+  // A stop order is not guaranteed to fill at its stop price through a gap. If the
+  // bar opens beyond the stop, use the open as the conservative fill price.
+  const stoppedAt = side === "LONG"
+    ? Math.min(candle.open, stopLoss)
+    : Math.max(candle.open, stopLoss);
+
+  if (hitStop && hitTarget) return { kind: "STOP", price: stoppedAt, ambiguous: true };
+  if (hitStop) return { kind: "STOP", price: stoppedAt, ambiguous: false };
   if (hitTarget) return { kind: "TARGET", price: takeProfit, ambiguous: false };
   return { kind: "NONE", price: candle.close, ambiguous: false };
 }
