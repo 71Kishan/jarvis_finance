@@ -142,7 +142,7 @@ function firstNumber(...values: any[]): number | null {
 
 function parsePriceRows(payload: any): any[] {
   const rows = Array.isArray(payload?.prices) ? payload.prices : Array.isArray(payload?.history) ? payload.history : [];
-  return rows.filter((row) => row && Number.isFinite(Number(row.close ?? row.price)));
+  return rows.filter((row: any) => row && Number.isFinite(Number(row.close ?? row.price)));
 }
 
 function rowTimestamp(row: any): number {
@@ -291,6 +291,28 @@ function computeQuantitativeCritique(trade: any, marketSnapshot: any) {
     riskControlImpact: "No automatic risk-budget increase is authorized by a single trade outcome.",
   };
 }
+
+// Canonical server-side asset mapping. Live/paper decisions must use provider data;
+// these entries are identifiers only and are not price seeds.
+const SYMBOL_MAP: Record<string, string> = {
+  "BTC/USD": "BTCUSDT",
+  "ETH/USD": "ETHUSDT",
+  "SOL/USD": "SOLUSDT",
+  "DOGE/USD": "DOGEUSDT",
+  "XRP/USD": "XRPUSDT",
+  "EUR/USD": "EURUSDT",
+  "GBP/USD": "GBPUSDT",
+};
+
+const STOCK_UNIVERSE: Record<string, { name: string; category: "STOCK" | "INDEX" }> = {
+  NVDA: { name: "NVIDIA Corp", category: "STOCK" },
+  AAPL: { name: "Apple Inc", category: "STOCK" },
+  MSFT: { name: "Microsoft Corp.", category: "STOCK" },
+  AMZN: { name: "Amazon.com Inc.", category: "STOCK" },
+  META: { name: "Meta Platforms Inc.", category: "STOCK" },
+  SPY: { name: "S&P 500 ETF Trust", category: "INDEX" },
+  QQQ: { name: "Invesco QQQ Trust", category: "INDEX" },
+};
 
 function computeQuantitativeMarketIntelligence(asset: string, marketSnapshot: any = null) {
   const cleanAsset = asset || "Unknown asset";
