@@ -79,7 +79,7 @@ const getAIClient = () => {
     apiKey,
     httpOptions: {
       headers: {
-        "User-Agent": "aistudio-build",
+        "User-Agent": "JarvisFinance/1.0",
       },
     },
   });
@@ -337,9 +337,31 @@ app.post("/api/copilot/chat", async (req: Request, res: Response) => {
     "but it cannot authorize real-money execution. " +
     "Verify provider timestamps, strategy version, and risk state before acting on any research conclusion.";
 
+  const stockSymbol = typeof terminalContext?.currentAsset === "string" && !terminalContext.currentAsset.includes("/")
+    ? terminalContext.currentAsset
+    : null;
+
+  let fundamentalContext: any = null;
+  if (stockSymbol && fdsConfigured()) {
+    try {
+      fundamentalContext = await cached(
+        `fds:financials:quarterly:${stockSymbol}`,
+        15 * 60_000,
+        () => fetchFinancialDatasets("/financials", { ticker: stockSymbol, period: "quarterly" })
+      );
+    } catch (error: any) {
+      fundamentalContext = { status: "UNAVAILABLE", reason: error?.message || "Provider unavailable." };
+    }
+  }
+
   const ai = getAIClient();
   if (!ai) {
-    return res.json({ reply: localReply, modelUsed: "LOCAL-SAFE-FALLBACK" });
+    return res.json({
+      reply: stockSymbol && fundamentalContext
+        ? localReply + " Fundamental company data was requested from the configured Financial Datasets provider when available."
+        : localReply,
+      modelUsed: "LOCAL-SAFE-FALLBACK"
+    });
   }
 
   const prompt = `You are Jarvis Finance's research copilot.
@@ -353,6 +375,9 @@ Treat all trade ideas as research hypotheses and tell the user what would need t
 
 CURRENT TERMINAL CONTEXT:
 ${JSON.stringify(terminalContext, null, 2)}
+
+FUNDAMENTAL COMPANY CONTEXT (provider-supplied; may be unavailable):
+${JSON.stringify(fundamentalContext || {}, null, 2)}
 
 RECENT CONVERSATION:
 ${safeHistory || "No prior conversation supplied."}
@@ -631,7 +656,7 @@ app.get("/api/market/live-feed", async (req: Request, res: Response) => {
       ticker: {
         symbol: symbolParam, price: snapshot.price, bid: snapshot.bid ?? snapshot.price, ask: snapshot.ask ?? snapshot.price,
         high24h: snapshot.high ?? snapshot.price, low24h: snapshot.low ?? snapshot.price, volume24h: snapshot.volume ?? 0,
-        change24hPercent: snapshot.changePercent ?? 0, lastUpdated: Date.now(), source: "FINANCIAL_DATASETS", quoteQuality: snapshot.bid && snapshot.ask ? "BID_ASK" : "LAST_ONLY",
+        change24hPercent: snapshot.changePercent ?? 0, lastUpdated: snapshot.updatedAt || Date.now(), source: "FINANCIAL_DATASETS", quoteQuality: snapshot.bid && snapshot.ask ? "BID_ASK" : "LAST_ONLY",
       },
     });
   } catch (error: any) {
