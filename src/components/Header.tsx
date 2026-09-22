@@ -155,14 +155,14 @@ export const Header: React.FC<HeaderProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <span className="font-bold text-neutral-100 tracking-tight text-sm md:text-base">
-                  AEGIS QUANTITATIVE TERMINAL
+                  JARVIS FINANCE
                 </span>
                 <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-neutral-800 text-neutral-400 border border-neutral-700">
                   Self-Optimizing
                 </span>
               </div>
               <p className="text-xs text-neutral-400 font-mono">
-                Autonomous Algorithmic Execution &bull; Dynamic Risk Parity
+                Research & Paper Trading &bull; Evidence-Driven Risk Controls
               </p>
             </div>
           </div>
@@ -273,7 +273,7 @@ export const Header: React.FC<HeaderProps> = ({
               <button
                 id="header-open-copilot-btn"
                 onClick={() => onOpenCopilot("CHAT")}
-                title="AEGIS Quantitative AI Copilot & Fiduciary Advisor"
+                title="Jarvis Finance AI Copilot & Research Assistant"
                 className="flex items-center gap-1.5 px-2.5 py-1.5 hover:bg-indigo-600/30 text-xs font-mono font-semibold transition-colors cursor-pointer"
               >
                 <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
@@ -296,7 +296,7 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               id="header-open-profit-vault-btn"
               onClick={onOpenProfitVault}
-              title="Cold Storage Profit Vault: Auto-withdrawn gains insulated from market risk"
+              title="Paper Profit Reserve: virtual transfer ledger only"
               className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/35 text-xs font-mono font-semibold transition-all shadow-[0_0_10px_rgba(245,158,11,0.15)] cursor-pointer"
             >
               <Vault className="w-3.5 h-3.5 text-amber-400" />
@@ -348,11 +348,11 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               id="header-open-market-hours-btn"
               onClick={onOpenMarketHours}
-              title="24/7 Market Hours & Android Phone Auto-Pilot Setup"
+              title="Market sessions and server runtime architecture"
               className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-neutral-900 hover:bg-neutral-800 text-neutral-300 border border-neutral-800 text-xs font-mono transition-colors cursor-pointer"
             >
               <Clock className="w-3.5 h-3.5 text-amber-400" />
-              <span className="hidden sm:inline">24/7 Hours</span>
+              <span className="hidden sm:inline">Market Sessions</span>
             </button>
           )}
 
