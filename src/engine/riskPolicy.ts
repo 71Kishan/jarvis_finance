@@ -44,7 +44,15 @@ export function evaluateRisk(policy: RiskPolicyConfig, input: RiskCheckInput, st
 
   if (input.openPositions >= policy.maxOpenPositions) reasons.push(`Maximum concurrent positions reached (${policy.maxOpenPositions}).`);
   if (input.leverage > policy.maxLeverage) reasons.push(`Requested leverage ${input.leverage}x exceeds policy cap of ${policy.maxLeverage}x.`);
-  if (input.requestedNotional > equity * policy.maxPositionNotionalPercent / 100) reasons.push(`Requested notional exceeds ${policy.maxPositionNotionalPercent}% of equity.`);
+  const maxNotional = equity * policy.maxPositionNotionalPercent / 100;
+  if (input.requestedNotional > maxNotional) reasons.push(`Requested notional exceeds ${policy.maxPositionNotionalPercent}% of equity.`);
+
+  const stopRiskUsd = Math.max(0, input.requestedNotional) * Math.max(0, input.stopLossPercent) / 100;
+  const configuredRiskPct = Math.max(0, Number(strategy.maxRiskPerTrade) || 0);
+  const maxLossBudgetUsd = equity * Math.min(configuredRiskPct, 1) / 100;
+  if (stopRiskUsd > maxLossBudgetUsd + 1e-9) {
+    reasons.push(`Estimated stop-loss risk of ${stopRiskUsd.toFixed(2)} exceeds the configured risk budget of ${maxLossBudgetUsd.toFixed(2)}.`);
+  }
 
   const peakDrawdownPct = peakEquity > 0 ? ((peakEquity - equity) / peakEquity) * 100 : 0;
   if (peakDrawdownPct >= policy.maxPeakDrawdownPercent) reasons.push(`Peak drawdown ${peakDrawdownPct.toFixed(2)}% reached the configured halt threshold.`);
@@ -64,7 +72,5 @@ export function evaluateRisk(policy: RiskPolicyConfig, input: RiskCheckInput, st
     reasons.push(`Loss-streak cooldown active for approximately ${remaining} more minute(s).`);
   }
 
-  const configuredRiskPct = Math.max(0, Number(strategy.maxRiskPerTrade) || 0);
-  const maxLossBudgetUsd = equity * Math.min(configuredRiskPct, 1) / 100;
   return { allowed: reasons.length === 0 && maxLossBudgetUsd > 0, reasons, maxLossBudgetUsd };
 }
