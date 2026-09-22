@@ -189,6 +189,7 @@ export interface LiveExchangeTicker {
   change24hPercent: number;
   lastUpdated: number;
   source: "BINANCE" | "COINBASE" | "FINANCIAL_DATASETS" | "SYNTHETIC";
+  quoteQuality?: "BID_ASK" | "LAST_ONLY";
 }
 
 export interface PaperOrderRequest {
@@ -224,7 +225,7 @@ export interface MultiAssetOpportunity {
   change24hPercent: number;
   score: number;
   bestDirection: "LONG" | "SHORT" | "NEUTRAL";
-  rsi: number;
+  rsi: number | null;
   trend: "BULLISH" | "BEARISH" | "SIDEWAYS";
   volatility: number;
   isEligible: boolean;
