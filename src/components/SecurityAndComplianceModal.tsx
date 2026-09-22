@@ -228,10 +228,10 @@ export const SecurityAndComplianceModal: React.FC<SecurityAndComplianceModalProp
               <div className="p-4 rounded-xl bg-neutral-900/50 border border-neutral-800/80 space-y-2">
                 <h4 className="text-xs font-mono font-bold text-white flex items-center gap-2">
                   <Scale className="w-4 h-4 text-emerald-400" />
-                  NON-CUSTODIAL ALGORITHMIC SIMULATION SOFTWARE
+                  RESEARCH & PAPER-TRADING SOFTWARE
                 </h4>
                 <p className="text-neutral-400 text-xs leading-relaxed font-sans">
-                  This software is an autonomous quantitative simulation and educational platform. It does not act as a broker-dealer, registered investment advisor (RIA), or custodian of user funds. All financial computations, backtests, and paper orders occur in simulated sandboxes using deterministic market simulators or public ticker relays. Past algorithmic survival does not guarantee future profitability.
+                  This software is an autonomous quantitative simulation and educational platform. It does not act as a broker-dealer, registered investment advisor (RIA), or custodian of user funds. All financial computations, backtests, and paper orders occur in simulated sandboxes using deterministic market simulators or public ticker relays. Past paper results do not establish future profitability.
                 </p>
               </div>
 
@@ -239,11 +239,11 @@ export const SecurityAndComplianceModal: React.FC<SecurityAndComplianceModalProp
               <div className="p-4 rounded-xl bg-neutral-900/50 border border-neutral-800/80 space-y-2">
                 <h4 className="text-xs font-mono font-bold text-white flex items-center gap-2">
                   <EyeOff className="w-4 h-4 text-sky-400" />
-                  GDPR & CCPA ZERO-KNOWLEDGE PRIVACY POLICY
+                  LOCAL DATA & PRIVACY NOTES
                 </h4>
                 <div className="text-neutral-400 text-xs leading-relaxed space-y-1.5 font-sans">
                   <p>
-                    &bull; <strong>Zero Server Storage:</strong> Your private configurations, strategy weights, and trade history remain strictly stored on your local client device within your browser or Android PWA container.
+                    &bull; <strong>Local-First Paper State:</strong> Current paper state is primarily client-side. Cross-device synchronization requires a server-side journal, which is not yet enabled.
                   </p>
                   <p>
                     &bull; <strong>No Personal Telemetry:</strong> We do not collect, monetize, track, or distribute your IP address, device identifiers, or trading strategies.
@@ -629,7 +629,7 @@ export const SecurityAndComplianceModal: React.FC<SecurityAndComplianceModalProp
         <div className="p-3.5 border-t border-neutral-800 bg-neutral-900/50 flex items-center justify-between text-xs font-mono text-neutral-400">
           <div className="flex items-center gap-2">
             <Shield className="w-4 h-4 text-emerald-400" />
-            <span>Fiduciary Compliance & Cryptographic Integrity</span>
+            <span>Security Controls & Local Audit Integrity</span>
           </div>
 
           <button
