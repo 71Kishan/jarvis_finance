@@ -93,7 +93,7 @@ export const MultiAssetRadarModal: React.FC<MultiAssetRadarModalProps> = ({
                 </span>
               </div>
               <p className="text-xs text-neutral-400">
-                Scans Crypto, Tech Stocks, Indices & Forex. If current asset score is below minimum threshold, instantly finds profitable setups.
+                Scans supported assets using connected market data. Radar results are research candidates, not trade approvals.
               </p>
             </div>
           </div>
@@ -129,7 +129,7 @@ export const MultiAssetRadarModal: React.FC<MultiAssetRadarModalProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <span className="text-xs font-semibold text-neutral-200">
-                  Autonomous Cross-Asset Auto-Rotator
+                  Cross-Asset Research Scanner
                 </span>
                 <span
                   className={`text-[10px] font-mono font-bold px-1.5 py-0.2 rounded ${
@@ -142,7 +142,7 @@ export const MultiAssetRadarModal: React.FC<MultiAssetRadarModalProps> = ({
                 </span>
               </div>
               <div className="text-[11px] text-neutral-400">
-                When current asset score is &lt;{minConfidence}%, automatically rotate capital to highest confluence asset.
+                Scores below {minConfidence}% are shown for review only. The radar never moves capital automatically.
               </div>
             </div>
           </div>
