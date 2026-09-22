@@ -630,7 +630,7 @@ export default function App() {
         />
       )}
 
-      {/* Autonomous Multi-Asset Opportunity Radar Modal */}
+      {/* Multi-Asset Research Radar Modal */}
       <MultiAssetRadarModal
         isOpen={isRadarOpen}
         onClose={() => setIsRadarOpen(false)}
@@ -649,7 +649,7 @@ export default function App() {
         onApplyStrategy={handleApplyStrategy}
       />
 
-      {/* 24/7 Market Hours & Android Auto-Pilot Modal */}
+      {/* Market Hours & Mobile Runtime Modal */}
       <MarketHoursModal
         isOpen={isMarketHoursOpen}
         onClose={() => setIsMarketHoursOpen(false)}
@@ -679,7 +679,7 @@ export default function App() {
         />
       )}
 
-      {/* Cold Storage Profit Vault & Withdrawal Ledger Modal */}
+      {/* Virtual Paper Reserve & Transfer Ledger Modal */}
       {vitality && tradingEngineRef.current && (
         <ProfitVaultModal
           isOpen={isProfitVaultOpen}
@@ -689,7 +689,7 @@ export default function App() {
         />
       )}
 
-      {/* Security PIN Lock Screen Overlay (Zero-Knowledge Session Guard) */}
+      {/* Local Security PIN Lock Screen Overlay */}
       {isSessionLocked && (
         <SecurityPinLockScreen onUnlock={() => setIsSessionLocked(false)} />
       )}
