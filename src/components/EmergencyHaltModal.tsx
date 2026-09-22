@@ -54,7 +54,7 @@ export const EmergencyHaltModal: React.FC<EmergencyHaltModalProps> = ({
               Emergency Circuit Breaker Triggered
             </h2>
             <p className="text-[11px] text-rose-300">
-              Operations halted immediately to preserve portfolio capital
+              Paper trading halted by modeled risk controls
             </p>
           </div>
         </div>
@@ -64,14 +64,14 @@ export const EmergencyHaltModal: React.FC<EmergencyHaltModalProps> = ({
           {/* Capital Preservation Statement */}
           <div className="bg-neutral-900/90 border border-neutral-800 rounded-xl p-3.5 space-y-2">
             <div className="flex items-center justify-between text-neutral-300">
-              <span>Capital Preserved Safely:</span>
+              <span>Paper Equity at Halt:</span>
               <strong className="text-base text-emerald-400 font-bold">
                 ${vitality.currentEquity.toLocaleString("en-US", { minimumFractionDigits: 2 })}
               </strong>
             </div>
 
             <div className="flex items-center justify-between text-neutral-400 text-[11px] pt-1 border-t border-neutral-800">
-              <span>Controlled Drawdown Limited At:</span>
+              <span>Observed Drawdown at Halt:</span>
               <span className="text-rose-400 font-bold">
                 -${Math.abs(lossDollars).toFixed(2)} (-{vitality.currentDrawdownPercent}%)
               </span>
@@ -92,7 +92,7 @@ export const EmergencyHaltModal: React.FC<EmergencyHaltModalProps> = ({
               <span>Circuit Attribution & Risk Analysis</span>
             </div>
             <p className="text-neutral-300 text-[11px] leading-relaxed">
-              The algorithm detected adverse market regime dislocation and reached the pre-set risk boundary. Rather than allowing compounding drawdown, the system strictly enforced its fiduciary circuit breaker: open positions were safely liquidated and automated order entry was suspended.
+              The paper engine reached its configured risk boundary. New paper entries are suspended. This simulation control cannot guarantee real-market liquidation, gap protection, or capital preservation.
             </p>
             <p className="text-indigo-300 text-[11px] bg-indigo-950/30 p-2 rounded border border-indigo-900/40">
               Risk-halt state reached. The modeled limits stop new paper entries; they cannot guarantee protection from real-market gaps or losses.
