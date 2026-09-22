@@ -3,6 +3,7 @@ import { DEFAULT_RISK_POLICY, evaluateRisk } from "../src/engine/riskPolicy";
 import { DEFAULT_STRATEGY, TradingEngine } from "../src/engine/tradingEngine";
 import { modelEntryFill, modelExitFill, resolveStopTarget, grossPnL } from "../src/engine/executionModel";
 import { evaluateSignal } from "../src/engine/signalEngine";
+import { calculateRSI } from "../src/engine/indicators";
 import { Candle } from "../src/types/trading";
 import { PaperStateStore } from "../src/server/paperStateStore";
 import { existsSync, unlinkSync } from "fs";
@@ -97,6 +98,21 @@ describe("automated paper entry timing", () => {
     const trade = engine.getActiveTrade();
     expect(trade).not.toBeNull();
     expect(trade?.entryPrice).toBeGreaterThan(nextBar.open);
+  });
+});
+
+describe("indicator math", () => {
+  test("returns neutral RSI for a flat series", () => {
+    const flat = Array.from({ length: 30 }, () => 100);
+    const values = calculateRSI(flat, 14);
+    expect(values[values.length - 1]).toBe(50);
+  });
+
+  test("returns bounded RSI for monotonic series", () => {
+    const rising = Array.from({ length: 30 }, (_, i) => 100 + i);
+    const falling = Array.from({ length: 30 }, (_, i) => 100 - i);
+    expect(calculateRSI(rising, 14).at(-1)).toBe(100);
+    expect(calculateRSI(falling, 14).at(-1)).toBe(0);
   });
 });
 
