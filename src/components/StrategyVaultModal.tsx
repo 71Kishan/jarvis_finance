@@ -71,11 +71,6 @@ export const StrategyVaultModal: React.FC<StrategyVaultModalProps> = ({
     setTimeout(() => setFeedback(null), 4500);
   };
 
-  const progressPercent = Math.min(
-    100,
-    Math.max(0, (dailyGoal.currentDailyPnlUsd / dailyGoal.dailyTargetUsd) * 100)
-  );
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
       <div
@@ -144,15 +139,11 @@ export const StrategyVaultModal: React.FC<StrategyVaultModalProps> = ({
             </div>
           </div>
 
-          {/* No profit-target progress bar: Jarvis measures process, not a required income quota. */}
-          <div className="w-full bg-neutral-950 rounded-full h-2 overflow-hidden border border-neutral-800">
-            <div
-              className={`h-full transition-all duration-500 ${
-                dailyGoal.targetAchieved ? "bg-emerald-400 animate-pulse" : "bg-emerald-500"
-              }`}
-              style={{ width: `${progressPercent}%` }}
-            />
+          <div className="flex justify-between items-center text-[10px] text-neutral-500 mt-2 font-mono">
+            <span>P&L today: {dailyGoal.currentDailyPnlUsd >= 0 ? "+" : ""}${dailyGoal.currentDailyPnlUsd.toFixed(2)}</span>
+            <span>{dailyGoal.tradesCountToday} paper trades logged</span>
           </div>
+        </div>
           <div className="flex justify-between items-center text-[10px] text-neutral-500 mt-1 font-mono">
             <span>Progress: {progressPercent.toFixed(1)}%</span>
             <span>
