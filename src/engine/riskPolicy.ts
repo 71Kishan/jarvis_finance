@@ -22,6 +22,7 @@ export interface RiskCheckInput {
   requestedNotional: number;
   leverage: number;
   spreadBps?: number;
+  marketOpen?: boolean;
   candle?: Candle;
   stopLossPercent: number;
   recentLossCount: number;
@@ -60,6 +61,7 @@ export function evaluateRisk(policy: RiskPolicyConfig, input: RiskCheckInput, st
   const dailyDrawdownPct = dailyStartEquity > 0 ? ((dailyStartEquity - equity) / dailyStartEquity) * 100 : 0;
   if (dailyDrawdownPct >= policy.maxDailyLossPercent) reasons.push(`Daily drawdown ${dailyDrawdownPct.toFixed(2)}% reached the configured daily loss limit.`);
 
+  if (input.marketOpen === false) reasons.push("Market session is closed for this asset; no live paper entry is allowed.");
   if (input.spreadBps !== undefined && input.spreadBps > policy.maxSpreadBps) reasons.push(`Spread ${input.spreadBps.toFixed(1)} bps exceeds the ${policy.maxSpreadBps} bps cap.`);
 
   if (input.candle && input.candle.close > 0 && input.candle.indicators?.atr !== undefined) {
