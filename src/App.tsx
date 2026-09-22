@@ -318,6 +318,8 @@ export default function App() {
   // Apply Evolved Strategy from AI Lab
   const handleApplyStrategy = (newStrategy: StrategyConfig) => {
     if (!tradingEngineRef.current) return;
+    // Loading a research candidate never leaves automated paper execution running.
+    setIsAutoTrading(false);
     tradingEngineRef.current.updateStrategy(newStrategy);
     syncStateFromEngine();
   };
