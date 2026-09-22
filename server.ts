@@ -614,7 +614,12 @@ app.get("/api/market/live-feed", async (req: Request, res: Response) => {
         fetchJsonWithTimeout(`https://api.binance.com/api/v3/ticker/24hr?symbol=${binanceSymbol}`, { "User-Agent": "JarvisFinance/1.0" }),
       ]);
       if (!Array.isArray(klinesRes)) throw new Error("Invalid Binance candle payload.");
-      const candles = klinesRes.map((k: any[]) => ({ timestamp: Number(k[0]), open: Number(k[1]), high: Number(k[2]), low: Number(k[3]), close: Number(k[4]), volume: Number(k[5]) }));
+      // Binance kline index 6 is the provider-defined close time. Only feed completed
+      // candles to the signal engine; the current in-progress 1m candle is mark data,
+      // not a completed observation suitable for a new signal.
+      const nowMs = Date.now();
+      const closedKlines = klinesRes.filter((k: any[]) => Number(k[6]) <= nowMs).slice(-limit);
+      const candles = closedKlines.map((k: any[]) => ({ timestamp: Number(k[0]), open: Number(k[1]), high: Number(k[2]), low: Number(k[3]), close: Number(k[4]), volume: Number(k[5]) }));
       const rawTicker = tickerRes || {};
       return res.json({
         success: true, status: "OK", symbol: symbolParam, candles,
@@ -642,16 +647,17 @@ app.get("/api/market/live-feed", async (req: Request, res: Response) => {
       ticker: symbolParam, interval: "minute", interval_multiplier: "1",
       start_date: start.toISOString().slice(0,10), end_date: end.toISOString().slice(0,10),
     }));
-    let candles = parsePriceRows(pricesPayload).map(mapPriceRow).filter((x: any) => x.timestamp > 0 && x.close !== null).slice(-limit);
-    if (candles.length < 20) {
-      const dailyPayload = await cached(`fds:daily:${symbolParam}`, 60000, () => fetchFinancialDatasets("/prices/", {
-        ticker: symbolParam, interval: "day", interval_multiplier: "1",
-        start_date: start.toISOString().slice(0,10), end_date: end.toISOString().slice(0,10),
-      }));
-      candles = parsePriceRows(dailyPayload).map(mapPriceRow).filter((x: any) => x.timestamp > 0 && x.close !== null).slice(-limit);
-    }
+    const candles = parsePriceRows(pricesPayload).map(mapPriceRow).filter((x: any) => x.timestamp > 0 && x.close !== null).slice(-limit);
 
-    if (!candles.length) throw new Error("Financial Datasets returned no usable price history.");
+    // Do not silently replace an intraday research feed with daily bars. The paper
+    // engine's signal horizon must match the requested timeframe.
+    if (candles.length < 20) {
+      return res.status(503).json({
+        success: false,
+        status: "DATA_UNAVAILABLE",
+        error: "Trusted intraday market data did not provide enough completed bars for this paper timeframe.",
+      });
+    }
     return res.json({
       success: true, status: "OK", symbol: symbolParam, candles,
       ticker: {
