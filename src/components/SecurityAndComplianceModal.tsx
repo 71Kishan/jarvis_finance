@@ -145,7 +145,7 @@ export const SecurityAndComplianceModal: React.FC<SecurityAndComplianceModalProp
                 Security Vault, Legal Disclosures & Quant Defense
               </h2>
               <p className="text-xs text-neutral-400 font-sans">
-                Financial law compliance, SHA-256 trade provenance, and AES-256-GCM encryption
+                Trading-software security controls, local audit hashing, and key-handling guidance
               </p>
             </div>
           </div>
@@ -313,7 +313,7 @@ export const SecurityAndComplianceModal: React.FC<SecurityAndComplianceModalProp
                         : "bg-neutral-800 text-neutral-400"
                     }`}
                   >
-                    {slippageFilterActive ? "ACTIVE (PROTECTED)" : "DISABLED"}
+                    {slippageFilterActive ? "ACTIVE" : "DISABLED"}
                   </button>
                 </div>
 
@@ -336,7 +336,7 @@ export const SecurityAndComplianceModal: React.FC<SecurityAndComplianceModalProp
                         : "bg-neutral-800 text-neutral-400"
                     }`}
                   >
-                    {atrSpikeFilterActive ? "ACTIVE (PROTECTED)" : "DISABLED"}
+                    {atrSpikeFilterActive ? "ACTIVE" : "DISABLED"}
                   </button>
                 </div>
 
@@ -359,7 +359,7 @@ export const SecurityAndComplianceModal: React.FC<SecurityAndComplianceModalProp
                         : "bg-neutral-800 text-neutral-400"
                     }`}
                   >
-                    {maxDailyLossActive ? "ACTIVE (PROTECTED)" : "DISABLED"}
+                    {maxDailyLossActive ? "ACTIVE" : "DISABLED"}
                   </button>
                 </div>
               </div>
@@ -373,7 +373,7 @@ export const SecurityAndComplianceModal: React.FC<SecurityAndComplianceModalProp
                       Cryptographic Trade Audit Ledger (SHA-256 Provenance)
                     </h4>
                     <p className="text-[11px] text-neutral-400">
-                      Every trade creates an immutable, cryptographically chained block proving zero tampering of trade records.
+                      Trade records can be hashed for local integrity checks. A local hash is not a tamper-proof external ledger or custody record.
                     </p>
                   </div>
 
@@ -401,7 +401,7 @@ export const SecurityAndComplianceModal: React.FC<SecurityAndComplianceModalProp
                       <>
                         <CheckCircle2 className="w-4 h-4 shrink-0" />
                         <span>
-                          LEDGER VERIFIED: All {ledgerVerificationResult.verifiedCount} historical trade blocks are intact with valid SHA-256 signatures. No tampering detected.
+                          LOCAL HASH CHECK: {ledgerVerificationResult.verifiedCount} stored records passed the current client-side hash check. This is not an external audit.
                         </span>
                       </>
                     ) : (
