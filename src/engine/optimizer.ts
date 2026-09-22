@@ -144,6 +144,7 @@ export class StrategyOptimizer {
         lastLossAtMs > 0 &&
         candle.timestamp - lastLossAtMs < DEFAULT_RISK_POLICY.cooldownMinutes * 60_000;
 
+      let openedThisBar = false;
       if (!position && !halted && !inCooldown) {
         const signal = evaluateSignal(candle, candles.slice(0, i), s);
         if (signal.eligible) {
@@ -180,6 +181,7 @@ export class StrategyOptimizer {
                 highestPrice: entry.fillPrice,
                 lowestPrice: entry.fillPrice,
               };
+              openedThisBar = true;
             }
           }
         }
@@ -188,7 +190,12 @@ export class StrategyOptimizer {
       const openPnl = position
         ? grossPnL(position.type, position.entryPrice, candle.close, position.amount)
         : 0;
-      const equity = cash + (position ? position.sizeUsd : 0) + openPnl;
+      // A signal on bar i fills at bar i+1 open. Do not mark the new position
+      // against bar i's close; that close predates the fill and would create
+      // look-ahead P&L. For the opening bar, equity reflects the entry fee only.
+      const equity = openedThisBar
+        ? cash + (position ? position.sizeUsd : 0)
+        : cash + (position ? position.sizeUsd : 0) + openPnl;
       peak = Math.max(peak, equity);
       const drawdown = peak > 0 ? ((peak - equity) / peak) * 100 : 0;
       maxDrawdown = Math.max(maxDrawdown, drawdown);
