@@ -292,14 +292,24 @@ function computeQuantitativeCritique(trade: any, marketSnapshot: any) {
   };
 }
 
-function computeQuantitativeMarketIntelligence(asset: string) {
-  const cleanAsset = asset || "BTC/USD";
+function computeQuantitativeMarketIntelligence(asset: string, marketSnapshot: any = null) {
+  const cleanAsset = asset || "Unknown asset";
+  const price = Number(marketSnapshot?.price);
+  const change = Number(marketSnapshot?.change24hPercent);
+  const label = Number.isFinite(change)
+    ? (change > 1 ? "POSITIVE MOMENTUM" : change < -1 ? "NEGATIVE MOMENTUM" : "MIXED")
+    : "UNAVAILABLE";
+
   return {
-    headline: `${cleanAsset}: Order flow microstructures indicate institutional accumulation at primary liquidity boundaries.`,
-    sentimentScore: 66,
-    sentimentLabel: "Quantitative Accumulation & Volatility Contraction",
-    hazardAlert: "Normal - Order book depth reflects balanced institutional participation.",
-    botActionPlan: "Maintain limit-order execution; enter positions upon confirmed exponential moving average crossover.",
+    headline: marketSnapshot
+      ? `${cleanAsset}: supplied market snapshot available; deeper liquidity data is not assumed.`
+      : `${cleanAsset}: market-structure intelligence unavailable without a trusted snapshot.`,
+    sentimentScore: Number.isFinite(change) ? Math.max(0, Math.min(100, 50 + change * 5)) : null,
+    sentimentLabel: label,
+    hazardAlert: Number.isFinite(price)
+      ? "Price snapshot available. Order-book depth, institutional flow and liquidity imbalance require separately sourced data."
+      : "No trusted market snapshot supplied.",
+    botActionPlan: "Do not trade from AI sentiment alone. Require deterministic market data, a validated strategy signal, and the risk engine.",
   };
 }
 
@@ -314,9 +324,10 @@ app.post("/api/bot/study", async (req: Request, res: Response) => {
       return res.json(localFallback);
     }
 
-    const prompt = `You are the core Quantitative Risk Architect of an Autonomous Algorithmic Trading System.
-Your mandate is strictly capital preservation and mathematical edge.
-Analyze the following portfolio and market data:
+    const prompt = `You are Jarvis Finance's research assistant.
+Use only the supplied portfolio, market, strategy and performance data. Never fabricate values or market events.
+Treat any strategy recommendation as an unvalidated research hypothesis, not as an execution instruction.
+Analyze the following data:
 
 Market Context:
 ${JSON.stringify(body.marketContext || {}, null, 2)}
@@ -325,9 +336,9 @@ Current Strategy Parameters:
 ${JSON.stringify(body.currentStrategy || {}, null, 2)}
 
 Equity & Performance Stats:
-- Drawdown: ${body.drawdownPercent || 0}%
-- Win Rate: ${body.equityStats?.winRate || 0}%
-- Total Trades: ${body.equityStats?.totalTrades || 0}
+- Drawdown: ${Number.isFinite(Number(body.drawdownPercent)) ? body.drawdownPercent + "%" : "unavailable"}
+- Win Rate: ${Number.isFinite(Number(body.equityStats?.winRate)) ? body.equityStats.winRate + "%" : "unavailable"}
+- Total Trades: ${Number.isFinite(Number(body.equityStats?.totalTrades)) ? body.equityStats.totalTrades : "unavailable"}
 
 Provide an institutional quantitative analysis in valid JSON:
 {
@@ -418,60 +429,30 @@ Provide an institutional post-trade execution analysis in valid JSON:
 
 // Endpoint: Quantitative Market Structure Intelligence (Self-Sustaining)
 app.post("/api/bot/market-news", async (req: Request, res: Response) => {
-  const { asset } = req.body || {};
-  const localIntel = computeQuantitativeMarketIntelligence(asset);
+  const { asset, marketSnapshot } = req.body || {};
+  const localIntel = computeQuantitativeMarketIntelligence(asset, marketSnapshot);
 
   try {
     const ai = getAIClient();
-    if (!ai) {
-      return res.json(localIntel);
-    }
+    if (!ai) return res.json(localIntel);
 
-    const prompt = `Generate a high-frequency quantitative market intelligence briefing for ${asset || "BTC/USD"}.
-Focus on order book depth, liquidity imbalance, and volatility regime.
-Return valid JSON:
-{
-  "headline": "concise market structure summary",
-  "sentimentScore": number (0 to 100),
-  "sentimentLabel": "string",
-  "hazardAlert": "string describing macro hazard or clear liquidity",
-  "botActionPlan": "specific execution directive"
-}`;
+    const prompt = `Analyze only the supplied market snapshot for ${asset || "the asset"}.
+Never invent order-book depth, institutional activity, news, liquidity imbalance, or market events that are not present in the input.
+Return JSON with: headline, sentimentScore (0-100 or null), sentimentLabel, hazardAlert, botActionPlan.
+Snapshot: ${JSON.stringify(marketSnapshot || {}, null, 2)}`;
 
     const response = await ai.models.generateContent({
       model: "gemini-3.8-flash",
       contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-      },
+      config: { responseMimeType: "application/json", temperature: 0.2 },
     });
-
     const parsed = JSON.parse(response.text || "{}");
     return res.json({ ...localIntel, ...parsed });
   } catch (error: any) {
-    console.warn("Gemini API unavailable - executing local market intelligence:", error?.message || error);
+    console.warn("Market intelligence unavailable:", error?.message || error);
     return res.json(localIntel);
   }
 });
-
-// Map symbols to Binance pairs where available
-const SYMBOL_MAP: Record<string, string> = {
-  "BTC/USD": "BTCUSDT",
-  "ETH/USD": "ETHUSDT",
-  "SOL/USD": "SOLUSDT",
-  "DOGE/USD": "DOGEUSDT",
-  "XRP/USD": "XRPUSDT",
-};
-
-const STOCK_UNIVERSE: Record<string, { category: "STOCK" | "INDEX"; name: string }> = {
-  AAPL: { category: "STOCK", name: "Apple Inc." },
-  MSFT: { category: "STOCK", name: "Microsoft Corp." },
-  NVDA: { category: "STOCK", name: "NVIDIA Corp." },
-  AMZN: { category: "STOCK", name: "Amazon.com Inc." },
-  META: { category: "STOCK", name: "Meta Platforms Inc." },
-  SPY: { category: "INDEX", name: "SPDR S&P 500 ETF" },
-  QQQ: { category: "INDEX", name: "Invesco QQQ Trust" },
-};
 
 app.get("/api/market/multi-scan", async (req: Request, res: Response) => {
   try {
@@ -646,7 +627,7 @@ const httpServer = http.createServer(app);
             voiceConfig: { prebuiltVoiceConfig: { voiceName: "Zephyr" } },
           },
           systemInstruction:
-            "You are AEGIS Live Voice Copilot. Speak concisely in real time, explaining trading metrics, risk limits, market confluence, and terminal features.",
+            "You are Jarvis Finance Live Voice Copilot. Speak concisely in real time, explaining trading metrics, risk limits, market confluence, and terminal features.",
         },
         callbacks: {
           onmessage: (message: LiveServerMessage) => {
@@ -717,7 +698,7 @@ const httpServer = http.createServer(app);
   }
 
   httpServer.listen(PORT, "0.0.0.0", () => {
-    console.log(`Autonomous Trading Bot Server running on http://0.0.0.0:${PORT}`);
+    console.log(`Jarvis Finance server running on http://0.0.0.0:${PORT}`);
   });
 }
 
