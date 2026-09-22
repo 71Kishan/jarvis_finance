@@ -86,14 +86,14 @@ export const MultiAssetRadarModal: React.FC<MultiAssetRadarModalProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <h3 className="text-base font-bold text-neutral-100">
-                  Autonomous Multi-Market Opportunity Scanner
+                  Multi-Market Research Radar
                 </h3>
                 <span className="px-2 py-0.5 rounded text-[10px] font-mono uppercase bg-indigo-950 text-indigo-300 border border-indigo-800">
                   Global Universe
                 </span>
               </div>
               <p className="text-xs text-neutral-400">
-                Scans Crypto, Tech Stocks, Indices & Forex. If current asset score is below minimum threshold, instantly finds profitable setups.
+                Scans supported assets using connected market data. Radar results are research candidates, not trade approvals.
               </p>
             </div>
           </div>
@@ -120,7 +120,7 @@ export const MultiAssetRadarModal: React.FC<MultiAssetRadarModalProps> = ({
           </div>
         </div>
 
-        {/* Top Feature Banner: Autonomous Asset Rotator Status */}
+        {/* Top Feature Banner: Research Universe Rotation */}
         <div className="bg-gradient-to-r from-neutral-950 via-indigo-950/40 to-neutral-950 p-4 border-b border-neutral-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-emerald-500/10 text-emerald-400 rounded-lg border border-emerald-500/20">
@@ -129,7 +129,7 @@ export const MultiAssetRadarModal: React.FC<MultiAssetRadarModalProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <span className="text-xs font-semibold text-neutral-200">
-                  Autonomous Cross-Asset Auto-Rotator
+                  Cross-Asset Research Scanner
                 </span>
                 <span
                   className={`text-[10px] font-mono font-bold px-1.5 py-0.2 rounded ${
@@ -138,27 +138,16 @@ export const MultiAssetRadarModal: React.FC<MultiAssetRadarModalProps> = ({
                       : "bg-neutral-800 text-neutral-400"
                   }`}
                 >
-                  {autoRotate ? "ENABLED" : "MANUAL"}
+                  {autoRotate ? "RESEARCH MODE" : "MANUAL"}
                 </span>
               </div>
               <div className="text-[11px] text-neutral-400">
-                When current asset score is &lt;{minConfidence}%, automatically rotate capital to highest confluence asset.
+                Scores below {minConfidence}% are shown for review only. The radar only changes the research focus; it never moves capital or approves a trade automatically.
               </div>
             </div>
           </div>
 
-          <button
-            id="toggle-auto-rotate-btn"
-            type="button"
-            onClick={onToggleAutoRotate}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-              autoRotate
-                ? "bg-emerald-600 hover:bg-emerald-500 text-white shadow-md shadow-emerald-900/30"
-                : "bg-neutral-800 hover:bg-neutral-700 text-neutral-300 border border-neutral-700"
-            }`}
-          >
-            {autoRotate ? "Auto-Rotation Active" : "Enable Auto-Rotation"}
-          </button>
+          <span className="px-3 py-1.5 rounded-lg text-xs font-bold bg-neutral-800 text-neutral-300 border border-neutral-700">Research Asset Selection</span>
         </div>
 
         {/* Top Opportunity Highlight */}
@@ -195,13 +184,13 @@ export const MultiAssetRadarModal: React.FC<MultiAssetRadarModalProps> = ({
               id="switch-to-top-opportunity-btn"
               type="button"
               onClick={() => {
-                onSelectAndTradeAsset(topOpportunity.symbol as AssetSymbol, true);
+                onSelectAndTradeAsset(topOpportunity.symbol as AssetSymbol, false);
                 onClose();
               }}
               className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-lg flex items-center gap-1.5 transition-colors whitespace-nowrap shadow-md"
             >
               <Zap className="w-3.5 h-3.5" />
-              <span>Switch & Execute Paper Trade</span>
+              <span>Switch & Review Signal</span>
             </button>
           </div>
         )}
@@ -306,7 +295,7 @@ export const MultiAssetRadarModal: React.FC<MultiAssetRadarModalProps> = ({
                         </span>
                       </div>
                       <div className="text-[10px] text-neutral-500">
-                        {op.isEligible ? "Meets Edge Criteria" : "Sub-threshold Abstain"}
+                        {op.isEligible ? "Screen Threshold Met" : "Review / Abstain"}
                       </div>
                     </div>
 
@@ -315,7 +304,7 @@ export const MultiAssetRadarModal: React.FC<MultiAssetRadarModalProps> = ({
                       id={`trade-asset-${op.symbol.replace(/[^a-zA-Z0-9]/g, "")}`}
                       type="button"
                       onClick={() => {
-                        onSelectAndTradeAsset(op.symbol as AssetSymbol, true);
+                        onSelectAndTradeAsset(op.symbol as AssetSymbol, false);
                         onClose();
                       }}
                       className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors ${
@@ -324,7 +313,7 @@ export const MultiAssetRadarModal: React.FC<MultiAssetRadarModalProps> = ({
                           : "bg-neutral-800 hover:bg-neutral-700 text-neutral-300 border border-neutral-700"
                       }`}
                     >
-                      <span>Switch & Trade</span>
+                      <span>Switch & Scan</span>
                       <ArrowRight className="w-3.5 h-3.5" />
                     </button>
                   </div>

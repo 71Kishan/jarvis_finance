@@ -1,0 +1,19 @@
+services:
+  jarvis-finance:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      JARVIS_PAPER_STATE_FILE: /app/data/paper-runtime.json
+      # Keep this false until the paper strategy has completed validation.
+      JARVIS_PAPER_AUTOSTART: "false"
+    volumes:
+      - jarvis-paper-data:/app/data
+    stop_grace_period: 30s
+
+volumes:
+  jarvis-paper-data:

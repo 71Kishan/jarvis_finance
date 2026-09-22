@@ -30,12 +30,37 @@ export interface MarketHoursSchedule {
 
 export function getGlobalMarketSchedule(): MarketHoursSchedule {
   const now = new Date();
-  const utcDay = now.getUTCDay(); // 0 = Sun, 1 = Mon, ..., 6 = Sat
-  const utcHours = now.getUTCHours();
-  const utcMinutes = now.getUTCMinutes();
-  const utcTimeMinutes = utcHours * 60 + utcMinutes;
 
-  // 1. CRYPTO: 24 hours a day, 7 days a week, 365 days a year
+  const zoned = (timeZone: string) => {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      weekday: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(now);
+    const get = (type: string) => parts.find((p) => p.type === type)?.value || "";
+    const weekday = get("weekday");
+    const dayIndex = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(weekday);
+    return { dayIndex, minutes: Number(get("hour")) * 60 + Number(get("minute")) };
+  };
+
+  const formatDuration = (minutes: number) => {
+    const total = Math.max(0, Math.round(minutes));
+    return `${Math.floor(total / 60)}h ${total % 60}m`;
+  };
+
+  const sessionProgress = (minutes: number, open: number, close: number) =>
+    Math.max(0, Math.min(100, Math.round(((minutes - open) / Math.max(1, close - open)) * 100)));
+
+  const us = zoned("America/New_York");
+  const london = zoned("Europe/London");
+  const tokyo = zoned("Asia/Tokyo");
+  const utcDay = now.getUTCDay();
+  const utcMinutes = now.getUTCHours() * 60 + now.getUTCMinutes();
+
+  // Crypto is continuously tradeable from a market-hours perspective; execution still
+  // depends on fresh provider data and risk gates.
   const cryptoSession: MarketSession = {
     id: "CRYPTO_24_7",
     name: "Crypto Continuous",
@@ -43,67 +68,56 @@ export function getGlobalMarketSchedule(): MarketHoursSchedule {
     timezone: "UTC",
     isOpen: true,
     statusLabel: "OPEN",
-    currentSessionProgress: Math.round((utcTimeMinutes / 1440) * 100),
-    nextTransitionLabel: "Daily Candle Close",
-    nextTransitionTime: `in ${23 - utcHours}h ${59 - utcMinutes}m`,
-    hoursDisplay: "24/7/365 Continuous",
+    currentSessionProgress: sessionProgress(utcMinutes, 0, 1440),
+    nextTransitionLabel: "Daily clock rollover",
+    nextTransitionTime: `in ${formatDuration(1440 - utcMinutes)}`,
+    hoursDisplay: "24/7 market availability",
     badgeColor: "text-emerald-400 bg-emerald-500/10 border-emerald-500/30",
   };
 
-  // 2. US STOCKS (NYSE / NASDAQ): Monday to Friday, 9:30 AM to 4:00 PM Eastern Time (UTC-4 in EDT or UTC-5 in EST)
-  // Let's approximate UTC 13:30 to 20:00 (EDT standard)
-  const isWeekend = utcDay === 0 || utcDay === 6;
-  const usOpenMinutes = 13 * 60 + 30; // 13:30 UTC (9:30 AM EDT)
-  const usCloseMinutes = 20 * 60; // 20:00 UTC (4:00 PM EDT)
-  const usPreMarketStart = 8 * 60; // 08:00 UTC (4:00 AM EDT)
-  const usPostMarketEnd = 24 * 60;
+  const isUsWeekday = us.dayIndex >= 1 && us.dayIndex <= 5;
+  const usOpenMinutes = 9 * 60 + 30;
+  const usCloseMinutes = 16 * 60;
+  const usPreStart = 4 * 60;
+  const usPostEnd = 20 * 60;
 
   let usStatus: MarketSession["statusLabel"] = "CLOSED";
   let usOpen = false;
   let usProgress = 0;
-  let usNextTrans = "";
-  let usNextTime = "";
+  let usNextTrans = "Next regular session";
+  let usNextTime = "09:30 ET";
 
-  if (isWeekend) {
+  if (!isUsWeekday) {
     usStatus = "WEEKEND";
-    usNextTrans = "Opens Monday";
-    const daysUntilMonday = (8 - utcDay) % 7 || 1;
-    usNextTime = `in ${daysUntilMonday}d`;
-  } else {
-    if (utcTimeMinutes >= usOpenMinutes && utcTimeMinutes < usCloseMinutes) {
-      usStatus = "OPEN";
-      usOpen = true;
-      usProgress = Math.round(((utcTimeMinutes - usOpenMinutes) / (usCloseMinutes - usOpenMinutes)) * 100);
-      const remMin = usCloseMinutes - utcTimeMinutes;
-      usNextTrans = "Closes";
-      usNextTime = `in ${Math.floor(remMin / 60)}h ${remMin % 60}m`;
-    } else if (utcTimeMinutes >= usPreMarketStart && utcTimeMinutes < usOpenMinutes) {
-      usStatus = "PRE_MARKET";
-      const remMin = usOpenMinutes - utcTimeMinutes;
-      usNextTrans = "Regular Open";
-      usNextTime = `in ${Math.floor(remMin / 60)}h ${remMin % 60}m`;
-    } else if (utcTimeMinutes >= usCloseMinutes && utcTimeMinutes < usPostMarketEnd) {
-      usStatus = "POST_MARKET";
-      usNextTrans = "Session End";
-      usNextTime = "After-hours active";
-    } else {
-      usStatus = "CLOSED";
-      usNextTrans = "Pre-market";
-      usNextTime = "Overnight";
-    }
+    usNextTrans = "Next regular session";
+    usNextTime = "Monday 09:30 ET";
+  } else if (us.minutes >= usOpenMinutes && us.minutes < usCloseMinutes) {
+    usStatus = "OPEN";
+    usOpen = true;
+    usProgress = sessionProgress(us.minutes, usOpenMinutes, usCloseMinutes);
+    usNextTrans = "Regular close";
+    usNextTime = `in ${formatDuration(usCloseMinutes - us.minutes)}`;
+  } else if (us.minutes >= usPreStart && us.minutes < usOpenMinutes) {
+    usStatus = "PRE_MARKET";
+    usNextTrans = "Regular open";
+    usNextTime = `in ${formatDuration(usOpenMinutes - us.minutes)}`;
+  } else if (us.minutes >= usCloseMinutes && us.minutes < usPostEnd) {
+    usStatus = "POST_MARKET";
+    usNextTrans = "Extended-hours window ends";
+    usNextTime = `in ${formatDuration(usPostEnd - us.minutes)}`;
   }
 
   const usStocksSession: MarketSession = {
     id: "US_EQUITIES",
-    name: "Wall Street (NYSE/NASDAQ)",
+    name: "US Equities (NYSE / NASDAQ)",
     category: "STOCK",
-    timezone: "US Eastern (UTC-4)",
+    timezone: "America/New_York",
     isOpen: usOpen,
     statusLabel: usStatus,
     currentSessionProgress: usProgress,
     nextTransitionLabel: usNextTrans,
     nextTransitionTime: usNextTime,
-    hoursDisplay: "Mon-Fri 09:30 - 16:00 ET",
+    hoursDisplay: "Mon-Fri 09:30-16:00 ET",
     badgeColor: usOpen
       ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/30"
       : usStatus === "PRE_MARKET" || usStatus === "POST_MARKET"
@@ -111,81 +125,64 @@ export function getGlobalMarketSchedule(): MarketHoursSchedule {
       : "text-neutral-400 bg-neutral-900 border-neutral-800",
   };
 
-  // 3. FOREX: Sunday 21:00 UTC (Sydney open) to Friday 21:00 UTC (New York close)
-  let forexOpen = false;
-  let forexStatus: MarketSession["statusLabel"] = "CLOSED";
-  let forexNextTrans = "";
-  let forexNextTime = "";
-
-  if (utcDay === 6 || (utcDay === 5 && utcHours >= 21) || (utcDay === 0 && utcHours < 21)) {
-    forexOpen = false;
-    forexStatus = "WEEKEND";
-    forexNextTrans = "Sydney Open (Sun)";
-    forexNextTime = "Opens Sun 21:00 UTC";
-  } else {
-    forexOpen = true;
-    forexStatus = "OPEN";
-    forexNextTrans = "Weekend Close (Fri)";
-    forexNextTime = "Active 24/5";
-  }
-
+  // FX spot market is typically active from Sunday 21:00 UTC through Friday 21:00 UTC;
+  // broker/liquidity-provider schedules can differ around holidays and maintenance.
+  const forexOpen = !(
+    utcDay === 6 ||
+    (utcDay === 5 && utcMinutes >= 21 * 60) ||
+    (utcDay === 0 && utcMinutes < 21 * 60)
+  );
   const forexSession: MarketSession = {
     id: "FOREX_24_5",
-    name: "Global FX (Forex 24/5)",
+    name: "Global FX",
     category: "FOREX",
-    timezone: "Global Interbank",
+    timezone: "UTC",
     isOpen: forexOpen,
-    statusLabel: forexStatus,
-    currentSessionProgress: forexOpen ? 75 : 0,
-    nextTransitionLabel: forexNextTrans,
-    nextTransitionTime: forexNextTime,
-    hoursDisplay: "Sun 21:00 - Fri 21:00 UTC",
+    statusLabel: forexOpen ? "OPEN" : "WEEKEND",
+    currentSessionProgress: forexOpen ? 50 : 0,
+    nextTransitionLabel: forexOpen ? "Continuous session" : "Next weekly open",
+    nextTransitionTime: forexOpen ? "Active" : "Sunday 21:00 UTC",
+    hoursDisplay: "Generally Sun 21:00-Fri 21:00 UTC",
     badgeColor: forexOpen
       ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/30"
       : "text-neutral-400 bg-neutral-900 border-neutral-800",
   };
 
-  // 4. LONDON SESSION (07:00 UTC - 15:30 UTC Mon-Fri)
-  const londonOpenMinutes = 7 * 60;
-  const londonCloseMinutes = 15 * 60 + 30;
-  const isLondonOpen = !isWeekend && utcTimeMinutes >= londonOpenMinutes && utcTimeMinutes < londonCloseMinutes;
-
+  const londonOpenMinutes = 8 * 60;
+  const londonCloseMinutes = 16 * 60 + 30;
+  const londonWeekday = london.dayIndex >= 1 && london.dayIndex <= 5;
+  const isLondonOpen = londonWeekday && london.minutes >= londonOpenMinutes && london.minutes < londonCloseMinutes;
   const londonSession: MarketSession = {
     id: "LONDON_SESSION",
     name: "London (LSE / Europe)",
     category: "STOCK",
-    timezone: "UTC+1 (BST)",
+    timezone: "Europe/London",
     isOpen: isLondonOpen,
-    statusLabel: isLondonOpen ? "OPEN" : isWeekend ? "WEEKEND" : "CLOSED",
-    currentSessionProgress: isLondonOpen
-      ? Math.round(((utcTimeMinutes - londonOpenMinutes) / (londonCloseMinutes - londonOpenMinutes)) * 100)
-      : 0,
-    nextTransitionLabel: isLondonOpen ? "Closes" : "Opens",
-    nextTransitionTime: isLondonOpen ? "Open now" : "07:00 UTC",
-    hoursDisplay: "Mon-Fri 08:00 - 16:30 BST",
+    statusLabel: isLondonOpen ? "OPEN" : !londonWeekday ? "WEEKEND" : "CLOSED",
+    currentSessionProgress: isLondonOpen ? sessionProgress(london.minutes, londonOpenMinutes, londonCloseMinutes) : 0,
+    nextTransitionLabel: isLondonOpen ? "Regular close" : "Next regular session",
+    nextTransitionTime: isLondonOpen ? `in ${formatDuration(londonCloseMinutes - london.minutes)}` : "08:00 local",
+    hoursDisplay: "Mon-Fri 08:00-16:30 local",
     badgeColor: isLondonOpen
       ? "text-sky-400 bg-sky-500/10 border-sky-500/30"
       : "text-neutral-400 bg-neutral-900 border-neutral-800",
   };
 
-  // 5. TOKYO / ASIAN SESSION (00:00 UTC - 06:00 UTC Mon-Fri)
-  const tokyoOpenMinutes = 0;
-  const tokyoCloseMinutes = 6 * 60;
-  const isTokyoOpen = !isWeekend && utcTimeMinutes >= tokyoOpenMinutes && utcTimeMinutes < tokyoCloseMinutes;
-
+  const tokyoOpenMinutes = 9 * 60;
+  const tokyoCloseMinutes = 15 * 60;
+  const tokyoWeekday = tokyo.dayIndex >= 1 && tokyo.dayIndex <= 5;
+  const isTokyoOpen = tokyoWeekday && tokyo.minutes >= tokyoOpenMinutes && tokyo.minutes < tokyoCloseMinutes;
   const tokyoSession: MarketSession = {
     id: "TOKYO_SESSION",
     name: "Tokyo (TSE / Asia)",
     category: "STOCK",
-    timezone: "JST (UTC+9)",
+    timezone: "Asia/Tokyo",
     isOpen: isTokyoOpen,
-    statusLabel: isTokyoOpen ? "OPEN" : isWeekend ? "WEEKEND" : "CLOSED",
-    currentSessionProgress: isTokyoOpen
-      ? Math.round(((utcTimeMinutes - tokyoOpenMinutes) / (tokyoCloseMinutes - tokyoOpenMinutes)) * 100)
-      : 0,
-    nextTransitionLabel: isTokyoOpen ? "Closes" : "Opens",
-    nextTransitionTime: isTokyoOpen ? "Open now" : "00:00 UTC",
-    hoursDisplay: "Mon-Fri 09:00 - 15:00 JST",
+    statusLabel: isTokyoOpen ? "OPEN" : !tokyoWeekday ? "WEEKEND" : "CLOSED",
+    currentSessionProgress: isTokyoOpen ? sessionProgress(tokyo.minutes, tokyoOpenMinutes, tokyoCloseMinutes) : 0,
+    nextTransitionLabel: isTokyoOpen ? "Regular close" : "Next regular session",
+    nextTransitionTime: isTokyoOpen ? `in ${formatDuration(tokyoCloseMinutes - tokyo.minutes)}` : "09:00 local",
+    hoursDisplay: "Mon-Fri 09:00-15:00 local",
     badgeColor: isTokyoOpen
       ? "text-indigo-400 bg-indigo-500/10 border-indigo-500/30"
       : "text-neutral-400 bg-neutral-900 border-neutral-800",
@@ -194,18 +191,17 @@ export function getGlobalMarketSchedule(): MarketHoursSchedule {
   const sessions = [cryptoSession, usStocksSession, forexSession, londonSession, tokyoSession];
   const activeCount = sessions.filter((s) => s.isOpen).length;
 
-  // Quantitative Routing Recommendation
-  let recommendation = "";
+  let recommendation: string;
   if (usOpen) {
-    recommendation = "US Regular Hours: Prime liquidity & volatility across Equities, Indices, and Digital Assets.";
+    recommendation = "US regular session is open. Use the provider's current bid/ask and liquidity data; session status alone is never an entry signal.";
   } else if (forexOpen && isLondonOpen) {
-    recommendation = "London Active: Strong institutional volume in EUR/USD, GBP/USD, and Major Liquid Assets.";
+    recommendation = "London session is open. Session clocks are informational; trade eligibility still requires fresh data and strategy/risk approval.";
   } else if (isTokyoOpen) {
-    recommendation = "Asian Session Active: Consistent scalping volume on Crypto and JPY currency crosses.";
-  } else if (isWeekend) {
-    recommendation = "Weekend Mode: Traditional exchanges closed. System automatically routes execution to 24/7 liquid crypto markets (BTC, ETH, SOL).";
+    recommendation = "Tokyo session is open. Session clocks are informational; trade eligibility still requires fresh data and strategy/risk approval.";
+  } else if (utcDay === 0 || utcDay === 6) {
+    recommendation = "Weekend: traditional equity sessions are closed. Crypto remains open, but Jarvis does not auto-route capital solely because another market is closed.";
   } else {
-    recommendation = "Inter-session: Low equity volume; system operates conservatively with adaptive volatility filters.";
+    recommendation = "No highlighted regular session is open. Jarvis should wait for fresh data and a qualified setup rather than trade because the clock says a session is active.";
   }
 
   return {
@@ -221,3 +217,23 @@ export function getGlobalMarketSchedule(): MarketHoursSchedule {
     sessions,
   };
 }
+
+export function isUsRegularMarketOpen(date = new Date()): boolean {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const weekday = parts.find((p) => p.type === "weekday")?.value || "";
+  const dayIndex = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(weekday);
+  const minutes =
+    Number(parts.find((p) => p.type === "hour")?.value || 0) * 60 +
+    Number(parts.find((p) => p.type === "minute")?.value || 0);
+  return dayIndex >= 1 && dayIndex <= 5 && minutes >= 570 && minutes < 960;
+}
+
+// This clock intentionally models regular weekday session hours only.
+// Exchange-specific holiday and early-close calendars should be supplied by the
+// authoritative market-data provider before real-money execution is enabled.

@@ -19,8 +19,7 @@ export const SecurityPinLockScreen: React.FC<SecurityPinLockScreenProps> = ({ on
       setErrorMsg(null);
       systemNotificationService.triggerHaptic("LIGHT");
 
-      if (nextPin.length >= 4) {
-        // Auto check when reaches 4 digits
+      if (nextPin.length === 6) {
         checkPin(nextPin);
       }
     }
@@ -76,16 +75,16 @@ export const SecurityPinLockScreen: React.FC<SecurityPinLockScreenProps> = ({ on
         {/* Text Prompt */}
         <div className="text-center space-y-1">
           <h2 className="text-lg font-bold font-mono text-white tracking-wide">
-            AEGIS Institutional Vault
+            Jarvis Local Session Lock
           </h2>
           <p className="text-xs text-neutral-400 font-sans">
-            Enter Security PIN to unlock live trading terminal
+            Enter your six-digit PIN to unlock the local paper-trading session
           </p>
         </div>
 
         {/* PIN Indicators */}
         <div className="flex items-center gap-3">
-          {[0, 1, 2, 3].map((idx) => {
+          {[0, 1, 2, 3, 4, 5].map((idx) => {
             const isFilled = pin.length > idx;
             return (
               <div
@@ -151,7 +150,7 @@ export const SecurityPinLockScreen: React.FC<SecurityPinLockScreenProps> = ({ on
         {/* Footer Note */}
         <div className="text-[11px] text-neutral-500 font-mono text-center flex items-center gap-1.5">
           <KeyRound className="w-3 h-3 text-emerald-400" />
-          <span>AES-256-GCM Encrypted & Zero-Knowledge</span>
+          <span>Web Crypto protected local session lock; not brokerage key custody</span>
         </div>
       </div>
     </div>

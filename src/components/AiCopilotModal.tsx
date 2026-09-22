@@ -32,16 +32,17 @@ interface AiCopilotModalProps {
   currentPrice: number;
   activeTrade: Trade | null;
   strategy: StrategyConfig;
+  isAutoTrading: boolean;
   initialMode?: "CHAT" | "VOICE";
 }
 
 const QUICK_PROMPTS = [
   "How does the Circuit Breaker protect capital?",
-  "How does Automated Profit Withdrawal work?",
-  "Analyze current market regime & indicators",
+  "How does the paper reserve ledger work?",
+  "Analyze the current market regime & indicators",
   "Audit my win rate and active position",
   "Explain the EMA + RSI + BB confluence formula",
-  "Can this terminal run 24/7 autonomously?",
+  "What can run while my phone is offline?",
 ];
 
 const INITIAL_MESSAGES: ChatMessage[] = [
@@ -49,8 +50,8 @@ const INITIAL_MESSAGES: ChatMessage[] = [
     id: "welcome-1",
     role: "model",
     timestamp: Date.now() - 30000,
-    content: `### **Welcome to AEGIS AI Copilot**\n\nI am your institutional quantitative advisor and terminal specialist. Ask me anything about the **AEGIS Autonomous Terminal**, mathematical formulas, **Circuit Breaker capital preservation**, or **Automated Profit Withdrawals**.\n\n*Select any prompt below or type your inquiry.*`,
-    modelUsed: "gemini-3.5-flash",
+    content: `### **Welcome to Jarvis Finance AI Copilot**\n\nI am your research assistant and terminal specialist. Ask me anything about the **Jarvis Finance Research & Paper Terminal**, mathematical formulas, **configured risk controls**, or **paper reserve transfers**.\n\n*Select any prompt below or type your inquiry.*`,
+    modelUsed: "gemini-3.8-flash",
   },
 ];
 
@@ -62,13 +63,14 @@ export const AiCopilotModal: React.FC<AiCopilotModalProps> = ({
   currentPrice,
   activeTrade,
   strategy,
+  isAutoTrading,
   initialMode = "CHAT",
 }) => {
   const [activeTab, setActiveTab] = useState<"CHAT" | "VOICE">(initialMode);
   const [messages, setMessages] = useState<ChatMessage[]>(() => {
     if (typeof window !== "undefined") {
       try {
-        const saved = localStorage.getItem("aegis_copilot_chat_v1");
+        const saved = localStorage.getItem("jarvis_copilot_chat_v2");
         if (saved) return JSON.parse(saved);
       } catch {}
     }
@@ -76,9 +78,7 @@ export const AiCopilotModal: React.FC<AiCopilotModalProps> = ({
   });
   const [inputPrompt, setInputPrompt] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [modelPreference, setModelPreference] = useState<
-    "gemini-3.5-flash" | "gemini-3.1-flash-lite" | "gemini-3.1-pro-preview"
-  >("gemini-3.5-flash");
+  const [modelPreference] = useState<"gemini-3.8-flash">("gemini-3.8-flash");
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   // Live Voice Mode States
@@ -102,7 +102,7 @@ export const AiCopilotModal: React.FC<AiCopilotModalProps> = ({
   useEffect(() => {
     if (typeof window !== "undefined") {
       try {
-        localStorage.setItem("aegis_copilot_chat_v1", JSON.stringify(messages.slice(-30)));
+        localStorage.setItem("jarvis_copilot_chat_v2", JSON.stringify(messages.slice(-30)));
       } catch {}
     }
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -300,7 +300,7 @@ export const AiCopilotModal: React.FC<AiCopilotModalProps> = ({
       winRate: vitality.winRate,
       vaultBalance: vitality.securedProfitVault || 0,
       strategy,
-      isAutoTrading: true,
+      isAutoTrading,
       autoWithdrawProfitEnabled: vitality.autoWithdrawProfitEnabled,
     };
 
@@ -322,7 +322,7 @@ export const AiCopilotModal: React.FC<AiCopilotModalProps> = ({
         "I have analyzed your query with respect to current portfolio metrics. Capital preservation buffers remain active."
       );
     } catch (err) {
-      return "The quantitative assistant operates locally with verified capital preservation safeguards. Please verify network connectivity.";
+      return "The quantitative assistant operates locally with configured paper-trading risk controls. Please verify network connectivity.";
     }
   };
 
@@ -366,7 +366,7 @@ export const AiCopilotModal: React.FC<AiCopilotModalProps> = ({
     if (confirm("Reset conversation history?")) {
       setMessages(INITIAL_MESSAGES);
       if (typeof window !== "undefined") {
-        localStorage.removeItem("aegis_copilot_chat_v1");
+        localStorage.removeItem("jarvis_copilot_chat_v2");
       }
     }
   };
@@ -391,7 +391,7 @@ export const AiCopilotModal: React.FC<AiCopilotModalProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <h2 className="text-lg font-bold text-white tracking-wide">
-                  AEGIS Quantitative AI Copilot
+                  Jarvis Finance Quantitative AI Copilot
                 </h2>
                 <span className="px-2 py-0.5 text-xs font-semibold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 rounded-full flex items-center gap-1">
                   <Sparkles className="w-3 h-3" />
@@ -399,7 +399,7 @@ export const AiCopilotModal: React.FC<AiCopilotModalProps> = ({
                 </span>
               </div>
               <p className="text-xs text-slate-400">
-                Institutional knowledge, strategy explanation, autonomous operations & real-time portfolio telemetry
+                Research, strategy explanation, risk controls & real-time paper telemetry
               </p>
             </div>
           </div>
@@ -411,17 +411,12 @@ export const AiCopilotModal: React.FC<AiCopilotModalProps> = ({
               <select
                 id="copilot-model-select"
                 value={modelPreference}
-                onChange={(e) => setModelPreference(e.target.value as any)}
-                className="bg-transparent text-slate-200 text-xs focus:outline-none cursor-pointer"
+                disabled
+                aria-label="AI model"
+                className="bg-transparent text-slate-200 text-xs focus:outline-none"
               >
-                <option value="gemini-3.5-flash" className="bg-slate-900 text-white">
-                  gemini-3.5-flash (Standard)
-                </option>
-                <option value="gemini-3.1-flash-lite" className="bg-slate-900 text-white">
-                  gemini-3.1-flash-lite (Fast)
-                </option>
-                <option value="gemini-3.1-pro-preview" className="bg-slate-900 text-white">
-                  gemini-3.1-pro-preview (Deep Audit)
+                <option value="gemini-3.8-flash" className="bg-slate-900 text-white">
+                  gemini-3.8-flash
                 </option>
               </select>
             </div>
@@ -511,7 +506,7 @@ export const AiCopilotModal: React.FC<AiCopilotModalProps> = ({
                         <Markdown>{msg.content}</Markdown>
                         <div className="pt-2 mt-2 border-t border-slate-700/50 flex items-center justify-between text-[10px] text-slate-400">
                           <span className="font-mono text-slate-400">
-                            {msg.modelUsed || "gemini-3.5-flash"} • {new Date(msg.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                            {msg.modelUsed || "gemini-3.8-flash"} • {new Date(msg.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                           </span>
                           <button
                             onClick={() => handleCopyMessage(msg.id, msg.content)}
@@ -699,7 +694,7 @@ export const AiCopilotModal: React.FC<AiCopilotModalProps> = ({
                     >
                       <div className="flex justify-between items-center text-[10px] text-slate-400 mb-1">
                         <span className="font-semibold uppercase tracking-wider text-slate-400">
-                          {item.role === "user" ? "You" : "AEGIS Voice"}
+                          {item.role === "user" ? "You" : "Jarvis Finance Voice"}
                         </span>
                         <span className="font-mono">{item.time}</span>
                       </div>
