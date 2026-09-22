@@ -70,7 +70,7 @@
       this.logThought("DEFENSE", "Signal rejected: stale market data", "No new trusted market snapshot has arrived within 30 seconds.", signalScore);
       return false;
     }
-    const risk = evaluateRisk(this.riskPolicy, { equity: this.vitality.currentEquity, peakEquity: this.vitality.peakEquity, dailyStartEquity: this.vitality.dailyStartEquity, openPositions: 0, requestedNotional: intendedRiskNotional, leverage: 1, spreadBps: this.lastSpreadBps, candle: signalCandle, stopLossPercent: this.strategy.stopLossPercent, recentLossCount: this.vitality.consecutiveLosses, lastLossAtMs: this.vitality.lastLossAt }, this.strategy);
+    const risk = evaluateRisk(this.riskPolicy, { equity: this.vitality.currentEquity, peakEquity: this.vitality.peakEquity, dailyStartEquity: this.vitality.dailyStartEquity, openPositions: 0, requestedNotional: intendedRiskNotional, leverage: 1, spreadBps: this.lastSpreadBps, marketOpen: this.lastMarketOpen, candle: signalCandle, stopLossPercent: this.strategy.stopLossPercent, recentLossCount: this.vitality.consecutiveLosses, lastLossAtMs: this.vitality.lastLossAt }, this.strategy);
     if (!risk.allowed) { this.logThought("DEFENSE", "Signal rejected by risk policy", risk.reasons.join(" "), signalScore); return false; }
     const riskSize = risk.maxLossBudgetUsd / stopDistance;
     const maxNotional = this.vitality.currentEquity * this.riskPolicy.maxPositionNotionalPercent / 100;
