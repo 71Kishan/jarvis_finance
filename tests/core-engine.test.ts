@@ -31,6 +31,25 @@ describe("execution model", () => {
 });
 
 describe("risk policy", () => {
+  test("blocks trades whose stop risk exceeds the strategy risk budget", () => {
+    const result = evaluateRisk(DEFAULT_RISK_POLICY, {
+      equity: 10000, peakEquity: 10000, dailyStartEquity: 10000, openPositions: 0,
+      requestedNotional: 3500, leverage: 1, stopLossPercent: 2, recentLossCount: 0,
+    }, DEFAULT_STRATEGY);
+    expect(result.allowed).toBe(false);
+    expect(result.reasons.join(" ")).toContain("risk budget");
+  });
+
+  test("blocks entries when the regular market session is closed", () => {
+    const result = evaluateRisk(DEFAULT_RISK_POLICY, {
+      equity: 10000, peakEquity: 10000, dailyStartEquity: 10000, openPositions: 0,
+      requestedNotional: 2500, leverage: 1, marketOpen: false, stopLossPercent: 1,
+      recentLossCount: 0,
+    }, DEFAULT_STRATEGY);
+    expect(result.allowed).toBe(false);
+    expect(result.reasons.join(" ")).toContain("Market session is closed");
+  });
+
   test("blocks leverage and daily drawdown violations", () => {
     const result = evaluateRisk(DEFAULT_RISK_POLICY, {
       equity: 970, peakEquity: 1000, dailyStartEquity: 1000, openPositions: 0,
@@ -43,6 +62,17 @@ describe("risk policy", () => {
 });
 
 describe("signal engine", () => {
+  test("treats volume as participation evidence rather than directional evidence", () => {
+    const rows = Array.from({ length: 60 }, (_, i) => ({
+      ...candle(i + 1),
+      volume: 100,
+      indicators: { ...indicators, volumeSMA: 1000 },
+    }));
+    const result = evaluateSignal(rows[rows.length - 1], rows, DEFAULT_STRATEGY);
+    expect(result.eligible).toBe(false);
+    expect(result.reasons.join(" ")).toContain("Volume participation filter failed");
+  });
+
   test("refuses to signal before warm-up", () => {
     expect(evaluateSignal(candle(Date.now()), [candle(1)], DEFAULT_STRATEGY).eligible).toBe(false);
   });
