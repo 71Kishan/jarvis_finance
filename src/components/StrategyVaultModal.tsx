@@ -114,7 +114,7 @@ export const StrategyVaultModal: React.FC<StrategyVaultModalProps> = ({
             <div className="flex items-center gap-2">
               <Target className="w-4 h-4 text-emerald-400" />
               <span className="text-xs font-bold text-neutral-200 uppercase tracking-wider">
-                Daily Income Target: ${dailyGoal.dailyTargetUsd.toFixed(2)} / day
+                Daily process review
               </span>
             </div>
 
@@ -169,7 +169,7 @@ export const StrategyVaultModal: React.FC<StrategyVaultModalProps> = ({
               }`}
             >
               <Award className="w-3.5 h-3.5" />
-              <span>Validated Candidates ({strategies.filter((s) => s.status === "PROVISIONALLY_VALIDATED").length})</span>
+              <span>Validated (explicitly approved) ({strategies.filter((s) => s.status === "PROVISIONALLY_VALIDATED").length})</span>
             </button>
             <button
               id="vault-tab-all"
@@ -314,7 +314,7 @@ export const StrategyVaultModal: React.FC<StrategyVaultModalProps> = ({
                         onClick={() => handleActivate(item)}
                         className="px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-semibold rounded-lg flex items-center gap-1 transition-colors border border-neutral-700"
                       >
-                        <span>Deploy Strategy</span>
+                        <span>Load Paper Candidate</span>
                         <ArrowRight className="w-3.5 h-3.5" />
                       </button>
                     )}
@@ -356,7 +356,7 @@ export const StrategyVaultModal: React.FC<StrategyVaultModalProps> = ({
                     <span className="text-rose-400 font-bold">{item.maxDrawdownPercent}%</span>
                   </div>
                   <div>
-                    <span className="text-[10px] font-sans text-neutral-500 block">Confidence Min</span>
+                    <span className="text-[10px] font-sans text-neutral-500 block">Signal Threshold</span>
                     <span className="text-cyan-400 font-bold">{item.config.minConfidence}%</span>
                   </div>
                 </div>
