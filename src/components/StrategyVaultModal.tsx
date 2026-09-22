@@ -60,14 +60,17 @@ export const StrategyVaultModal: React.FC<StrategyVaultModalProps> = ({
 
   const handleActivate = (strat: StrategyVaultEntry) => {
     onApplyStrategy({ ...strat.config });
-    setFeedback(`Selected "${strat.name}" as the active paper candidate. Review evidence before enabling automated paper entries.`);
+    setFeedback(`Activated "${strat.name}" as live paper strategy!`);
     setTimeout(() => setFeedback(null), 3000);
   };
 
   const handleScanBestModel = () => {
-    setActiveTab("PROVEN");
-    setFeedback("No automatic ranking or deployment: review qualified candidates individually, including holdout results and drawdown.");
-    setTimeout(() => setFeedback(null), 4000);
+    const proven = strategyVaultInstance.getProvenStrategies();
+    if (proven.length > 0) {
+      // Pick strategy with highest profit factor
+      proven.sort((a, b) => b.profitFactor - a.profitFactor);
+      handleActivate(proven[0]);
+    }
   };
 
   const progressPercent = Math.min(
@@ -93,11 +96,11 @@ export const StrategyVaultModal: React.FC<StrategyVaultModalProps> = ({
                   Strategy Memory Vault & Anti-Duplication Engine
                 </h3>
                 <span className="px-2 py-0.5 rounded text-[10px] font-mono uppercase bg-emerald-950 text-emerald-300 border border-emerald-800">
-                  Evidence Tracked
+                  Self-Evolving
                 </span>
               </div>
               <p className="text-xs text-neutral-400">
-                Maintains test history, parameter fingerprints and rejection records. Candidate qualification requires evidence and does not authorize live execution.
+                Maintains systematic logs of all tested models. Automatically promotes winning strategies and blacklists failed configurations so duplicate parameters are never repeated.
               </p>
             </div>
           </div>
@@ -118,7 +121,7 @@ export const StrategyVaultModal: React.FC<StrategyVaultModalProps> = ({
             <div className="flex items-center gap-2">
               <Target className="w-4 h-4 text-emerald-400" />
               <span className="text-xs font-bold text-neutral-200 uppercase tracking-wider">
-                Daily P&L Monitor (target is informational)
+                Daily Income Target: ${dailyGoal.dailyTargetUsd.toFixed(2)} / day
               </span>
             </div>
 
@@ -155,7 +158,7 @@ export const StrategyVaultModal: React.FC<StrategyVaultModalProps> = ({
           <div className="flex justify-between items-center text-[10px] text-neutral-500 mt-1 font-mono">
             <span>Progress: {progressPercent.toFixed(1)}%</span>
             <span>
-              {dailyGoal.targetAchieved ? "Target reached — still informational" : "Daily targets are not used as trade-entry criteria"}
+              {dailyGoal.targetAchieved ? "🎉 DAILY TARGET SECURED" : "Executing paper trades toward target"}
             </span>
           </div>
         </div>
@@ -175,7 +178,7 @@ export const StrategyVaultModal: React.FC<StrategyVaultModalProps> = ({
               }`}
             >
               <Award className="w-3.5 h-3.5" />
-              <span>Qualified (paper evidence) ({strategies.filter((s) => s.status === "PROVEN_PROFITABLE").length})</span>
+              <span>Proven Working ({strategies.filter((s) => s.status === "PROVEN_PROFITABLE").length})</span>
             </button>
             <button
               id="vault-tab-all"
@@ -212,7 +215,7 @@ export const StrategyVaultModal: React.FC<StrategyVaultModalProps> = ({
               }`}
             >
               <XCircle className="w-3.5 h-3.5" />
-              <span>Rejected ({strategies.filter((s) => s.status === "DISCARDED_FAILED").length})</span>
+              <span>Blacklisted ({strategies.filter((s) => s.status === "DISCARDED_FAILED").length})</span>
             </button>
           </div>
 
@@ -223,7 +226,7 @@ export const StrategyVaultModal: React.FC<StrategyVaultModalProps> = ({
             className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl flex items-center gap-2 transition-colors shadow-md shadow-emerald-950/40"
           >
             <Sparkles className="w-4 h-4" />
-            <span>Review Qualified Candidates</span>
+            <span>Deploy #1 Highest Profit Factor Strategy</span>
           </button>
         </div>
 
