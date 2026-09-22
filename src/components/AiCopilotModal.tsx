@@ -32,13 +32,14 @@ interface AiCopilotModalProps {
   currentPrice: number;
   activeTrade: Trade | null;
   strategy: StrategyConfig;
+  isAutoTrading: boolean;
   initialMode?: "CHAT" | "VOICE";
 }
 
 const QUICK_PROMPTS = [
   "How does the Circuit Breaker protect capital?",
-  "How does Automated Profit Withdrawal work?",
-  "Analyze current market regime & indicators",
+  "How does the paper reserve ledger work?",
+  "Analyze the current market regime & indicators",
   "Audit my win rate and active position",
   "Explain the EMA + RSI + BB confluence formula",
   "What can run while my phone is offline?",
@@ -62,6 +63,7 @@ export const AiCopilotModal: React.FC<AiCopilotModalProps> = ({
   currentPrice,
   activeTrade,
   strategy,
+  isAutoTrading,
   initialMode = "CHAT",
 }) => {
   const [activeTab, setActiveTab] = useState<"CHAT" | "VOICE">(initialMode);
@@ -76,9 +78,7 @@ export const AiCopilotModal: React.FC<AiCopilotModalProps> = ({
   });
   const [inputPrompt, setInputPrompt] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [modelPreference, setModelPreference] = useState<
-    "gemini-3.5-flash" | "gemini-3.1-flash-lite" | "gemini-3.1-pro-preview"
-  >("gemini-3.5-flash");
+  const [modelPreference] = useState<"gemini-3.8-flash">("gemini-3.8-flash");
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   // Live Voice Mode States
@@ -300,7 +300,7 @@ export const AiCopilotModal: React.FC<AiCopilotModalProps> = ({
       winRate: vitality.winRate,
       vaultBalance: vitality.securedProfitVault || 0,
       strategy,
-      isAutoTrading: true,
+      isAutoTrading,
       autoWithdrawProfitEnabled: vitality.autoWithdrawProfitEnabled,
     };
 
@@ -399,7 +399,7 @@ export const AiCopilotModal: React.FC<AiCopilotModalProps> = ({
                 </span>
               </div>
               <p className="text-xs text-slate-400">
-                Institutional knowledge, strategy explanation, autonomous operations & real-time portfolio telemetry
+                Research, strategy explanation, risk controls & real-time paper telemetry
               </p>
             </div>
           </div>
@@ -411,19 +411,14 @@ export const AiCopilotModal: React.FC<AiCopilotModalProps> = ({
               <select
                 id="copilot-model-select"
                 value={modelPreference}
-                onChange={(e) => setModelPreference(e.target.value as any)}
-                className="bg-transparent text-slate-200 text-xs focus:outline-none cursor-pointer"
+                disabled
+                aria-label="AI model"
+                className="bg-transparent text-slate-200 text-xs focus:outline-none"
               >
-                <option value="gemini-3.5-flash" className="bg-slate-900 text-white">
-                  gemini-3.5-flash (Standard)
+                <option value="gemini-3.8-flash" className="bg-slate-900 text-white">
+                  gemini-3.8-flash
                 </option>
-                <option value="gemini-3.1-flash-lite" className="bg-slate-900 text-white">
-                  gemini-3.1-flash-lite (Fast)
-                </option>
-                <option value="gemini-3.1-pro-preview" className="bg-slate-900 text-white">
-                  gemini-3.1-pro-preview (Deep Audit)
-                </option>
-              </select>
+              
             </div>
 
             <button
