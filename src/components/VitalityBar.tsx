@@ -136,11 +136,11 @@ export const VitalityBar: React.FC<VitalityBarProps> = ({
             </div>
           </div>
 
-          {/* Cold Storage Profit Vault */}
+          {/* Virtual Paper Reserve */}
           <div
             id="vitality-bar-vault-card"
             onClick={onOpenProfitVault}
-            title="Cold Storage Profit Vault: Auto-withdrawn gains insulated from market risk"
+            title="Virtual paper reserve ledger; no real money is moved and this balance is not isolated from loss at a financial institution"
             className={`bg-neutral-950/60 border border-amber-500/30 hover:border-amber-500/60 rounded-xl p-2.5 flex flex-col justify-between transition-all ${
               onOpenProfitVault ? "cursor-pointer hover:bg-amber-500/5" : ""
             }`}
@@ -148,7 +148,7 @@ export const VitalityBar: React.FC<VitalityBarProps> = ({
             <div className="flex items-center justify-between text-amber-400 text-xs font-mono">
               <span className="flex items-center gap-1">
                 <Vault className="w-3.5 h-3.5 text-amber-400" />
-                <span>Cold Vault</span>
+                <span>Paper Reserve</span>
               </span>
               <Lock className="w-3 h-3 text-amber-500" />
             </div>
@@ -160,7 +160,7 @@ export const VitalityBar: React.FC<VitalityBarProps> = ({
                 })}
               </div>
               <div className="text-[11px] font-mono text-emerald-400 flex items-center gap-1">
-                <span>Insulated Profit</span>
+                <span>Virtual Reserve</span>
               </div>
             </div>
           </div>
@@ -181,10 +181,10 @@ export const VitalityBar: React.FC<VitalityBarProps> = ({
             </div>
           </div>
 
-          {/* Execution Alpha Streak */}
+          {/* Execution Win Streak */}
           <div className="bg-neutral-950/60 border border-neutral-800 rounded-xl p-2.5 flex flex-col justify-between">
             <div className="flex items-center justify-between text-neutral-400 text-xs font-mono">
-              <span>Alpha Streak</span>
+              <span>Win Streak</span>
               <Shield className="w-3.5 h-3.5 text-emerald-500" />
             </div>
             <div className="mt-1">
@@ -201,7 +201,7 @@ export const VitalityBar: React.FC<VitalityBarProps> = ({
           {/* Strategy Evolution */}
           <div className="bg-neutral-950/60 border border-neutral-800 rounded-xl p-2.5 flex flex-col justify-between">
             <div className="flex items-center justify-between text-neutral-400 text-xs font-mono">
-              <span>Strategy Gen</span>
+              <span>Strategy Version</span>
               <Award className="w-3.5 h-3.5 text-indigo-400" />
             </div>
             <div className="mt-1">

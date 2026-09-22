@@ -157,8 +157,12 @@ export function attachIndicators(candles: Candle[]): Candle[] {
   const macd = calculateMACD(closes, 12, 26, 9);
 
   return candles.map((candle, idx) => {
-    const volSlice = volumes.slice(Math.max(0, idx - 19), idx + 1);
-    const volumeSMA = volSlice.reduce((a, b) => a + b, 0) / volSlice.length;
+    // Compare the current bar to the prior 20 completed bars; including the
+    // current bar in its own baseline dampens participation spikes.
+    const volSlice = volumes.slice(Math.max(0, idx - 20), idx);
+    const volumeSMA = volSlice.length
+      ? volSlice.reduce((a, b) => a + b, 0) / volSlice.length
+      : 0;
 
     const indicators: IndicatorValues = {
       ema9: ema9[idx] || candle.close,

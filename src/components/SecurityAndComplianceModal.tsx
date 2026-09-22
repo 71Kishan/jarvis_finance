@@ -84,7 +84,7 @@ export const SecurityAndComplianceModal: React.FC<SecurityAndComplianceModalProp
   const handleSavePin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (newPin.length < 4) {
-      setPinFeedback("PIN must be at least 4 digits.");
+      setPinFeedback("PIN must be exactly 6 digits.");
       return;
     }
     if (newPin !== confirmPin) {
@@ -95,7 +95,7 @@ export const SecurityAndComplianceModal: React.FC<SecurityAndComplianceModalProp
     setPinConfigured(true);
     setNewPin("");
     setConfirmPin("");
-    setPinFeedback("Security PIN set successfully. Session protection active!");
+    setPinFeedback("Six-digit local session PIN set successfully. This protects the app session; it is not brokerage key custody.");
     systemNotificationService.triggerHaptic("SUCCESS");
   };
 
@@ -145,7 +145,7 @@ export const SecurityAndComplianceModal: React.FC<SecurityAndComplianceModalProp
                 Security Vault, Legal Disclosures & Quant Defense
               </h2>
               <p className="text-xs text-neutral-400 font-sans">
-                Financial law compliance, SHA-256 trade provenance, and AES-256-GCM encryption
+                Local session security, audit checks, risk controls, and key-handling guidance
               </p>
             </div>
           </div>
@@ -211,7 +211,7 @@ export const SecurityAndComplianceModal: React.FC<SecurityAndComplianceModalProp
               <div className="p-4 rounded-xl bg-neutral-900/70 border border-neutral-800 space-y-2">
                 <div className="flex items-center gap-2 text-amber-400 text-xs font-mono font-bold">
                   <AlertTriangle className="w-4 h-4 shrink-0" />
-                  <span>CFTC RULE 4.41 STATUTORY MANDATED DISCLAIMER</span>
+                  <span>SIMULATED PERFORMANCE DISCLOSURE</span>
                 </div>
                 <div className="text-neutral-300 text-xs leading-relaxed space-y-2 font-sans">
                   <p>
@@ -228,28 +228,28 @@ export const SecurityAndComplianceModal: React.FC<SecurityAndComplianceModalProp
               <div className="p-4 rounded-xl bg-neutral-900/50 border border-neutral-800/80 space-y-2">
                 <h4 className="text-xs font-mono font-bold text-white flex items-center gap-2">
                   <Scale className="w-4 h-4 text-emerald-400" />
-                  NON-CUSTODIAL ALGORITHMIC SIMULATION SOFTWARE
+                  RESEARCH & PAPER-TRADING SOFTWARE
                 </h4>
                 <p className="text-neutral-400 text-xs leading-relaxed font-sans">
-                  This software is an autonomous quantitative simulation and educational platform. It does not act as a broker-dealer, registered investment advisor (RIA), or custodian of user funds. All financial computations, backtests, and paper orders occur in simulated sandboxes using deterministic market simulators or public ticker relays. Past algorithmic survival does not guarantee future profitability.
+                  This build is a research and paper-trading application. It is not connected to a broker, does not custody funds, and does not place real-money orders. Paper results and backtests are hypothetical and can differ materially from live execution because of costs, liquidity, gaps, data quality, and model assumptions.
                 </p>
               </div>
 
-              {/* GDPR & CCPA Zero-Knowledge Privacy Policy */}
+              {/* LOCAL DATA & PRIVACY NOTES */}
               <div className="p-4 rounded-xl bg-neutral-900/50 border border-neutral-800/80 space-y-2">
                 <h4 className="text-xs font-mono font-bold text-white flex items-center gap-2">
                   <EyeOff className="w-4 h-4 text-sky-400" />
-                  GDPR & CCPA ZERO-KNOWLEDGE PRIVACY POLICY
+                  LOCAL DATA & PRIVACY NOTES
                 </h4>
                 <div className="text-neutral-400 text-xs leading-relaxed space-y-1.5 font-sans">
                   <p>
-                    &bull; <strong>Zero Server Storage:</strong> Your private configurations, strategy weights, and trade history remain strictly stored on your local client device within your browser or Android PWA container.
+                    &bull; <strong>Local-First Paper State:</strong> Current paper state is primarily client-side. Cross-device synchronization requires a server-side journal, which is not yet enabled.
                   </p>
                   <p>
-                    &bull; <strong>No Personal Telemetry:</strong> We do not collect, monetize, track, or distribute your IP address, device identifiers, or trading strategies.
+                    &bull; <strong>Local-first state:</strong> The current paper journal and security settings are primarily stored on the device. A durable cross-device journal is not enabled in this build.
                   </p>
                   <p>
-                    &bull; <strong>Right to Immediate Erasure:</strong> You retain complete cryptographic sovereignty. You may purge all local database stores instantly via the Reset Data option in the Risk Settings panel.
+                    &bull; <strong>Data clearing:</strong> Local application data can be cleared from the app settings. Local storage is not an immutable audit system or a custody layer.
                   </p>
                 </div>
               </div>
@@ -313,7 +313,7 @@ export const SecurityAndComplianceModal: React.FC<SecurityAndComplianceModalProp
                         : "bg-neutral-800 text-neutral-400"
                     }`}
                   >
-                    {slippageFilterActive ? "ACTIVE (PROTECTED)" : "DISABLED"}
+                    {slippageFilterActive ? "ACTIVE" : "DISABLED"}
                   </button>
                 </div>
 
@@ -336,7 +336,7 @@ export const SecurityAndComplianceModal: React.FC<SecurityAndComplianceModalProp
                         : "bg-neutral-800 text-neutral-400"
                     }`}
                   >
-                    {atrSpikeFilterActive ? "ACTIVE (PROTECTED)" : "DISABLED"}
+                    {atrSpikeFilterActive ? "ACTIVE" : "DISABLED"}
                   </button>
                 </div>
 
@@ -359,7 +359,7 @@ export const SecurityAndComplianceModal: React.FC<SecurityAndComplianceModalProp
                         : "bg-neutral-800 text-neutral-400"
                     }`}
                   >
-                    {maxDailyLossActive ? "ACTIVE (PROTECTED)" : "DISABLED"}
+                    {maxDailyLossActive ? "ACTIVE" : "DISABLED"}
                   </button>
                 </div>
               </div>
@@ -373,7 +373,7 @@ export const SecurityAndComplianceModal: React.FC<SecurityAndComplianceModalProp
                       Cryptographic Trade Audit Ledger (SHA-256 Provenance)
                     </h4>
                     <p className="text-[11px] text-neutral-400">
-                      Every trade creates an immutable, cryptographically chained block proving zero tampering of trade records.
+                      Trade records can be hashed for local integrity checks. A local hash is not a tamper-proof external ledger or custody record.
                     </p>
                   </div>
 
@@ -401,7 +401,7 @@ export const SecurityAndComplianceModal: React.FC<SecurityAndComplianceModalProp
                       <>
                         <CheckCircle2 className="w-4 h-4 shrink-0" />
                         <span>
-                          LEDGER VERIFIED: All {ledgerVerificationResult.verifiedCount} historical trade blocks are intact with valid SHA-256 signatures. No tampering detected.
+                          LOCAL HASH CHECK: {ledgerVerificationResult.verifiedCount} stored records passed the current client-side hash check. This is not an external audit.
                         </span>
                       </>
                     ) : (
@@ -617,7 +617,7 @@ export const SecurityAndComplianceModal: React.FC<SecurityAndComplianceModalProp
                   </div>
                   <div className="flex items-center gap-1.5">
                     <Check className="w-3.5 h-3.5 text-emerald-400" />
-                    <span>Zero Key Transmission / Client Sovereignty</span>
+                    <span>Broker/API credentials remain server-side; this client is not a credential vault.</span>
                   </div>
                 </div>
               </div>
@@ -629,7 +629,7 @@ export const SecurityAndComplianceModal: React.FC<SecurityAndComplianceModalProp
         <div className="p-3.5 border-t border-neutral-800 bg-neutral-900/50 flex items-center justify-between text-xs font-mono text-neutral-400">
           <div className="flex items-center gap-2">
             <Shield className="w-4 h-4 text-emerald-400" />
-            <span>Fiduciary Compliance & Cryptographic Integrity</span>
+            <span>Security Controls & Local Audit Integrity</span>
           </div>
 
           <button
