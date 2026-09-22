@@ -114,7 +114,7 @@ describe("durable paper state", () => {
       takeProfitPercent: 1,
       trailingStop: true,
     }, 100)).toBe(true);
-    first.onTick({ ...candle(123), low: 100, close: 101 }, [{ ...candle(123), low: 100, close: 101 }]);
+    first.onTick({ ...candle(123), high: 100.5, low: 100, close: 100.25 }, [{ ...candle(123), high: 100.5, low: 100, close: 100.25 }]);
     writer.save(first);
 
     const second = new TradingEngine(10000, 6, DEFAULT_STRATEGY);
