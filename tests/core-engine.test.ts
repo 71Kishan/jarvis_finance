@@ -4,6 +4,10 @@ import { DEFAULT_STRATEGY, TradingEngine } from "../src/engine/tradingEngine";
 import { modelEntryFill, modelExitFill, resolveStopTarget, grossPnL } from "../src/engine/executionModel";
 import { evaluateSignal } from "../src/engine/signalEngine";
 import { Candle } from "../src/types/trading";
+import { PaperStateStore } from "../src/server/paperStateStore";
+import { existsSync, unlinkSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 
 const indicators = {
   ema9: 104, ema21: 103, ema50: 100, rsi: 58,
@@ -93,6 +97,35 @@ describe("automated paper entry timing", () => {
     const trade = engine.getActiveTrade();
     expect(trade).not.toBeNull();
     expect(trade?.entryPrice).toBeGreaterThan(nextBar.open);
+  });
+});
+
+describe("durable paper state", () => {
+  test("restores an open paper position and processed candle after restart", () => {
+    const statePath = join(tmpdir(), `jarvis-paper-state-test-${Date.now()}-${Math.random().toString(36).slice(2)}.json`);
+    const writer = new PaperStateStore(statePath);
+    const first = new TradingEngine(10000, 6, DEFAULT_STRATEGY);
+    first.setMarketQuality({ spreadBps: 0, dataTimestamp: Date.now(), marketOpen: true });
+    expect(first.executePaperTrade({
+      type: "LONG",
+      amountUsd: 1000,
+      leverage: 1,
+      stopLossPercent: 0.5,
+      takeProfitPercent: 1,
+      trailingStop: true,
+    }, 100)).toBe(true);
+    first.onTick({ ...candle(123), low: 100, close: 101 }, [{ ...candle(123), low: 100, close: 101 }]);
+    writer.save(first);
+
+    const second = new TradingEngine(10000, 6, DEFAULT_STRATEGY);
+    const result = new PaperStateStore(statePath).loadInto(second);
+
+    expect(result.restored).toBe(true);
+    expect(second.getActiveTrade()?.asset).toBe("BTC/USD");
+    expect(second.getActiveTrade()?.entryPrice).toBe(first.getActiveTrade()?.entryPrice);
+    expect(second.getLastProcessedCandleTimestamp()).toBe(123);
+
+    if (existsSync(statePath)) unlinkSync(statePath);
   });
 });
 
