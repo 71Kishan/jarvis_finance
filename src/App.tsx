@@ -41,8 +41,8 @@ import {
 
 export default function App() {
   const [currentAsset, setCurrentAsset] = useState<AssetSymbol>("BTC/USD");
-  const [marketSource, setMarketSource] = useState<MarketDataSource>("LIVE_EXCHANGE");
-  const [isAutoTrading, setIsAutoTrading] = useState<boolean>(true);
+  const [marketSource, setMarketSource] = useState<MarketDataSource>("SIMULATED");
+  const [isAutoTrading, setIsAutoTrading] = useState<boolean>(false);
   const [simulationSpeed, setSimulationSpeed] = useState<number>(2); // 2x default for simulator
   const [liveTicker, setLiveTicker] = useState<LiveExchangeTicker | null>(null);
 
@@ -93,7 +93,7 @@ export default function App() {
   const [copilotInitialMode, setCopilotInitialMode] = useState<"CHAT" | "VOICE">("CHAT");
   const [isProfitVaultOpen, setIsProfitVaultOpen] = useState(false);
   const [isSessionLocked, setIsSessionLocked] = useState(() => cryptoSecurityService.isSessionLocked());
-  const [autoRotateAssets, setAutoRotateAssets] = useState(true);
+  const [autoRotateAssets, setAutoRotateAssets] = useState(false);
 
   // Monitor user activity and session auto-lock
   useEffect(() => {
@@ -167,7 +167,7 @@ export default function App() {
     const nextCandle = sim.nextTick();
     const allCandles = sim.getCandles();
 
-    engine.onTick(nextCandle, allCandles);
+    engine.onTick(nextCandle, allCandles, isAutoTrading);
     syncStateFromEngine();
   }, [syncStateFromEngine]);
 
@@ -209,7 +209,7 @@ export default function App() {
             const lastCandle = allCandles[allCandles.length - 1];
 
             if (isAutoTrading && botState !== "HALTED_DEAD") {
-              tradingEngineRef.current.onTick(lastCandle, allCandles);
+              tradingEngineRef.current.onTick(lastCandle, allCandles, isAutoTrading);
             } else if (tradingEngineRef.current.getActiveTrade()) {
               // Always manage active trade stop-loss/take-profit even if auto hunting is paused
               tradingEngineRef.current.onTick(lastCandle, allCandles);
@@ -307,7 +307,7 @@ export default function App() {
     if (!tradingEngineRef.current || !simulatorRef.current) return false;
     const lastCandle = simulatorRef.current.getLastCandle();
     const currentPrice = lastCandle ? lastCandle.close : 65000;
-    const success = tradingEngineRef.current.executePaperTrade(request, currentPrice);
+    const success = tradingEngineRef.current.executePaperTrade(request, currentPrice, liveTicker?.lastUpdated ?? lastCandle?.timestamp ?? Date.now());
     if (success) {
       syncStateFromEngine();
       const trade = tradingEngineRef.current.getActiveTrade();
@@ -316,60 +316,24 @@ export default function App() {
     return success;
   };
 
-  // Instantly run one verified trade on the live market to confirm execution & update strategy vault
+  // Quantitative scan: inspect the current setup without manufacturing a fill.
   const handleRunImmediateTrade = async () => {
     if (!tradingEngineRef.current || !simulatorRef.current) return;
     const lastCandle = simulatorRef.current.getLastCandle();
-    const currentPrice = lastCandle ? lastCandle.close : 65000;
+    const allCandles = simulatorRef.current.getCandles();
+    if (!lastCandle) return;
 
-    // If auto-rotation across markets is active:
-    // If current asset score is below minimum, scan other assets (Forex, Tech Stocks, Crypto, Indices)
-    // to find the highest-probability winning setup
-    if (autoRotateAssets) {
-      try {
-        const res = await fetch(`/api/market/multi-scan?minConfidence=${strategy.minConfidence}`);
-        if (res.ok) {
-          const data = await res.json();
-          const top = data.opportunities?.[0];
-          if (top && top.symbol !== currentAsset && top.score >= 70) {
-            handleSelectAsset(top.symbol as AssetSymbol);
-            setTimeout(() => {
-              if (tradingEngineRef.current) {
-                const tr = tradingEngineRef.current.runImmediateVerifiedTrade(
-                  top.price,
-                  top.bestDirection === "SHORT" ? "SHORT" : "LONG"
-                );
-                syncStateFromEngine();
-                if (tr) setVerificationToastTrade(tr);
-              }
-            }, 300);
-            return;
-          }
-        }
-      } catch (err) {
-        console.warn("Opportunity auto-rotation check skipped:", err);
-      }
-    }
-
-    const tr = tradingEngineRef.current.runImmediateVerifiedTrade(currentPrice);
+    const result = tradingEngineRef.current.forceScanSignal(lastCandle, allCandles);
     syncStateFromEngine();
-    if (tr) setVerificationToastTrade(tr);
+
+    if (result.direction && result.direction !== "NEUTRAL") {
+      setVerificationToastTrade(null);
+    }
   };
 
-  // Select asset and optionally execute a trade immediately
-  const handleSelectAndTradeAsset = (asset: AssetSymbol, executeTrade?: boolean) => {
+  // Selecting a radar candidate never submits an order. The candidate must be reviewed/scanned first.
+  const handleSelectAndTradeAsset = (asset: AssetSymbol, _executeTrade?: boolean) => {
     handleSelectAsset(asset);
-    if (executeTrade) {
-      setTimeout(() => {
-        if (tradingEngineRef.current && simulatorRef.current) {
-          const candle = simulatorRef.current.getLastCandle();
-          const price = candle ? candle.close : 100;
-          const tr = tradingEngineRef.current.runImmediateVerifiedTrade(price);
-          syncStateFromEngine();
-          if (tr) setVerificationToastTrade(tr);
-        }
-      }, 350);
-    }
   };
 
   // Force Quantitative Confluence Scan
