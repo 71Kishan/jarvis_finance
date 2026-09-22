@@ -211,7 +211,7 @@ export const SecurityAndComplianceModal: React.FC<SecurityAndComplianceModalProp
               <div className="p-4 rounded-xl bg-neutral-900/70 border border-neutral-800 space-y-2">
                 <div className="flex items-center gap-2 text-amber-400 text-xs font-mono font-bold">
                   <AlertTriangle className="w-4 h-4 shrink-0" />
-                  <span>CFTC RULE 4.41 STATUTORY MANDATED DISCLAIMER</span>
+                  <span>SIMULATED-PERFORMANCE DISCLOSURE</span>
                 </div>
                 <div className="text-neutral-300 text-xs leading-relaxed space-y-2 font-sans">
                   <p>
@@ -231,7 +231,7 @@ export const SecurityAndComplianceModal: React.FC<SecurityAndComplianceModalProp
                   NON-CUSTODIAL ALGORITHMIC SIMULATION SOFTWARE
                 </h4>
                 <p className="text-neutral-400 text-xs leading-relaxed font-sans">
-                  This software is an autonomous quantitative simulation and educational platform. It does not act as a broker-dealer, registered investment advisor (RIA), or custodian of user funds. All financial computations, backtests, and paper orders occur in simulated sandboxes using deterministic market simulators or public ticker relays. Past algorithmic survival does not guarantee future profitability.
+                  This software is a research and paper-trading platform. It does not custody funds or provide a live brokerage execution service in the current build. It does not act as a broker-dealer, registered investment advisor (RIA), or custodian of user funds. All financial computations, backtests, and paper orders occur in simulated sandboxes using paper simulations or configured market-data providers. Backtests and paper results do not establish future profitability.
                 </p>
               </div>
 
@@ -239,17 +239,17 @@ export const SecurityAndComplianceModal: React.FC<SecurityAndComplianceModalProp
               <div className="p-4 rounded-xl bg-neutral-900/50 border border-neutral-800/80 space-y-2">
                 <h4 className="text-xs font-mono font-bold text-white flex items-center gap-2">
                   <EyeOff className="w-4 h-4 text-sky-400" />
-                  GDPR & CCPA ZERO-KNOWLEDGE PRIVACY POLICY
+                  LOCAL-DATA & PRIVACY NOTICE
                 </h4>
                 <div className="text-neutral-400 text-xs leading-relaxed space-y-1.5 font-sans">
                   <p>
-                    &bull; <strong>Zero Server Storage:</strong> Your private configurations, strategy weights, and trade history remain strictly stored on your local client device within your browser or Android PWA container.
+                    &bull; <strong>Local app storage:</strong> This build stores some paper-trading and security state in browser/PWA storage. Local storage is not a secure vault; sensitive broker credentials must never be placed there.
                   </p>
                   <p>
-                    &bull; <strong>No Personal Telemetry:</strong> We do not collect, monetize, track, or distribute your IP address, device identifiers, or trading strategies.
+                    &bull; <strong>Application scope:</strong> The application does not promise that all hosting, analytics, browser, or network layers are telemetry-free.
                   </p>
                   <p>
-                    &bull; <strong>Right to Immediate Erasure:</strong> You retain complete cryptographic sovereignty. You may purge all local database stores instantly via the Reset Data option in the Risk Settings panel.
+                    &bull; <strong>Local reset:</strong> You can clear local application state using the available reset controls.
                   </p>
                 </div>
               </div>
@@ -364,16 +364,16 @@ export const SecurityAndComplianceModal: React.FC<SecurityAndComplianceModalProp
                 </div>
               </div>
 
-              {/* Cryptographic Trade Audit Ledger (SHA-256 Provenance) */}
+              {/* Tamper-Evident Paper Trade Journal */}
               <div className="p-4 rounded-xl bg-neutral-900/60 border border-neutral-800 space-y-3">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                   <div>
                     <h4 className="text-xs font-mono font-bold text-white flex items-center gap-2">
                       <Database className="w-4 h-4 text-emerald-400" />
-                      Cryptographic Trade Audit Ledger (SHA-256 Provenance)
+                      Tamper-Evident Paper Trade Journal
                     </h4>
                     <p className="text-[11px] text-neutral-400">
-                      Every trade creates an immutable, cryptographically chained block proving zero tampering of trade records.
+                      Closed paper trades are recorded with chained SHA-256 hashes so later local edits can be detected. This does not make browser storage immutable or externally attested.
                     </p>
                   </div>
 
@@ -429,7 +429,7 @@ export const SecurityAndComplianceModal: React.FC<SecurityAndComplianceModalProp
                           <th className="p-2">Asset</th>
                           <th className="p-2">Type</th>
                           <th className="p-2">PnL</th>
-                          <th className="p-2">SHA-256 Hash</th>
+                          <th className="p-2">Record Hash</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-neutral-900 text-neutral-300">
@@ -475,11 +475,11 @@ export const SecurityAndComplianceModal: React.FC<SecurityAndComplianceModalProp
                   <div className="flex items-center gap-2">
                     <KeyRound className="w-4 h-4 text-emerald-400" />
                     <span className="text-xs font-mono font-bold text-white">
-                      AES-256-GCM Native Web Crypto Engine
+                      Web Crypto Encryption Engine
                     </span>
                   </div>
                   <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                    HARDWARE ACCELERATED
+                    WEB CRYPTO
                   </span>
                 </div>
                 <p className="text-neutral-400 text-xs font-sans leading-relaxed">
@@ -487,7 +487,7 @@ export const SecurityAndComplianceModal: React.FC<SecurityAndComplianceModalProp
                 </p>
               </div>
 
-              {/* Physical Security PIN Lock Configuration */}
+              {/* Local Security PIN */}
               <div className="p-4 rounded-xl bg-neutral-900/60 border border-neutral-800 space-y-3">
                 <div className="flex items-center justify-between">
                   <div>
@@ -516,7 +516,7 @@ export const SecurityAndComplianceModal: React.FC<SecurityAndComplianceModalProp
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                       <div>
                         <label className="text-[11px] font-mono text-neutral-400 block mb-1">
-                          Enter 4-Digit Security PIN
+                          Enter 6+ Digit Security PIN
                         </label>
                         <input
                           type="password"
