@@ -434,7 +434,19 @@ export class TradingEngine {
     this.vitality.winRate = this.vitality.totalTrades ? Number((this.vitality.winningTrades / this.vitality.totalTrades * 100).toFixed(1)) : 0;
     const gp = this.tradeHistory.filter(t => t.pnl > 0).reduce((s, t) => s + t.pnl, 0) + (economicNet > 0 ? economicNet : 0); const gl = this.tradeHistory.filter(t => t.pnl < 0).reduce((s, t) => s + Math.abs(t.pnl), 0) + (economicNet < 0 ? Math.abs(economicNet) : 0); this.vitality.profitFactor = gl > 0 ? Number((gp / gl).toFixed(2)) : 0;
     this.tradeHistory.unshift({ ...trade }); strategyVaultInstance.recordTradeOutcome(this.strategy, trade);
-    try { void cryptoSecurityService.appendTradeToAuditLedger({ id: trade.id, asset: trade.asset, type: trade.type, entryPrice: trade.entryPrice, exitPrice: trade.exitPrice || requestedExitPrice, pnl: trade.pnl, timestamp: trade.exitTime || Date.now() }); } catch {}
+    if (typeof window !== "undefined") {
+      try {
+        void cryptoSecurityService.appendTradeToAuditLedger({
+          id: trade.id,
+          asset: trade.asset,
+          type: trade.type,
+          entryPrice: trade.entryPrice,
+          exitPrice: trade.exitPrice || requestedExitPrice,
+          pnl: trade.pnl,
+          timestamp: trade.exitTime || Date.now(),
+        }).catch(() => {});
+      } catch {}
+    }
     this.activeTrade = null; this.updateEquityAndHealth(trade.exitPrice || requestedExitPrice); this.recordEquitySnapshot(trade.exitPrice || requestedExitPrice, "Close: " + (economicNet >= 0 ? "+" : "") + "$" + economicNet.toFixed(2), economicNet);
     this.addNotification({ type: economicNet > 0 ? "TAKE_PROFIT" : economicNet < 0 ? "STOP_LOSS" : "MANUAL_CLOSE", title: "Paper trade realized " + (economicNet >= 0 ? "+" : "") + "$" + economicNet.toFixed(2), message: trade.type + " " + trade.asset + " closed. " + reason, badgeText: economicNet > 0 ? "WIN" : economicNet < 0 ? "LOSS" : "FLAT", details: { asset: trade.asset, pnl: economicNet, pnlPercent: trade.pnlPercent, price: trade.exitPrice } });
     if (status === "CLOSED_TAKE_PROFIT") soundFx.playTakeProfit(); else if (status === "CLOSED_STOP_LOSS") soundFx.playStopLoss(); else if (status === "EMERGENCY_LIQUIDATED") soundFx.playCircuitBreaker();
