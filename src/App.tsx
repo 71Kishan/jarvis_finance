@@ -198,10 +198,22 @@ export default function App() {
         const data = await res.json();
 
         if (!isSubscribed) return;
-
-        if (data.ticker) {
-          setLiveTicker(data.ticker);
+        if (!data?.ticker || !Array.isArray(data.candles) || data.candles.length === 0) {
+          throw new Error("Trusted provider returned an incomplete market snapshot.");
         }
+
+        const bid = Number(data.ticker.bid);
+        const ask = Number(data.ticker.ask);
+        const mid = (bid + ask) / 2;
+        const spreadBps = Number.isFinite(bid) && Number.isFinite(ask) && mid > 0
+          ? ((ask - bid) / mid) * 10_000
+          : undefined;
+        tradingEngineRef.current?.setMarketQuality({
+          spreadBps,
+          dataTimestamp: Number(data.ticker.lastUpdated) || Date.now(),
+        });
+        setLiveTicker(data.ticker);
+        setLiveDataError(null);
 
         if (Array.isArray(data.candles) && data.candles.length > 0) {
           if (simulatorRef.current && tradingEngineRef.current) {
@@ -223,7 +235,8 @@ export default function App() {
       } catch (err) {
         console.warn("Live feed unavailable; paper/live mode remains fail-closed:", err);
         setLiveTicker(null);
-        setLiveDataError("Trusted market data is unavailable. Jarvis is fail-closed and will not substitute synthetic prices.");
+        setIsAutoTrading(false);
+        setLiveDataError("Trusted market data is unavailable. Auto-paper execution has been paused and no synthetic price is substituted.");
         setCandles([]);
       }
     };
@@ -256,6 +269,8 @@ export default function App() {
 
   // Toggle Auto Trading
   const handleToggleAutoTrading = () => {
+    if (!isAutoTrading && botState === "HALTED_DEAD") return;
+    if (!isAutoTrading && marketSource === "LIVE_MARKET_DATA" && liveDataError) return;
     setIsAutoTrading((prev) => !prev);
   };
 
@@ -310,9 +325,10 @@ export default function App() {
   // Execute Manual Paper Order
   const handleExecutePaperTrade = (request: PaperOrderRequest): boolean => {
     if (!tradingEngineRef.current || !simulatorRef.current) return false;
+    if (marketSource === "LIVE_MARKET_DATA" && liveDataError) return false;
     const lastCandle = simulatorRef.current.getLastCandle();
-    const currentPrice = lastCandle ? lastCandle.close : 65000;
-    const success = tradingEngineRef.current.executePaperTrade(request, currentPrice);
+    if (!lastCandle || !Number.isFinite(lastCandle.close) || lastCandle.close <= 0) return false;
+    const success = tradingEngineRef.current.executePaperTrade(request, lastCandle.close);
     if (success) {
       syncStateFromEngine();
       const trade = tradingEngineRef.current.getActiveTrade();
