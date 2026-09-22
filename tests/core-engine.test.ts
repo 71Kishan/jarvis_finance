@@ -80,7 +80,7 @@ describe("signal engine", () => {
     const rows = Array.from({ length: 60 }, (_, i) => candle(i + 1));
     const result = evaluateSignal(rows[rows.length - 1], rows, DEFAULT_STRATEGY);
     expect(result.direction).toBe("LONG");
-    expect(result.score).toBeGreaterThanOrEqual(70);
+    expect(result.score).toBeGreaterThanOrEqual(DEFAULT_STRATEGY.minConfidence);
     expect(result.eligible).toBe(true);
   });
 });
