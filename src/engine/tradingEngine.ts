@@ -30,6 +30,7 @@ export class TradingEngine {
   private readonly riskPolicy: RiskPolicyConfig;
   private lastProcessedCandleTimestamp = 0;
   private lastSignal: SignalResult | null = null;
+  private pendingEntry: { direction: "LONG" | "SHORT"; signalScore: number; rationale: string; signalCandle: Candle } | null = null;
   private lastSpreadBps: number | undefined;
   private lastMarketDataTimestamp = 0;
   private lastMarketOpen: boolean | undefined;
@@ -172,11 +173,34 @@ export class TradingEngine {
     if (!currentCandle || currentCandle.timestamp <= 0) return;
     this.rollDailyBoundary(currentCandle.timestamp);
     this.updateEquityAndHealth(currentCandle.close);
+
     if (this.activeTrade) this.manageActiveTrade(currentCandle);
+
     if (currentCandle.timestamp !== this.lastProcessedCandleTimestamp) {
       this.lastProcessedCandleTimestamp = currentCandle.timestamp;
-      if (!this.activeTrade && this.botState !== "HALTED_DEAD") this.evaluateEntry(currentCandle, recentCandles);
+
+      // A strategy signal becomes an order on the NEXT completed bar's open.
+      // This keeps unattended paper execution aligned with the backtester and
+      // prevents using the signal bar's closing price as an execution fill.
+      if (this.pendingEntry && !this.activeTrade && this.botState !== "HALTED_DEAD") {
+        const pending = this.pendingEntry;
+        this.pendingEntry = null;
+        this.executeEntry(
+          pending.direction,
+          currentCandle.open,
+          pending.signalScore,
+          pending.rationale,
+          pending.signalCandle
+        );
+      } else if (this.pendingEntry && (this.activeTrade || this.botState === "HALTED_DEAD")) {
+        this.pendingEntry = null;
+      }
+
+      if (!this.activeTrade && this.botState !== "HALTED_DEAD" && !this.pendingEntry) {
+        this.evaluateEntry(currentCandle, recentCandles);
+      }
     }
+
     this.recordEquitySnapshot(currentCandle.close);
     this.notify();
   }
@@ -261,9 +285,26 @@ export class TradingEngine {
   }
 
   private evaluateEntry(candle: Candle, recentCandles: Candle[]) {
-    const signal = evaluateSignal(candle, recentCandles, this.strategy); this.lastSignal = signal;
-    if (!signal.eligible) { this.logThought("STUDY", "No eligible setup", signal.reasons.join(" ") || "Composite score below threshold.", signal.score); return; }
-    this.executeEntry(signal.direction as "LONG" | "SHORT", candle.close, signal.score, signal.reasons.join(" | "), candle);
+    const signal = evaluateSignal(candle, recentCandles, this.strategy);
+    this.lastSignal = signal;
+
+    if (!signal.eligible) {
+      this.logThought("STUDY", "No eligible setup", signal.reasons.join(" ") || "Composite score below threshold.", signal.score);
+      return;
+    }
+
+    this.pendingEntry = {
+      direction: signal.direction as "LONG" | "SHORT",
+      signalScore: signal.score,
+      rationale: signal.reasons.join(" | "),
+      signalCandle: candle,
+    };
+    this.logThought(
+      "SIGNAL",
+      "Eligible setup queued for next bar",
+      `Signal score ${signal.score}; ${signal.direction} will only be filled at the next completed bar open after risk re-check.`,
+      signal.score
+    );
   }
 
   private executeEntry(type: "LONG" | "SHORT", expectedPrice: number, signalScore: number, rationale: string, signalCandle?: Candle) {
