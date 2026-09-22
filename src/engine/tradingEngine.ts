@@ -30,6 +30,9 @@ export class TradingEngine {
   private readonly riskPolicy: RiskPolicyConfig;
   private lastProcessedCandleTimestamp = 0;
   private lastSignal: SignalResult | null = null;
+  private lastSpreadBps: number | undefined;
+  private lastMarketDataTimestamp = 0;
+  private lastDailyKey = "";
   private paperSettings: PaperTradingSettings = { slippageBps: 2, feeTierPercent: 0.04, leverage: 1, soundAlerts: true };
   private static readonly STORAGE_VAULT_KEY = "jarvis_paper_reserve_v2";
   private static readonly STORAGE_WITHDRAWALS_KEY = "jarvis_paper_reserve_ledger_v2";
@@ -43,6 +46,7 @@ export class TradingEngine {
     if (typeof window !== "undefined") { try { savedVault = Number(localStorage.getItem(TradingEngine.STORAGE_VAULT_KEY) || 0) || 0; const raw = localStorage.getItem(TradingEngine.STORAGE_WITHDRAWALS_KEY); if (raw) saved = JSON.parse(raw); } catch {} }
     this.profitWithdrawals = Array.isArray(saved) ? saved : [];
     this.vitality = this.createInitialVitality(capital, this.riskPolicy.maxPeakDrawdownPercent);
+    this.lastDailyKey = this.utcDayKey(Date.now());
     this.vitality.securedProfitVault = Math.max(0, savedVault);
     this.vitality.totalProfitWithdrawn = this.profitWithdrawals.reduce((s, r) => s + (Number(r.withdrawnAmount) || 0), 0);
     const now = Date.now();
@@ -82,7 +86,25 @@ export class TradingEngine {
     if (this.equityCurve.length > 500) this.equityCurve.shift();
   }
 
-  public setCircuitBreakerThreshold(percent: number) { this.vitality.circuitBreakerThresholdPercent = Math.max(0.5, Math.min(15, Number(percent) || 0.5)); this.notify(); }
+  public setCircuitBreakerThreshold(percent: number) {
+    // The configured risk policy is a hard ceiling. Users may tighten the limit,
+    // but the UI cannot widen it beyond the policy used to create the run.
+    const requested = Math.max(0.5, Number(percent) || 0.5);
+    const next = Math.min(this.riskPolicy.maxPeakDrawdownPercent, requested);
+    this.vitality.circuitBreakerThresholdPercent = next;
+    if (this.vitality.currentDrawdownPercent >= next && this.botState !== "HALTED_DEAD") {
+      this.triggerCircuitBreaker(
+        { timestamp: Date.now(), open: 0, high: 0, low: 0, close: 1, volume: 0 },
+        "Configured drawdown threshold tightened below the current drawdown."
+      );
+    }
+    this.notify();
+  }
+
+  public setMarketQuality(input: { spreadBps?: number; dataTimestamp?: number }) {
+    this.lastSpreadBps = Number.isFinite(input.spreadBps) ? Math.max(0, Number(input.spreadBps)) : undefined;
+    this.lastMarketDataTimestamp = Number.isFinite(input.dataTimestamp) ? Number(input.dataTimestamp) : Date.now();
+  }
   public getPaperSettings() { return { ...this.paperSettings }; }
   public updatePaperSettings(settings: Partial<PaperTradingSettings>) { const n = { ...this.paperSettings, ...settings }; this.paperSettings = { slippageBps: Math.max(0, Number(n.slippageBps) || 0), feeTierPercent: Math.max(0, Number(n.feeTierPercent) || 0), leverage: 1, soundAlerts: n.soundAlerts ?? true }; soundFx.setEnabled(this.paperSettings.soundAlerts); this.notify(); }
 
@@ -115,7 +137,8 @@ export class TradingEngine {
     if (!Number.isFinite(currentPrice) || currentPrice <= 0) return this.reject("Order rejected: invalid market price.");
     if (request.leverage !== 1) return this.reject("Order rejected: leverage is disabled.");
     if (request.amountUsd <= 0 || request.stopLossPercent <= 0 || request.takeProfitPercent <= 0) return this.reject("Order rejected: amount, stop, and target must be positive.");
-    const notional = Math.min(request.amountUsd, this.vitality.cash);
+    if (request.amountUsd > this.vitality.cash) return this.reject("Order rejected: requested notional exceeds available paper cash.");
+    const notional = request.amountUsd;
     const risk = evaluateRisk(this.riskPolicy, { equity: this.vitality.currentEquity, peakEquity: this.vitality.peakEquity, dailyStartEquity: this.vitality.dailyStartEquity, openPositions: 0, requestedNotional: notional, leverage: 1, stopLossPercent: request.stopLossPercent, recentLossCount: this.vitality.consecutiveLosses, lastLossAtMs: this.vitality.lastLossAt }, this.strategy);
     if (!risk.allowed) return this.reject("Order rejected: " + risk.reasons.join(" "));
     this.openPaperPosition(request.type, currentPrice, notional, request.stopLossPercent, request.takeProfitPercent, request.trailingStop, request.manualNote, 0);
@@ -146,6 +169,7 @@ export class TradingEngine {
 
   public onTick(currentCandle: Candle, recentCandles: Candle[]) {
     if (!currentCandle || currentCandle.timestamp <= 0) return;
+    this.rollDailyBoundary(currentCandle.timestamp);
     this.updateEquityAndHealth(currentCandle.close);
     if (this.activeTrade) this.manageActiveTrade(currentCandle);
     if (currentCandle.timestamp !== this.lastProcessedCandleTimestamp) {
@@ -154,6 +178,26 @@ export class TradingEngine {
     }
     this.recordEquitySnapshot(currentCandle.close);
     this.notify();
+  }
+
+  private utcDayKey(timestampMs: number) {
+    return new Date(timestampMs).toISOString().slice(0, 10);
+  }
+
+  private rollDailyBoundary(timestampMs: number) {
+    const key = this.utcDayKey(timestampMs);
+    if (!this.lastDailyKey) {
+      this.lastDailyKey = key;
+      this.vitality.dailyStartEquity = this.vitality.currentEquity;
+      this.vitality.dailyDrawdownPercent = 0;
+      return;
+    }
+    if (key !== this.lastDailyKey) {
+      this.lastDailyKey = key;
+      this.vitality.dailyStartEquity = this.vitality.currentEquity;
+      this.vitality.dailyDrawdownPercent = 0;
+      this.logThought("STUDY", "New UTC risk day", "Daily loss budget reset from the current paper equity. Loss streak is intentionally preserved across days.");
+    }
   }
 
   private updateEquityAndHealth(currentPrice: number) {
@@ -187,11 +231,11 @@ export class TradingEngine {
   private evaluateEntry(candle: Candle, recentCandles: Candle[]) {
     const signal = evaluateSignal(candle, recentCandles, this.strategy); this.lastSignal = signal;
     if (!signal.eligible) { this.logThought("STUDY", "No eligible setup", signal.reasons.join(" ") || "Composite score below threshold.", signal.score); return; }
-    this.executeEntry(signal.direction as "LONG" | "SHORT", candle.close, signal.score, signal.reasons.join(" | "));
+    this.executeEntry(signal.direction as "LONG" | "SHORT", candle.close, signal.score, signal.reasons.join(" | "), candle);
   }
 
-  private executeEntry(type: "LONG" | "SHORT", expectedPrice: number, signalScore: number, rationale: string) {
-    const risk = evaluateRisk(this.riskPolicy, { equity: this.vitality.currentEquity, peakEquity: this.vitality.peakEquity, dailyStartEquity: this.vitality.dailyStartEquity, openPositions: 0, requestedNotional: this.vitality.currentEquity * 0.35, leverage: 1, stopLossPercent: this.strategy.stopLossPercent, recentLossCount: this.vitality.consecutiveLosses, lastLossAtMs: this.vitality.lastLossAt }, this.strategy);
+  private executeEntry(type: "LONG" | "SHORT", expectedPrice: number, signalScore: number, rationale: string, signalCandle?: Candle) {
+    const risk = evaluateRisk(this.riskPolicy, { equity: this.vitality.currentEquity, peakEquity: this.vitality.peakEquity, dailyStartEquity: this.vitality.dailyStartEquity, openPositions: 0, requestedNotional: this.vitality.currentEquity * 0.35, leverage: 1, spreadBps: this.lastSpreadBps, candle: signalCandle, stopLossPercent: this.strategy.stopLossPercent, recentLossCount: this.vitality.consecutiveLosses, lastLossAtMs: this.vitality.lastLossAt }, this.strategy);
     if (!risk.allowed) { this.logThought("DEFENSE", "Signal rejected by risk policy", risk.reasons.join(" "), signalScore); return false; }
     const stopDistance = Math.max(0.001, this.strategy.stopLossPercent / 100);
     const riskSize = risk.maxLossBudgetUsd / stopDistance;
