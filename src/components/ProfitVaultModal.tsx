@@ -54,7 +54,7 @@ export const ProfitVaultModal: React.FC<ProfitVaultModalProps> = ({
     engine.setAutoWithdrawProfitEnabled(autoEnabled);
     engine.setWithdrawPercentage(withdrawPct);
     engine.setMinProfitThresholdUsd(minThreshold);
-    setActionSuccess("Autonomous profit withdrawal settings saved successfully.");
+    setActionSuccess("Paper reserve settings saved.");
     setTimeout(() => setActionSuccess(null), 3500);
   };
 
@@ -207,7 +207,7 @@ export const ProfitVaultModal: React.FC<ProfitVaultModalProps> = ({
               ${totalWithdrawn.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </div>
             <div className="text-[11px] text-slate-400 mt-1">
-              {records.length} documented autonomous withdrawals
+              {records.length} documented paper-reserve transfers
             </div>
           </div>
 
