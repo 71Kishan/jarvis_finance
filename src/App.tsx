@@ -509,6 +509,7 @@ export default function App() {
             <OrderBookWidget
               currentPrice={currentPrice}
               symbol={currentAsset}
+              ticker={liveTicker}
             />
           </div>
         </div>
