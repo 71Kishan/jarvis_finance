@@ -404,7 +404,7 @@ Return a concise answer with:
   }
 });
 
-// Endpoint: Deep Quantitative Study & Strategy Evolution (Self-Sustaining)
+// Endpoint: Quantitative Study & Strategy Research
 app.post("/api/bot/study", async (req: Request, res: Response) => {
   const body = req.body || {};
   const localFallback = computeQuantitativeStudy(body);
@@ -431,13 +431,13 @@ Equity & Performance Stats:
 - Win Rate: ${Number.isFinite(Number(body.equityStats?.winRate)) ? body.equityStats.winRate + "%" : "unavailable"}
 - Total Trades: ${Number.isFinite(Number(body.equityStats?.totalTrades)) ? body.equityStats.totalTrades : "unavailable"}
 
-Provide an institutional quantitative analysis in valid JSON:
+Provide a quantitative research analysis in valid JSON:
 {
   "survivalStatus": "THRIVING" | "ALERT" | "DEFENSIVE",
-  "regimeAssessment": "string describing market structure (e.g. Bullish Trend Expansion, Mean-Reverting Squeeze)",
-  "thoughtLog": "Rigorous quantitative risk reasoning focusing on asymmetric risk-to-reward and capital preservation",
-  "survivalVow": "Formal fiduciary statement regarding mathematical risk discipline",
-  "keyTakeaway": "Actionable technical execution rule",
+  "regimeAssessment": "string describing market structure from the supplied data",
+  "thoughtLog": "Quantitative reasoning focused on asymmetric risk-to-reward, uncertainty, and capital preservation",
+  "riskDisciplineNote": "Plain-language note describing the relevant risk constraint; do not claim fiduciary status or legal duties",
+  "keyTakeaway": "Research rule that can be tested",
   "recommendedStrategy": {
     "name": "Strategy Name",
     "version": number,
@@ -477,7 +477,7 @@ Provide an institutional quantitative analysis in valid JSON:
   }
 });
 
-// Endpoint: Post-Trade Attribution & Execution Analysis (Self-Sustaining)
+// Endpoint: Post-Trade Attribution & Execution Analysis
 app.post("/api/bot/critique-trade", async (req: Request, res: Response) => {
   const { trade, marketSnapshot } = req.body || {};
   const localAttribution = computeQuantitativeCritique(trade, marketSnapshot);
@@ -488,17 +488,17 @@ app.post("/api/bot/critique-trade", async (req: Request, res: Response) => {
       return res.json(localAttribution);
     }
 
-    const prompt = `You are the Quantitative Risk Auditing System for an algorithmic execution terminal.
-Evaluate this completed trade:
+    const prompt = `You are Jarvis Finance's post-trade research auditor.
+Evaluate this completed paper trade:
 Trade Record: ${JSON.stringify(trade, null, 2)}
 Market Snapshot: ${JSON.stringify(marketSnapshot, null, 2)}
 
-Provide an institutional post-trade execution analysis in valid JSON:
+Provide a quantitative post-trade execution analysis in valid JSON:
 {
   "verdict": "string",
   "autopsy": "thorough technical analysis of order entry, slippage, and risk execution",
   "lesson": "institutional risk rule derived from this outcome",
-  "survivalHealthImpact": "string"
+  "riskControlImpact": "string"
 }`;
 
     const response = await ai.models.generateContent({
@@ -517,7 +517,7 @@ Provide an institutional post-trade execution analysis in valid JSON:
   }
 });
 
-// Endpoint: Quantitative Market Structure Intelligence (Self-Sustaining)
+// Endpoint: Quantitative Market Structure Intelligence
 app.post("/api/bot/market-news", async (req: Request, res: Response) => {
   const { asset, marketSnapshot } = req.body || {};
   const localIntel = computeQuantitativeMarketIntelligence(asset, marketSnapshot);
