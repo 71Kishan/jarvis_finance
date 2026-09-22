@@ -430,10 +430,10 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
           <div className="p-2.5 bg-neutral-900/70 rounded-lg border border-neutral-800">
             <div className="flex items-center justify-between text-xs text-neutral-400">
               <span>Paper Leverage</span>
-              <span className="font-mono font-bold text-emerald-400">1x SPOT ONLY</span>
+              <span className="font-mono font-bold text-emerald-400">1x UNLEVERED PAPER SIMULATION</span>
             </div>
             <div className="text-[10px] text-neutral-500 mt-1">
-              Leverage is disabled in the current risk policy. Position notional equals the cash reserved for the paper trade.
+              Leverage is disabled. Long/short mechanics here are simulated; instrument-specific borrow, funding, and margin rules are not modeled.
             </div>
           </div>
 
