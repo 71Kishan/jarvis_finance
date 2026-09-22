@@ -238,7 +238,7 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
           <div>
             <div className="flex items-center gap-2">
               <span className="text-xs font-bold text-neutral-200">
-                Daily P&L (informational)
+                Daily Risk Monitor
               </span>
               <span
                 className={`text-[10px] font-mono font-bold px-1.5 py-0.2 rounded ${
@@ -251,13 +251,13 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
                 {dailyGoal.currentDailyPnlUsd.toFixed(2)} Today
               </span>
               <span className="text-[10px] text-amber-400 font-mono hidden sm:inline">
-                {dailyGoal.streakDays}d Streak 🔥
+                {dailyGoal.riskDays}d Risk
               </span>
             </div>
             <div className="text-[11px] text-neutral-400">
               {dailyGoal.targetAchieved
-                ? "Daily target is informational only; capital controls remain independent of P&L targets."
-                : "No P&L target is used to trigger entries. Review the session result, drawdown and trade count instead."}
+                ? "Daily P&L is informational. Entry controls are independent of profit targets."
+                : "Review drawdown, daily loss limit and trade count. Jarvis does not chase a daily income target."}
             </div>
           </div>
         </div>
