@@ -202,7 +202,7 @@ export interface LiveExchangeTicker {
   volume24h: number;
   change24hPercent: number;
   lastUpdated: number;
-  source: "BINANCE" | "COINBASE" | "SYNTHETIC";
+  source: "BINANCE" | "COINBASE" | "FINANCIAL_DATASETS" | "SYNTHETIC";
   dataQuality?: DataQuality;
 }
 
