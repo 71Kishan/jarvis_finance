@@ -53,7 +53,7 @@ export class StrategyOptimizer {
     const returns: number[] = [];
     let previousEquity = initialBalance;
 
-    const recordClosedTrade = (net: number, fees: number, slippage: number, sizeUsd: number) => {
+    const recordClosedTrade = (net: number, fees: number, slippage: number) => {
       totalFees += fees;
       totalSlippage += slippage;
       if (net > 0) {
@@ -63,14 +63,16 @@ export class StrategyOptimizer {
         losses += 1;
         grossLosses += Math.abs(net);
       }
-      return sizeUsd + net;
     };
 
     const closePosition = (p: SimPosition, exitPrice: number) => {
       const exit = modelExitFill(exitPrice, p.type, Math.abs(p.amount * exitPrice), settings);
       const gross = grossPnL(p.type, p.entryPrice, exit.fillPrice, p.amount);
       const net = gross - p.entryFeeUsd - exit.feeUsd;
-      cash += recordClosedTrade(net, p.entryFeeUsd + exit.feeUsd, exit.slippageUsd, p.sizeUsd);
+      recordClosedTrade(net, p.entryFeeUsd + exit.feeUsd, exit.slippageUsd);
+      // Entry fee was already deducted when the position opened. Return the reserved notional
+      // plus gross P&L, less only the exit fee.
+      cash += p.sizeUsd + gross - exit.feeUsd;
       position = null;
     };
 
@@ -215,18 +217,22 @@ export class StrategyOptimizer {
       const validation = this.backtest(strategy, candles.slice(Math.max(0, trainEnd - 60), validationEnd));
       const test = this.backtest(strategy, candles.slice(Math.max(0, validationEnd - 60)));
 
-      const selectionScore =
-        (test.totalTrades >= 10 ? 1 : 0) +
-        (test.totalPnl > 0 ? 1 : 0) +
-        (test.sharpeRatio > 0 ? 1 : 0) +
-        (test.maxDrawdown < 10 ? 1 : 0) +
-        (validation.totalPnl > 0 ? 1 : 0);
+      // Select only from training/validation evidence. The test set is held out until
+      // after the candidate has been selected so it remains a genuinely out-of-sample report.
+      const validationScore =
+        (validation.totalTrades >= 20 ? 2 : validation.totalTrades >= 10 ? 1 : 0) +
+        (validation.totalPnl > 0 ? 2 : 0) +
+        (validation.profitFactor >= 1.2 ? 1 : 0) +
+        (validation.sharpeRatio > 0 ? 1 : 0) +
+        (validation.maxDrawdown < 10 ? 1 : 0) +
+        (train.totalPnl > 0 ? 1 : 0);
 
-      return { strategy, result: test, selectionScore, train, validation };
+      return { strategy, result: test, selectionScore: validationScore, train, validation };
     }).sort((a, b) =>
       b.selectionScore - a.selectionScore ||
-      b.result.sharpeRatio - a.result.sharpeRatio ||
-      b.result.totalPnl - a.result.totalPnl
+      b.validation.sharpeRatio - a.validation.sharpeRatio ||
+      b.validation.totalPnl - a.validation.totalPnl ||
+      b.train.sharpeRatio - a.train.sharpeRatio
     );
 
     const selected = rows[0];
@@ -236,12 +242,13 @@ export class StrategyOptimizer {
       bestResult: selected.result,
       candidatesTested: rows.map((row) => ({ strategy: row.strategy, result: row.result })),
       optimizationInsights: [
-        "Walk-forward split: 60% train, 20% validation, 20% test, with warm-up overlap for indicator calculation.",
+        "Walk-forward split: 60% train, 20% validation, 20% held-out test, with warm-up overlap for indicator calculation.",
+        "Candidate selection uses training/validation evidence only; the held-out test set is reported after selection.",
         "Entry signals are generated from a completed bar and filled at the next bar open.",
         "Test results include modeled entry and exit fees plus adverse slippage.",
         "Ambiguous OHLC bars resolve stop-first rather than assuming a favorable intrabar path.",
         "A small sample is not production validation; forward paper and shadow evidence remain required.",
-        "The selected candidate is a research hypothesis, not an automatic deployment decision.",
+        "The selected candidate is a research hypothesis, not an automatic deployment decision."
       ],
     };
   }
