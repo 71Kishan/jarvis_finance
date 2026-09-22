@@ -506,7 +506,7 @@ export const AiCopilotModal: React.FC<AiCopilotModalProps> = ({
                         <Markdown>{msg.content}</Markdown>
                         <div className="pt-2 mt-2 border-t border-slate-700/50 flex items-center justify-between text-[10px] text-slate-400">
                           <span className="font-mono text-slate-400">
-                            {msg.modelUsed || "gemini-3.5-flash"} • {new Date(msg.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                            {msg.modelUsed || "gemini-3.8-flash"} • {new Date(msg.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                           </span>
                           <button
                             onClick={() => handleCopyMessage(msg.id, msg.content)}
