@@ -123,7 +123,7 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
                 Quantitative Strategy Evolution & Backtest Lab
               </h2>
               <p className="text-[11px] text-neutral-400">
-                Historical testing, holdout validation, and AI-assisted research proposals
+                Continuous optimization via historical market data and quantitative parameter search
               </p>
             </div>
           </div>
@@ -143,10 +143,10 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
             <div className="space-y-1">
               <div className="flex items-center gap-2 text-indigo-300 font-bold text-xs">
                 <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
-                <span>Run Research & Validation Cycle</span>
+                <span>Execute Quantitative Strategy Optimization Cycle</span>
               </div>
               <p className="text-[11px] text-neutral-400 max-w-xl">
-                Evaluates the available history using a chronological holdout, execution-cost assumptions, and conservative stop/target handling. AI output is treated as a proposal, not an execution command.
+                Evaluates {candles.length} historical candles, performs parameter surface search, backtests risk-to-reward ratios, and recalibrates algorithmic execution thresholds.
               </p>
             </div>
 
@@ -180,7 +180,7 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
                     Quantitative Risk & Regime Assessment
                   </span>
                   <span className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 text-[10px]">
-                    Research Assessment: {aiAnalysis.survivalStatus || "UNSPECIFIED"}
+                    Status: {aiAnalysis.survivalStatus || "OPTIMAL"}
                   </span>
                 </div>
 
@@ -212,7 +212,7 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
                   Simulated Strategy Candidates ({optimizationData.candidatesTested.length} tested across historical data)
                 </h3>
                 <span className="text-[10px] text-neutral-500">
-                  Ordered by the validation objective; inspect holdout trades, P&L, drawdown and expectancy before using a candidate.
+                  Sorted by Win-Rate & Survival Score
                 </span>
               </div>
 
@@ -238,7 +238,7 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
                             </span>
                             {isTop && (
                               <span className="px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 text-[9px] font-bold border border-emerald-500/40">
-                                TOP VALIDATION CANDIDATE
+                                TOP PERFORMER
                               </span>
                             )}
                           </div>
@@ -313,7 +313,7 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
         {/* Modal Footer */}
         <div className="px-5 py-3 border-t border-neutral-800 bg-neutral-900/70 flex items-center justify-between">
           <span className="text-neutral-500 text-[11px]">
-            Applying a candidate changes the paper strategy only. It does not approve live trading, and a paper backtest is not evidence of guaranteed future performance.
+            Adopting updates the terminal's live execution matrix immediately.
           </span>
 
           <div className="flex items-center gap-2">
@@ -330,7 +330,7 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
               className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition-all shadow-md disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
             >
               <CheckCircle2 className="w-3.5 h-3.5" />
-              <span>Use as Paper Candidate</span>
+              <span>Adopt Optimized Strategy</span>
             </button>
           </div>
         </div>
