@@ -35,7 +35,7 @@ export const StrategyVaultModal: React.FC<StrategyVaultModalProps> = ({
   currentStrategy,
   onApplyStrategy,
 }) => {
-  const [activeTab, setActiveTab] = useState<"PROVEN" | "ALL" | "TESTING" | "DISCARDED">("PROVEN");
+  const [activeTab, setActiveTab] = useState<"PROVEN" | "ALL" | "TESTING" | "DISCARDED">("ALL");
   const [strategies, setStrategies] = useState<StrategyVaultEntry[]>(() =>
     strategyVaultInstance.getAllStrategies()
   );
@@ -159,7 +159,7 @@ export const StrategyVaultModal: React.FC<StrategyVaultModalProps> = ({
           {/* Tab Filter */}
           <div className="flex items-center gap-1 bg-neutral-950 p-1 rounded-xl border border-neutral-800">
             <button
-              id="vault-tab-proven"
+              id="vault-tab-validated"
               type="button"
               onClick={() => setActiveTab("PROVEN")}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors ${
@@ -169,7 +169,7 @@ export const StrategyVaultModal: React.FC<StrategyVaultModalProps> = ({
               }`}
             >
               <Award className="w-3.5 h-3.5" />
-              <span>Provisionally Validated ({strategies.filter((s) => s.status === "PROVISIONALLY_VALIDATED").length})</span>
+              <span>Validated Candidates ({strategies.filter((s) => s.status === "PROVISIONALLY_VALIDATED").length})</span>
             </button>
             <button
               id="vault-tab-all"
@@ -211,7 +211,7 @@ export const StrategyVaultModal: React.FC<StrategyVaultModalProps> = ({
           </div>
 
           <button
-            id="deploy-best-proven-btn"
+            id="review-validated-candidates-btn"
             type="button"
             onClick={handleScanBestModel}
             className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl flex items-center gap-2 transition-colors shadow-md shadow-emerald-950/40"
