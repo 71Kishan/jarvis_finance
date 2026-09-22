@@ -212,7 +212,7 @@ export class StrategyOptimizer {
     let verdict: BacktestResult["verdict"] = "FAILED";
     if (totalTrades >= 30 && totalPnl > 0 && maxDrawdown < 10 && sharpe > 0) {
       verdict = "SURVIVED_AND_PROFITABLE";
-    } else if (totalPnl >= 0 && maxDrawdown < 10) {
+    } else if (maxDrawdown >= 10) {
       verdict = "UNSAFE_HIGH_DRAWDOWN";
     }
 
