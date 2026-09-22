@@ -78,17 +78,14 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
 }) => {
   const [orderType, setOrderType] = useState<"LONG" | "SHORT">("LONG");
   const [amountUsd, setAmountUsd] = useState<number>(500);
-  const [leverage, setLeverage] = useState<number>(1);
+  const leverage = 1;
   const [stopLossPercent, setStopLossPercent] = useState<number>(strategy.stopLossPercent || 1.0);
   const [takeProfitPercent, setTakeProfitPercent] = useState<number>(strategy.takeProfitPercent || 2.5);
   const [trailingStop, setTrailingStop] = useState<boolean>(true);
   const [executionFeedback, setExecutionFeedback] = useState<string | null>(null);
 
   const availableCash = vitality.cash;
-  const positionSizeUsd = amountUsd * leverage;
-  const estimatedSlippage = (positionSizeUsd * 0.0002).toFixed(2);
-  const estimatedFee = (positionSizeUsd * 0.0004).toFixed(2);
-
+  const positionSizeUsd = amountUsd;
   const calculatedStopPrice =
     orderType === "LONG"
       ? currentPrice * (1 - stopLossPercent / 100)
@@ -175,7 +172,7 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
               }`}
             />
             <Radio className="w-3.5 h-3.5" />
-            <span>Verified Live Data</span>
+            <span>Trusted Live Data</span>
           </button>
 
           <button
@@ -220,7 +217,7 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
           </div>
         </div>
         <div>
-          <div className="text-[10px] text-neutral-400 font-sans">Available Margin</div>
+          <div className="text-[10px] text-neutral-400 font-sans">Available Cash</div>
           <div className="text-cyan-400 font-bold">
             ${vitality.cash.toFixed(2)}
           </div>
@@ -394,7 +391,7 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
           {/* Amount Sizing & Quick Chips */}
           <div>
             <div className="flex items-center justify-between text-xs text-neutral-400 mb-1">
-              <span>Order Margin ($ USD)</span>
+              <span>Order Notional ($ USD)</span>
               <span className="font-mono text-[11px]">
                 Max: ${availableCash.toFixed(0)}
               </span>
@@ -429,29 +426,14 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
             </div>
           </div>
 
-          {/* Leverage Selector */}
-          <div>
-            <div className="flex items-center justify-between text-xs text-neutral-400 mb-1">
+          {/* Leverage Policy */}
+          <div className="p-2.5 bg-neutral-900/70 rounded-lg border border-neutral-800">
+            <div className="flex items-center justify-between text-xs text-neutral-400">
               <span>Paper Leverage</span>
-              <span className="font-mono text-[11px] text-indigo-400">
-                Total Size: ${(amountUsd * leverage).toFixed(2)}
-              </span>
+              <span className="font-mono font-bold text-emerald-400">1x SPOT ONLY</span>
             </div>
-            <div className="grid grid-cols-4 gap-1.5">
-              {[1, 2, 5, 10].map((lev) => (
-                <button
-                  key={lev}
-                  type="button"
-                  onClick={() => setLeverage(lev)}
-                  className={`py-1 rounded-lg font-mono text-xs font-bold border transition-all ${
-                    leverage === lev
-                      ? "bg-indigo-600 text-white border-indigo-500 shadow-sm"
-                      : "bg-neutral-900 text-neutral-400 border-neutral-800 hover:text-neutral-200"
-                  }`}
-                >
-                  {lev}x {lev === 1 ? "Spot" : "Margin"}
-                </button>
-              ))}
+            <div className="text-[10px] text-neutral-500 mt-1">
+              Leverage is disabled in the current risk policy. Position notional equals the cash reserved for the paper trade.
             </div>
           </div>
 
@@ -503,7 +485,7 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
                 onChange={(e) => setTrailingStop(e.target.checked)}
                 className="rounded bg-neutral-800 border-neutral-700 text-indigo-500 focus:ring-0"
               />
-              <span>Dynamic Trailing Stop (+1% Lock)</span>
+              <span>Trailing Stop</span>
             </label>
             <span className="font-mono text-[11px] text-neutral-400">
               R:R <strong className="text-indigo-300">{riskRewardRatio} : 1</strong>
