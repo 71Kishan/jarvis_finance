@@ -89,7 +89,8 @@ export function evaluateSignal(candle: Candle, recentCandles: Candle[], strategy
   const eligible =
     direction !== "NEUTRAL" &&
     score >= strategy.minConfidence &&
-    directionalEdge >= 10;
+    directionalEdge >= 10 &&
+    volumeConfirmed;
   if (direction !== "NEUTRAL" && directionalEdge < 10) {
     reasons.push(`Directional edge is only ${directionalEdge} points; minimum required edge is 10.`);
   }
