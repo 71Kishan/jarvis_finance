@@ -1,118 +1,111 @@
 import { Candle, IndicatorValues } from "../types/trading";
 
-export function calculateEMA(prices: number[], period: number): number[] {
-  const k = 2 / (period + 1);
-  const emaArray: number[] = [];
-  
-  if (prices.length === 0) return [];
-  
-  let currentEma = prices[0];
-  emaArray.push(currentEma);
-
-  for (let i = 1; i < prices.length; i++) {
-    currentEma = prices[i] * k + currentEma * (1 - k);
-    emaArray.push(currentEma);
+function assertPeriod(period: number): void {
+  if (!Number.isInteger(period) || period <= 1) {
+    throw new Error("Indicator period must be an integer greater than 1.");
   }
-  return emaArray;
 }
 
-export function calculateRSI(prices: number[], period: number = 14): number[] {
-  const rsi: number[] = [];
-  if (prices.length <= period) {
-    return prices.map(() => 50);
+export function calculateEMA(prices: number[], period: number): number[] {
+  assertPeriod(period);
+  if (prices.length === 0) return [];
+
+  const k = 2 / (period + 1);
+  const ema = new Array<number>(prices.length);
+  ema[0] = prices[0];
+
+  for (let i = 1; i < prices.length; i += 1) {
+    ema[i] = prices[i] * k + ema[i - 1] * (1 - k);
   }
+  return ema;
+}
 
-  let gains = 0;
-  let losses = 0;
+export function calculateRSI(prices: number[], period = 14): number[] {
+  assertPeriod(period);
+  const result = new Array<number>(prices.length).fill(Number.NaN);
+  if (prices.length <= period) return result;
 
-  for (let i = 1; i <= period; i++) {
+  let gainSum = 0;
+  let lossSum = 0;
+
+  for (let i = 1; i <= period; i += 1) {
     const change = prices[i] - prices[i - 1];
-    if (change > 0) gains += change;
-    else losses += Math.abs(change);
+    gainSum += Math.max(change, 0);
+    lossSum += Math.max(-change, 0);
   }
 
-  let avgGain = gains / period;
-  let avgLoss = losses / period;
-  rsi[period] = avgLoss === 0 ? 100 : 100 - (100 / (1 + avgGain / avgLoss));
+  let avgGain = gainSum / period;
+  let avgLoss = lossSum / period;
+  result[period] = rsiValue(avgGain, avgLoss);
 
-  for (let i = 0; i < period; i++) {
-    rsi[i] = 50;
-  }
-
-  for (let i = period + 1; i < prices.length; i++) {
+  for (let i = period + 1; i < prices.length; i += 1) {
     const change = prices[i] - prices[i - 1];
-    const gain = change > 0 ? change : 0;
-    const loss = change < 0 ? Math.abs(change) : 0;
-
-    avgGain = (avgGain * (period - 1) + gain) / period;
-    avgLoss = (avgLoss * (period - 1) + loss) / period;
-
-    const rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
-    rsi.push(avgLoss === 0 ? 100 : 100 - (100 / (1 + rs)));
+    const gain = Math.max(change, 0);
+    const loss = Math.max(-change, 0);
+    avgGain = ((period - 1) * avgGain + gain) / period;
+    avgLoss = ((period - 1) * avgLoss + loss) / period;
+    result[i] = rsiValue(avgGain, avgLoss);
   }
 
-  return rsi;
+  return result;
+}
+
+function rsiValue(avgGain: number, avgLoss: number): number {
+  if (avgLoss === 0) return avgGain === 0 ? 50 : 100;
+  return 100 - 100 / (1 + avgGain / avgLoss);
 }
 
 export function calculateBollingerBands(
   prices: number[],
-  period: number = 20,
-  stdDevMultiplier: number = 2
+  period = 20,
+  stdDevMultiplier = 2
 ): { upper: number[]; middle: number[]; lower: number[] } {
-  const upper: number[] = [];
-  const middle: number[] = [];
-  const lower: number[] = [];
+  assertPeriod(period);
+  if (!Number.isFinite(stdDevMultiplier) || stdDevMultiplier <= 0) {
+    throw new Error("Bollinger standard deviation multiplier must be positive.");
+  }
 
-  for (let i = 0; i < prices.length; i++) {
-    if (i < period - 1) {
-      middle.push(prices[i]);
-      upper.push(prices[i] * 1.02);
-      lower.push(prices[i] * 0.98);
-      continue;
-    }
+  const upper = new Array<number>(prices.length).fill(Number.NaN);
+  const middle = new Array<number>(prices.length).fill(Number.NaN);
+  const lower = new Array<number>(prices.length).fill(Number.NaN);
 
+  for (let i = period - 1; i < prices.length; i += 1) {
     const slice = prices.slice(i - period + 1, i + 1);
     const mean = slice.reduce((sum, p) => sum + p, 0) / period;
-    const variance =
-      slice.reduce((sum, p) => sum + Math.pow(p - mean, 2), 0) / period;
+    const variance = slice.reduce((sum, p) => sum + (p - mean) ** 2, 0) / period;
     const stdDev = Math.sqrt(variance);
 
-    middle.push(mean);
-    upper.push(mean + stdDevMultiplier * stdDev);
-    lower.push(mean - stdDevMultiplier * stdDev);
+    middle[i] = mean;
+    upper[i] = mean + stdDevMultiplier * stdDev;
+    lower[i] = mean - stdDevMultiplier * stdDev;
   }
 
   return { upper, middle, lower };
 }
 
-export function calculateATR(candles: Candle[], period: number = 14): number[] {
-  const tr: number[] = [];
-  for (let i = 0; i < candles.length; i++) {
-    if (i === 0) {
-      tr.push(candles[i].high - candles[i].low);
-      continue;
-    }
-    const current = candles[i];
+export function calculateATR(candles: Candle[], period = 14): number[] {
+  assertPeriod(period);
+  if (candles.length === 0) return [];
+
+  const tr = candles.map((candle, i) => {
+    if (i === 0) return candle.high - candle.low;
     const prevClose = candles[i - 1].close;
-    const hl = current.high - current.low;
-    const hpc = Math.abs(current.high - prevClose);
-    const lpc = Math.abs(current.low - prevClose);
-    tr.push(Math.max(hl, hpc, lpc));
-  }
+    return Math.max(
+      candle.high - candle.low,
+      Math.abs(candle.high - prevClose),
+      Math.abs(candle.low - prevClose),
+    );
+  });
 
-  const atr: number[] = [];
-  let sum = tr.slice(0, period).reduce((a, b) => a + b, 0);
-  let currentAtr = sum / period;
+  const atr = new Array<number>(candles.length).fill(Number.NaN);
+  if (tr.length < period) return atr;
 
-  for (let i = 0; i < candles.length; i++) {
-    if (i < period - 1) {
-      atr.push(tr[i]);
-    } else if (i === period - 1) {
-      atr.push(currentAtr);
-    } else {
-      currentAtr = (currentAtr * (period - 1) + tr[i]) / period;
-      atr.push(currentAtr);
-    }
+  let currentAtr = tr.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  atr[period - 1] = currentAtr;
+
+  for (let i = period; i < tr.length; i += 1) {
+    currentAtr = ((period - 1) * currentAtr + tr[i]) / period;
+    atr[i] = currentAtr;
   }
 
   return atr;
@@ -120,34 +113,29 @@ export function calculateATR(candles: Candle[], period: number = 14): number[] {
 
 export function calculateMACD(
   prices: number[],
-  fastPeriod: number = 12,
-  slowPeriod: number = 26,
-  signalPeriod: number = 9
+  fastPeriod = 12,
+  slowPeriod = 26,
+  signalPeriod = 9,
 ): { macd: number[]; signal: number[]; hist: number[] } {
+  assertPeriod(fastPeriod);
+  assertPeriod(slowPeriod);
+  assertPeriod(signalPeriod);
+  if (fastPeriod >= slowPeriod) throw new Error("MACD fast period must be smaller than slow period.");
+
   const emaFast = calculateEMA(prices, fastPeriod);
   const emaSlow = calculateEMA(prices, slowPeriod);
-
-  const macdLine: number[] = [];
-  for (let i = 0; i < prices.length; i++) {
-    macdLine.push(emaFast[i] - emaSlow[i]);
-  }
-
+  const macdLine = prices.map((_, i) => emaFast[i] - emaSlow[i]);
   const signalLine = calculateEMA(macdLine, signalPeriod);
-  const hist: number[] = [];
-
-  for (let i = 0; i < prices.length; i++) {
-    hist.push(macdLine[i] - signalLine[i]);
-  }
+  const hist = macdLine.map((value, i) => value - signalLine[i]);
 
   return { macd: macdLine, signal: signalLine, hist };
 }
 
 export function attachIndicators(candles: Candle[]): Candle[] {
-  if (candles.length === 0) return candles;
+  if (candles.length === 0) return [];
 
   const closes = candles.map((c) => c.close);
   const volumes = candles.map((c) => c.volume);
-
   const ema9 = calculateEMA(closes, 9);
   const ema21 = calculateEMA(closes, 21);
   const ema50 = calculateEMA(closes, 50);
@@ -157,27 +145,28 @@ export function attachIndicators(candles: Candle[]): Candle[] {
   const macd = calculateMACD(closes, 12, 26, 9);
 
   return candles.map((candle, idx) => {
-    const volSlice = volumes.slice(Math.max(0, idx - 19), idx + 1);
-    const volumeSMA = volSlice.reduce((a, b) => a + b, 0) / volSlice.length;
+    const volStart = Math.max(0, idx - 19);
+    const volumeSMA = volumes.slice(volStart, idx + 1).reduce((a, b) => a + b, 0) / (idx - volStart + 1);
+
+    const required = [ema50[idx], rsi[idx], bb.upper[idx], bb.middle[idx], bb.lower[idx], atr[idx]];
+    const ready = idx >= 49 && required.every((v) => Number.isFinite(v));
 
     const indicators: IndicatorValues = {
-      ema9: ema9[idx] || candle.close,
-      ema21: ema21[idx] || candle.close,
-      ema50: ema50[idx] || candle.close,
-      rsi: rsi[idx] ?? 50,
-      bbandUpper: bb.upper[idx] || candle.close * 1.02,
-      bbandMiddle: bb.middle[idx] || candle.close,
-      bbandLower: bb.lower[idx] || candle.close * 0.98,
-      atr: atr[idx] || candle.close * 0.015,
-      macd: macd.macd[idx] || 0,
-      macdSignal: macd.signal[idx] || 0,
-      macdHist: macd.hist[idx] || 0,
+      ema9: ema9[idx],
+      ema21: ema21[idx],
+      ema50: ema50[idx],
+      rsi: rsi[idx],
+      bbandUpper: bb.upper[idx],
+      bbandMiddle: bb.middle[idx],
+      bbandLower: bb.lower[idx],
+      atr: atr[idx],
+      macd: macd.macd[idx],
+      macdSignal: macd.signal[idx],
+      macdHist: macd.hist[idx],
       volumeSMA,
+      ready,
     };
 
-    return {
-      ...candle,
-      indicators,
-    };
+    return { ...candle, indicators };
   });
 }
