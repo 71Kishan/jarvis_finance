@@ -118,7 +118,7 @@ export default function App() {
       window.removeEventListener("touchstart", handleActivity);
       clearInterval(interval);
     };
-  }, []);
+  }, [marketSource]);
   const [dailyGoal, setDailyGoal] = useState<DailyPerformanceGoal>(() =>
     strategyVaultInstance.getDailyGoal()
   );
@@ -138,7 +138,7 @@ export default function App() {
     setActiveTrade(engine.getActiveTrade() ? { ...engine.getActiveTrade()! } : null);
     setTradeHistory([...engine.getTradeHistory()]);
     setThoughts([...engine.getThoughts()]);
-    setCandles([...sim.getCandles()]);
+    if (marketSource === "SIMULATED") setCandles([...sim.getCandles()]);
     setPaperSettings(engine.getPaperSettings());
     setDailyGoal(strategyVaultInstance.getDailyGoal());
     setNotifications([...engine.getNotifications()]);
@@ -215,7 +215,8 @@ export default function App() {
               tradingEngineRef.current.onTick(lastCandle, allCandles);
             }
 
-            syncStateFromEngine();
+            setCandles([...rows]);
+          syncStateFromEngine();
           }
         }
       } catch (err) {
