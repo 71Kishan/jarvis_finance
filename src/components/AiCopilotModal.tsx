@@ -50,8 +50,8 @@ const INITIAL_MESSAGES: ChatMessage[] = [
     id: "welcome-1",
     role: "model",
     timestamp: Date.now() - 30000,
-    content: `### **Welcome to Jarvis Finance AI Copilot**\n\nI am your research assistant and terminal specialist. Ask me anything about the **Jarvis Finance Autonomous Terminal**, mathematical formulas, **configured risk controls**, or **paper reserve transfers**.\n\n*Select any prompt below or type your inquiry.*`,
-    modelUsed: "gemini-3.5-flash",
+    content: `### **Welcome to Jarvis Finance AI Copilot**\n\nI am your research assistant and terminal specialist. Ask me anything about the **Jarvis Finance Research & Paper Terminal**, mathematical formulas, **configured risk controls**, or **paper reserve transfers**.\n\n*Select any prompt below or type your inquiry.*`,
+    modelUsed: "gemini-3.8-flash",
   },
 ];
 
