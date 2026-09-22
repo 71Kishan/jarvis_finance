@@ -496,7 +496,7 @@ export const SecurityAndComplianceModal: React.FC<SecurityAndComplianceModalProp
                       Mobile & Desktop Security PIN Lock
                     </h4>
                     <p className="text-[11px] text-neutral-400">
-                      Protects your terminal from unauthorized physical access if your Android phone or device is unlocked.
+                      Adds a local session PIN gate when the app is opened. It is not a substitute for Android/Windows device security.
                     </p>
                   </div>
 
@@ -520,10 +520,10 @@ export const SecurityAndComplianceModal: React.FC<SecurityAndComplianceModalProp
                         </label>
                         <input
                           type="password"
-                          maxLength={6}
+                          maxLength={12}
                           value={newPin}
                           onChange={(e) => setNewPin(e.target.value.replace(/\D/g, ""))}
-                          placeholder="e.g. 8492"
+                          placeholder="6-12 digits"
                           className="w-full px-3 py-2 rounded-xl bg-neutral-950 border border-neutral-800 text-white font-mono text-sm focus:border-emerald-500 focus:outline-none"
                         />
                       </div>
