@@ -78,7 +78,7 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
 }) => {
   const [orderType, setOrderType] = useState<"LONG" | "SHORT">("LONG");
   const [amountUsd, setAmountUsd] = useState<number>(500);
-  const [leverage, setLeverage] = useState<number>(2);
+  const [leverage, setLeverage] = useState<number>(1);
   const [stopLossPercent, setStopLossPercent] = useState<number>(strategy.stopLossPercent || 1.0);
   const [takeProfitPercent, setTakeProfitPercent] = useState<number>(strategy.takeProfitPercent || 2.5);
   const [trailingStop, setTrailingStop] = useState<boolean>(true);
@@ -146,11 +146,11 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
             <div className="font-bold text-neutral-100 flex items-center gap-2">
               <span>Paper Trading Terminal</span>
               <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-neutral-800 text-neutral-300">
-                Risk-Free Live Environment
+                Simulated Capital • Real Market Data
               </span>
             </div>
             <div className="text-[11px] text-neutral-400">
-              Zero capital risk. Real live market fills and trailing execution.
+              No real capital is connected. Paper fills use modeled fees and slippage.
             </div>
           </div>
         </div>
@@ -160,16 +160,16 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
           <button
             id="feed-toggle-live-exchange"
             type="button"
-            onClick={() => onToggleMarketSource("LIVE_EXCHANGE")}
+            onClick={() => onToggleMarketSource("LIVE_MARKET_DATA")}
             className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
-              marketSource === "LIVE_EXCHANGE"
+              marketSource === "LIVE_MARKET_DATA"
                 ? "bg-emerald-950 text-emerald-300 border border-emerald-700/80 shadow-sm"
                 : "text-neutral-400 hover:text-neutral-200"
             }`}
           >
             <span
               className={`w-2 h-2 rounded-full ${
-                marketSource === "LIVE_EXCHANGE"
+                marketSource === "LIVE_MARKET_DATA"
                   ? "bg-emerald-400 animate-pulse shadow-[0_0_8px_#34d399]"
                   : "bg-neutral-600"
               }`}
