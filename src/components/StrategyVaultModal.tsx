@@ -60,7 +60,7 @@ export const StrategyVaultModal: React.FC<StrategyVaultModalProps> = ({
 
   const handleActivate = (strat: StrategyVaultEntry) => {
     onApplyStrategy({ ...strat.config });
-    setFeedback(`Activated "${strat.name}" as live paper strategy!`);
+    setFeedback(`Activated "${strat.name}" as the active paper research strategy.`);
     setTimeout(() => setFeedback(null), 3000);
   };
 
@@ -69,10 +69,7 @@ export const StrategyVaultModal: React.FC<StrategyVaultModalProps> = ({
     setTimeout(() => setFeedback(null), 4000);
   };
 
-  const progressPercent = Math.min(
-    100,
-    Math.max(0, (dailyGoal.currentDailyPnlUsd / dailyGoal.dailyTargetUsd) * 100)
-  );
+  const progressPercent = 0;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
@@ -152,10 +149,8 @@ export const StrategyVaultModal: React.FC<StrategyVaultModalProps> = ({
             />
           </div>
           <div className="flex justify-between items-center text-[10px] text-neutral-500 mt-1 font-mono">
-            <span>Progress: {progressPercent.toFixed(1)}%</span>
-            <span>
-              {dailyGoal.targetAchieved ? "NO DAILY TARGET" : "Executing only when the research rules qualify a setup"}
-            </span>
+            <span>Income targets disabled</span>
+            <span>Only qualified paper setups are eligible for entry.</span>
           </div>
         </div>
 
