@@ -367,7 +367,6 @@ Provide an institutional quantitative analysis in valid JSON:
       contents: prompt,
       config: {
         responseMimeType: "application/json",
-        temperature: 0.3,
       },
     });
 
@@ -444,7 +443,7 @@ Snapshot: ${JSON.stringify(marketSnapshot || {}, null, 2)}`;
     const response = await ai.models.generateContent({
       model: "gemini-3.8-flash",
       contents: prompt,
-      config: { responseMimeType: "application/json", temperature: 0.2 },
+      config: { responseMimeType: "application/json" },
     });
     const parsed = JSON.parse(response.text || "{}");
     return res.json({ ...localIntel, ...parsed });
@@ -530,7 +529,8 @@ app.get("/api/market/live-feed", async (req: Request, res: Response) => {
         ticker: {
           symbol: symbolParam, price: Number(rawTicker.lastPrice), bid: Number(rawTicker.bidPrice) || Number(rawTicker.lastPrice),
           ask: Number(rawTicker.askPrice) || Number(rawTicker.lastPrice), high24h: Number(rawTicker.highPrice), low24h: Number(rawTicker.lowPrice),
-          volume24h: Number(rawTicker.volume), change24hPercent: Number(rawTicker.priceChangePercent), lastUpdated: Date.now(),
+          volume24h: Number(rawTicker.volume), change24hPercent: Number(rawTicker.priceChangePercent),
+          lastUpdated: Number(rawTicker.closeTime) || Date.now(),
           source: "BINANCE", quoteQuality: "BID_ASK",
         },
       });
