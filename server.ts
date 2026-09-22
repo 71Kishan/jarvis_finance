@@ -574,7 +574,9 @@ app.get("/api/market/live-feed", async (req: Request, res: Response) => {
   }
 });
 
-const httpServer = http.createServer(app);
+// Setup Vite/static serving and the long-lived WebSocket gateway only inside the async server bootstrap.
+async function startServer() {
+  const httpServer = http.createServer(app);
 
   // Live API WebSocket Voice Gateway
   const wss = new WebSocketServer({ server: httpServer, path: "/api/live-voice" });
@@ -686,5 +688,7 @@ const httpServer = http.createServer(app);
   httpServer.listen(PORT, "0.0.0.0", () => {
     console.log(`Jarvis Finance server running on http://0.0.0.0:${PORT}`);
   });
+
+}
 
 startServer();
