@@ -1,6 +1,7 @@
 import { BacktestResult, Candle, PaperTradingSettings, StrategyConfig } from "../types/trading";
 import { evaluateSignal } from "./signalEngine";
 import { modelEntryFill, modelExitFill, resolveStopTarget, grossPnL } from "./executionModel";
+import { DEFAULT_RISK_POLICY } from "./riskPolicy";
 
 interface SimPosition {
   type: "LONG" | "SHORT";
@@ -52,6 +53,11 @@ export class StrategyOptimizer {
     let position: SimPosition | null = null;
     const returns: number[] = [];
     let previousEquity = initialBalance;
+    let dailyStartEquity = initialBalance;
+    let dailyKey = "";
+    let consecutiveLosses = 0;
+    let lastLossAtMs = 0;
+    let halted = false;
 
     const recordClosedTrade = (net: number, fees: number, slippage: number) => {
       totalFees += fees;
@@ -78,6 +84,12 @@ export class StrategyOptimizer {
 
     for (let i = 60; i < candles.length - 1; i += 1) {
       const candle = candles[i];
+      const candleDay = new Date(candle.timestamp).toISOString().slice(0, 10);
+      if (candleDay !== dailyKey) {
+        dailyKey = candleDay;
+        const markPrice = position ? candle.close : 0;
+        dailyStartEquity = markPrice > 0 ? cash + position!.sizeUsd + grossPnL(position!.type, position!.entryPrice, markPrice, position!.amount) : cash;
+      }
 
       if (position) {
         if (position.type === "LONG") {
@@ -93,16 +105,50 @@ export class StrategyOptimizer {
         }
 
         const resolved = resolveStopTarget(position.type, candle, position.stopLoss, position.takeProfit);
-        if (resolved.kind !== "NONE") closePosition(position, resolved.price);
+        if (resolved.kind !== "NONE") {
+          const wasPositive = (() => {
+            const gross = grossPnL(position!.type, position!.entryPrice, modelExitFill(resolved.price, position!.type, Math.abs(position!.amount * resolved.price), settings).fillPrice, position!.amount);
+            return gross - position!.entryFeeUsd > 0;
+          })();
+          closePosition(position, resolved.price);
+          if (wasPositive) {
+            consecutiveLosses = 0;
+            lastLossAtMs = 0;
+          } else {
+            consecutiveLosses += 1;
+            lastLossAtMs = candle.timestamp;
+          }
+        }
       }
 
-      if (!position) {
+      const openPnlBeforeEntry = position
+        ? grossPnL(position.type, position.entryPrice, candle.close, position.amount)
+        : 0;
+      const markedEquityBeforeEntry = cash + (position ? position.sizeUsd : 0) + openPnlBeforeEntry;
+      const peakDrawdownPctBeforeEntry = peak > 0 ? ((peak - markedEquityBeforeEntry) / peak) * 100 : 0;
+      const dailyDrawdownPctBeforeEntry = dailyStartEquity > 0 ? ((dailyStartEquity - markedEquityBeforeEntry) / dailyStartEquity) * 100 : 0;
+      if (!halted && (peakDrawdownPctBeforeEntry >= DEFAULT_RISK_POLICY.maxPeakDrawdownPercent || dailyDrawdownPctBeforeEntry >= DEFAULT_RISK_POLICY.maxDailyLossPercent)) {
+        if (position) {
+          closePosition(position, candle.close);
+          position = null;
+        }
+        halted = true;
+      }
+
+      const inCooldown = consecutiveLosses >= DEFAULT_RISK_POLICY.cooldownAfterLosses &&
+        lastLossAtMs > 0 &&
+        candle.timestamp - lastLossAtMs < DEFAULT_RISK_POLICY.cooldownMinutes * 60_000;
+
+      if (!position && !halted && !inCooldown) {
         const signal = evaluateSignal(candle, candles.slice(0, i), s);
         if (signal.eligible) {
           const next = candles[i + 1];
           const stopDistance = Math.max(0.001, s.stopLossPercent / 100);
           const riskBudget = cash * s.maxRiskPerTrade / 100;
-          const notional = Math.min(riskBudget / stopDistance, cash * 0.35);
+          const notional = Math.min(
+            riskBudget / stopDistance,
+            cash * DEFAULT_RISK_POLICY.maxPositionNotionalPercent / 100
+          );
 
           if (notional >= 10) {
             const entry = modelEntryFill(next.open, signal.direction as "LONG" | "SHORT", notional, settings);
