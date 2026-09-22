@@ -233,15 +233,15 @@ export class TradingEngine {
     trade.pnlPercent = Number((economicNet / Math.max(1, trade.sizeUsd) * 100).toFixed(2));
     // Entry fee was already removed from cash when the position opened; add back only margin + gross PnL - exit fee.
     this.vitality.cash = Number((this.vitality.cash + (trade.marginUsd || trade.sizeUsd) + gross - fill.feeUsd).toFixed(2));
-    this.vitality.totalFees = Number((this.vitality.totalFees + fill.feeUsd).toFixed(2)); this.vitality.totalTrades++; this.vitality.totalPnl = Number((this.vitality.totalPnl + net).toFixed(2));
-    if (net > 0) { this.vitality.winningTrades++; this.vitality.survivalStreak++; this.vitality.consecutiveLosses = 0; delete this.vitality.lastLossAt; }
-    else if (net < 0) { this.vitality.losingTrades++; this.vitality.survivalStreak = 0; this.vitality.consecutiveLosses++; this.vitality.lastLossAt = Date.now(); }
+    this.vitality.totalFees = Number((this.vitality.totalFees + fill.feeUsd).toFixed(2)); this.vitality.totalTrades++; this.vitality.totalPnl = Number((this.vitality.totalPnl + economicNet).toFixed(2));
+    if (economicNet > 0) { this.vitality.winningTrades++; this.vitality.survivalStreak++; this.vitality.consecutiveLosses = 0; delete this.vitality.lastLossAt; }
+    else if (economicNet < 0) { this.vitality.losingTrades++; this.vitality.survivalStreak = 0; this.vitality.consecutiveLosses++; this.vitality.lastLossAt = Date.now(); }
     this.vitality.winRate = this.vitality.totalTrades ? Number((this.vitality.winningTrades / this.vitality.totalTrades * 100).toFixed(1)) : 0;
-    const gp = this.tradeHistory.filter(t => t.pnl > 0).reduce((s, t) => s + t.pnl, 0) + (net > 0 ? net : 0); const gl = this.tradeHistory.filter(t => t.pnl < 0).reduce((s, t) => s + Math.abs(t.pnl), 0) + (net < 0 ? Math.abs(net) : 0); this.vitality.profitFactor = gl > 0 ? Number((gp / gl).toFixed(2)) : 0;
+    const gp = this.tradeHistory.filter(t => t.pnl > 0).reduce((s, t) => s + t.pnl, 0) + (economicNet > 0 ? economicNet : 0); const gl = this.tradeHistory.filter(t => t.pnl < 0).reduce((s, t) => s + Math.abs(t.pnl), 0) + (economicNet < 0 ? Math.abs(economicNet) : 0); this.vitality.profitFactor = gl > 0 ? Number((gp / gl).toFixed(2)) : 0;
     this.tradeHistory.unshift({ ...trade }); strategyVaultInstance.recordTradeOutcome(this.strategy, trade);
     try { void cryptoSecurityService.appendTradeToAuditLedger({ id: trade.id, asset: trade.asset, type: trade.type, entryPrice: trade.entryPrice, exitPrice: trade.exitPrice || requestedExitPrice, pnl: trade.pnl, timestamp: trade.exitTime || Date.now() }); } catch {}
-    this.activeTrade = null; this.updateEquityAndHealth(trade.exitPrice || requestedExitPrice); this.recordEquitySnapshot(trade.exitPrice || requestedExitPrice, "Close: " + (net >= 0 ? "+" : "") + "$" + net.toFixed(2), net);
-    this.addNotification({ type: net > 0 ? "TAKE_PROFIT" : net < 0 ? "STOP_LOSS" : "MANUAL_CLOSE", title: "Paper trade realized " + (net >= 0 ? "+" : "") + "$" + net.toFixed(2), message: trade.type + " " + trade.asset + " closed. " + reason, badgeText: net > 0 ? "WIN" : net < 0 ? "LOSS" : "FLAT", details: { asset: trade.asset, pnl: net, pnlPercent: trade.pnlPercent, price: trade.exitPrice } });
+    this.activeTrade = null; this.updateEquityAndHealth(trade.exitPrice || requestedExitPrice); this.recordEquitySnapshot(trade.exitPrice || requestedExitPrice, "Close: " + (economicNet >= 0 ? "+" : "") + "$" + economicNet.toFixed(2), economicNet);
+    this.addNotification({ type: economicNet > 0 ? "TAKE_PROFIT" : economicNet < 0 ? "STOP_LOSS" : "MANUAL_CLOSE", title: "Paper trade realized " + (economicNet >= 0 ? "+" : "") + "$" + economicNet.toFixed(2), message: trade.type + " " + trade.asset + " closed. " + reason, badgeText: economicNet > 0 ? "WIN" : economicNet < 0 ? "LOSS" : "FLAT", details: { asset: trade.asset, pnl: economicNet, pnlPercent: trade.pnlPercent, price: trade.exitPrice } });
     if (status === "CLOSED_TAKE_PROFIT") soundFx.playTakeProfit(); else if (status === "CLOSED_STOP_LOSS") soundFx.playStopLoss(); else if (status === "EMERGENCY_LIQUIDATED") soundFx.playCircuitBreaker();
     this.notify();
   }
