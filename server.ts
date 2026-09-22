@@ -5,6 +5,7 @@ import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, LiveServerMessage, Modality } from "@google/genai";
 import { WebSocketServer, WebSocket } from "ws";
 import dotenv from "dotenv";
+import { BinanceMarketDataService } from "./src/server/binanceMarketData";
 
 dotenv.config();
 
@@ -238,11 +239,16 @@ function buildTechnicalScreen(rows: any[], change24hPercent = 0) {
 
 // Health Check
 app.get("/api/health", (_req: Request, res: Response) => {
+  const market = binanceMarketData.getHealth();
   res.json({
     status: "ok",
     hasGeminiApiKey: !!process.env.GEMINI_API_KEY,
     financialDatasetsConfigured: fdsConfigured(),
     mode: "PAPER_RESEARCH_ONLY",
+    marketData: {
+      provider: "BINANCE_WEBSOCKET",
+      ...market,
+    },
     timestamp: Date.now(),
   });
 });
@@ -313,6 +319,12 @@ const STOCK_UNIVERSE: Record<string, { name: string; category: "STOCK" | "INDEX"
   SPY: { name: "S&P 500 ETF Trust", category: "INDEX" },
   QQQ: { name: "Invesco QQQ Trust", category: "INDEX" },
 };
+
+// One server-owned websocket gateway supplies crypto market data to every client.
+// The mobile/desktop UI is intentionally not responsible for keeping the market connection alive.
+const binanceMarketData = new BinanceMarketDataService(SYMBOL_MAP);
+void binanceMarketData.start();
+
 
 function computeQuantitativeMarketIntelligence(asset: string, marketSnapshot: any = null) {
   const cleanAsset = asset || "Unknown asset";
@@ -571,14 +583,6 @@ app.get("/api/market/multi-scan", async (req: Request, res: Response) => {
   const minScore = Math.min(95, Math.max(50, Number(req.query.minConfidence) || 70));
   const symbols = [...Object.keys(SYMBOL_MAP), ...Object.keys(STOCK_UNIVERSE)];
   try {
-    let binanceTickerMap: Record<string, any> = {};
-    try {
-      const response = await fetchJsonWithTimeout("https://api.binance.com/api/v3/ticker/24hr", { "User-Agent": "JarvisFinance/1.0" });
-      if (Array.isArray(response)) for (const row of response) binanceTickerMap[row.symbol] = row;
-    } catch (error: any) {
-      console.warn("Binance bulk ticker unavailable:", error?.message || error);
-    }
-
     const opportunities = await Promise.all(symbols.map(async (symbol) => {
       const cryptoPair = SYMBOL_MAP[symbol];
       if (cryptoPair && binanceTickerMap[cryptoPair]) {
@@ -588,15 +592,21 @@ app.get("/api/market/multi-scan", async (req: Request, res: Response) => {
         const score = Math.min(95, Math.round(50 + Math.min(30, Math.abs(change) * 4)));
         const direction = change > 0 ? "LONG" : change < 0 ? "SHORT" : "NEUTRAL";
         return {
+          symbol,       const cryptoTicker = binanceMarketData.getTicker(symbol);
+      if (cryptoPair && cryptoTicker) {
+        const change = Number(cryptoTicker.change24hPercent);
+        const price = Number(cryptoTicker.price);
+        const score = Math.min(95, Math.round(50 + Math.min(30, Math.abs(change) * 4)));
+        const direction = change > 0 ? "LONG" : change < 0 ? "SHORT" : "NEUTRAL";
+        return {
           symbol, name: symbol.replace("/", " / "), category: "CRYPTO", price, change24hPercent: change,
           score, bestDirection: direction, rsi: null, trend: direction === "LONG" ? "BULLISH" : direction === "SHORT" ? "BEARISH" : "SIDEWAYS",
-          volatility: Math.abs(change), isEligible: false, scanVerdict: score >= minScore ? "REVIEW — MOMENTUM SCREEN" : "ABSTAIN — LOW MOMENTUM",
-          rationale: "24h momentum screen only. A trade requires the full deterministic candle-based signal and risk checks.", dataSource: "BINANCE",
+          volatility: Math.abs(change), isEligible: false,
+          scanVerdict: score >= minScore ? "REVIEW — MOMENTUM SCREEN" : "ABSTAIN — LOW MOMENTUM",
+          rationale: "24h momentum screen only. A trade requires the full deterministic candle-based signal and risk checks.",
+          dataSource: "BINANCE",
         };
-      }
-
-      if (!fdsConfigured()) {
-        return { symbol, name: STOCK_UNIVERSE[symbol].name, category: STOCK_UNIVERSE[symbol].category, price: 0, change24hPercent: 0, score: 0, bestDirection: "NEUTRAL", rsi: null, trend: "SIDEWAYS", volatility: 0, isEligible: false, scanVerdict: "DATA UNAVAILABLE", rationale: "Configure FINANCIAL_DATASETS_API_KEY to scan this security with trusted data.", dataSource: "UNKNOWN" };
+      } };
       }
 
       try {
@@ -631,30 +641,25 @@ app.get("/api/market/live-feed", async (req: Request, res: Response) => {
 
   try {
     if (binanceSymbol) {
-      const [klinesRes, tickerRes] = await Promise.all([
-        fetchJsonWithTimeout(`https://api.binance.com/api/v3/klines?symbol=${binanceSymbol}&interval=1m&limit=${limit}`, { "User-Agent": "JarvisFinance/1.0" }),
-        fetchJsonWithTimeout(`https://api.binance.com/api/v3/ticker/24hr?symbol=${binanceSymbol}`, { "User-Agent": "JarvisFinance/1.0" }),
-      ]);
-      if (!Array.isArray(klinesRes)) throw new Error("Invalid Binance candle payload.");
-      // Binance kline index 6 is the provider-defined close time. Only feed completed
-      // candles to the signal engine; the current in-progress 1m candle is mark data,
-      // not a completed observation suitable for a new signal.
-      const nowMs = Date.now();
-      const closedKlines = klinesRes.filter((k: any[]) => Number(k[6]) <= nowMs).slice(-limit);
-      const candles = closedKlines.map((k: any[]) => ({ timestamp: Number(k[0]), open: Number(k[1]), high: Number(k[2]), low: Number(k[3]), close: Number(k[4]), volume: Number(k[5]) }));
-      const rawTicker = tickerRes || {};
+      const snapshot = binanceMarketData.getSnapshot(symbolParam, limit);
+      if (!snapshot || snapshot.gateway.stale || snapshot.gateway.state !== "READY") {
+        return res.status(503).json({
+          success: false,
+          status: "DATA_UNAVAILABLE",
+          error: "Binance websocket market gateway is not ready or quotes are stale.",
+          gateway: snapshot?.gateway || binanceMarketData.getHealth(),
+        });
+      }
+
       return res.json({
-        success: true, status: "OK", symbol: symbolParam, candles,
-        ticker: {
-          symbol: symbolParam, price: Number(rawTicker.lastPrice), bid: Number(rawTicker.bidPrice) || Number(rawTicker.lastPrice),
-          ask: Number(rawTicker.askPrice) || Number(rawTicker.lastPrice), high24h: Number(rawTicker.highPrice), low24h: Number(rawTicker.lowPrice),
-          volume24h: Number(rawTicker.volume), change24hPercent: Number(rawTicker.priceChangePercent),
-          lastUpdated: Number(rawTicker.closeTime) || Date.now(),
-          source: "BINANCE", quoteQuality: "BID_ASK",
-        },
+        success: true,
+        status: "OK",
+        symbol: symbolParam,
+        candles: snapshot.candles,
+        ticker: snapshot.ticker,
+        gateway: snapshot.gateway,
       });
     }
-
     const stock = STOCK_UNIVERSE[symbolParam];
     if (!stock) return res.status(404).json({ success: false, status: "DATA_UNAVAILABLE", error: "Unsupported symbol." });
     if (!fdsConfigured()) return res.status(503).json({ success: false, status: "DATA_UNAVAILABLE", error: "Financial Datasets is not configured for this security." });
