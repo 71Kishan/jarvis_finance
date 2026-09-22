@@ -247,7 +247,7 @@ app.get("/api/health", (_req: Request, res: Response) => {
   });
 });
 
-// Helper: Institutional Local Quantitative Reasoning & Strategy Optimization Engine
+// Helper: Local Quantitative Reasoning & Strategy Research Engine
 // Ensures local fallback analysis even if Gemini API key is absent, expired, or rate-limited
 function computeQuantitativeStudy(data: any) {
   const currentStrategy = data?.currentStrategy || {};
@@ -498,7 +498,7 @@ Provide a quantitative post-trade execution analysis in valid JSON:
 {
   "verdict": "string",
   "autopsy": "thorough technical analysis of order entry, slippage, and risk execution",
-  "lesson": "institutional risk rule derived from this outcome",
+  "lesson": "risk-control rule that could be tested after this outcome",
   "riskControlImpact": "string"
 }`;
 
@@ -513,7 +513,7 @@ Provide a quantitative post-trade execution analysis in valid JSON:
     const parsed = JSON.parse(response.text || "{}");
     return res.json({ ...localAttribution, ...parsed });
   } catch (error: any) {
-    console.warn("Gemini API unavailable - executing local post-trade attribution:", error?.message || error);
+    console.warn("Gemini API unavailable - executing local post-trade research:", error?.message || error);
     return res.json(localAttribution);
   }
 });
