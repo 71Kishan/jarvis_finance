@@ -168,6 +168,8 @@ export interface BacktestResult {
   sortinoRatio?: number;
   annualizedReturn?: number;
   volatilityAnnualized?: number;
+  sampleDays?: number;
+  annualizationReliable?: boolean;
   expectancyPerTrade?: number;
   avgWin?: number;
   avgLoss?: number;
