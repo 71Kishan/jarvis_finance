@@ -1,6 +1,6 @@
 {
-  "name": "Autonomous Survival Trading Bot",
-  "description": "An autonomous quantitative execution terminal with algorithmic risk management, continuous strategy optimization, and strict capital preservation circuit breakers.",
+  "name": "Jarvis Finance",
+  "description": "Research and paper-trading terminal with evidence-driven strategy research, market-data validation, and explicit risk controls.",
   "requestFramePermissions": ["microphone"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

@@ -35,8 +35,8 @@ export interface StrategyConfig {
   takeProfitPercent: number;
   trailingStop: boolean;
   trailingStopPercent: number;
-  minConfidence: number; // e.g. 78% minimum
-  maxRiskPerTrade: number; // percentage of equity, e.g. 2.5%
+  minConfidence: number; // Signal score threshold; NOT a calibrated probability.
+  maxRiskPerTrade: number; // Maximum intended loss as % of equity.
   indicatorWeights: {
     trendEMA: number;
     rsiReversal: number;
@@ -47,14 +47,26 @@ export interface StrategyConfig {
   rules: string[];
 }
 
+export interface RiskPolicyConfig {
+  maxDailyLossPercent: number;
+  maxPeakDrawdownPercent: number;
+  maxPositionNotionalPercent: number;
+  maxLeverage: number;
+  maxOpenPositions: number;
+  maxSpreadBps: number;
+  maxAtrToPricePercent: number;
+  cooldownAfterLosses: number;
+  cooldownMinutes: number;
+}
+
 export type BotState =
-  | "THRIVING"       // Profitable, high vitality
-  | "HUNTING"        // Actively scanning high-probability setups
-  | "STUDYING"       // Analyzing historical data / optimizing
-  | "IN_POSITION"    // Actively managing open trade
-  | "DEFENSIVE"      // Volatility high or minor drawdown, ultra-strict filters
-  | "CRITICAL_HAZARD"// Close to max drawdown limit, on brink of termination
-  | "HALTED_DEAD";   // Emergency circuit breaker triggered - trading halted to preserve capital
+  | "THRIVING"
+  | "HUNTING"
+  | "STUDYING"
+  | "IN_POSITION"
+  | "DEFENSIVE"
+  | "CRITICAL_HAZARD"
+  | "HALTED_DEAD";
 
 export interface Trade {
   id: string;
@@ -64,16 +76,20 @@ export interface Trade {
   exitPrice?: number;
   amount: number;
   sizeUsd: number;
+  marginUsd?: number;
   entryTime: number;
   exitTime?: number;
   stopLoss: number;
   takeProfit: number;
-  highestPrice?: number; // for trailing stop
-  lowestPrice?: number;  // for trailing stop short
+  highestPrice?: number;
+  lowestPrice?: number;
   pnl: number;
   pnlPercent: number;
+  feesUsd?: number;
+  slippageUsd?: number;
   status: "OPEN" | "CLOSED_TAKE_PROFIT" | "CLOSED_STOP_LOSS" | "CLOSED_MANUAL" | "EMERGENCY_LIQUIDATED";
-  confidence: number;
+  signalScore: number;
+  confidence: number; // Backward-compatible alias; treat as signal score, not probability.
   rationale: string;
   botSurvivalNote?: string;
 }
@@ -89,31 +105,36 @@ export interface BotThoughtLog {
 }
 
 export interface BotVitality {
-  health: number; // 0% to 100%
+  health: number;
   startingCapital: number;
   currentEquity: number;
   cash: number;
   peakEquity: number;
+  dailyStartEquity: number;
   currentDrawdownPercent: number;
   maxDrawdownPercent: number;
-  circuitBreakerThresholdPercent: number; // e.g. 3.0% loss -> triggers death
+  dailyDrawdownPercent: number;
+  circuitBreakerThresholdPercent: number;
   totalTrades: number;
   winningTrades: number;
   losingTrades: number;
   winRate: number;
   profitFactor: number;
   totalPnl: number;
-  survivalStreak: number; // consecutive non-losing trades
+  totalFees: number;
+  survivalStreak: number;
+  consecutiveLosses: number;
+  lastLossAt?: number;
   generationsLearned: number;
-  securedProfitVault: number; // Cumulative profits swept to cold storage vault
-  totalProfitWithdrawn: number; // Total amount withdrawn from trading pool
-  autoWithdrawProfitEnabled: boolean; // Automatic profit sweep active
-  withdrawPercentage: number; // e.g. 50% or 100% of winning trade profit
-  minProfitThresholdUsd: number; // minimum profit threshold to trigger auto-sweep
+  securedProfitVault: number;
+  totalProfitWithdrawn: number;
+  autoWithdrawProfitEnabled: boolean;
+  withdrawPercentage: number;
+  minProfitThresholdUsd: number;
 }
 
 export interface ProfitWithdrawalRecord {
-  id: string; // e.g. "WDR-842910"
+  id: string;
   timestamp: number;
   tradeId?: string;
   asset: string;
@@ -125,6 +146,7 @@ export interface ProfitWithdrawalRecord {
   documentationMemo: string;
   status: "COMPLETED" | "SECURED";
   policy: "AUTO_SWEEP_WIN" | "MANUAL_SWEEP" | "MILESTONE_SWEEP";
+  proofVerified?: boolean;
 }
 
 export interface ChatMessage {
@@ -143,10 +165,18 @@ export interface BacktestResult {
   profitFactor: number;
   maxDrawdown: number;
   sharpeRatio: number;
+  sortinoRatio?: number;
+  annualizedReturn?: number;
+  volatilityAnnualized?: number;
+  expectancyPerTrade?: number;
+  avgWin?: number;
+  avgLoss?: number;
+  totalFees?: number;
+  totalSlippage?: number;
   verdict: "SURVIVED_AND_PROFITABLE" | "UNSAFE_HIGH_DRAWDOWN" | "FAILED";
 }
 
-export type MarketDataSource = "SIMULATED" | "LIVE_EXCHANGE";
+export type MarketDataSource = "SIMULATED" | "LIVE_MARKET_DATA";
 
 export interface LiveExchangeTicker {
   symbol: string;
@@ -158,7 +188,8 @@ export interface LiveExchangeTicker {
   volume24h: number;
   change24hPercent: number;
   lastUpdated: number;
-  source: "BINANCE" | "COINBASE" | "SYNTHETIC";
+  source: "BINANCE" | "COINBASE" | "FINANCIAL_DATASETS" | "SYNTHETIC";
+  quoteQuality?: "BID_ASK" | "LAST_ONLY";
 }
 
 export interface PaperOrderRequest {
@@ -172,8 +203,8 @@ export interface PaperOrderRequest {
 }
 
 export interface PaperTradingSettings {
-  slippageBps: number; // basis points (e.g. 2 = 0.02%)
-  feeTierPercent: number; // e.g. 0.04%
+  slippageBps: number;
+  feeTierPercent: number;
   leverage: number;
   soundAlerts: boolean;
 }
@@ -192,19 +223,20 @@ export interface MultiAssetOpportunity {
   category: AssetCategory;
   price: number;
   change24hPercent: number;
-  score: number; // 0 to 100 confluence score
+  score: number;
   bestDirection: "LONG" | "SHORT" | "NEUTRAL";
-  rsi: number;
+  rsi: number | null;
   trend: "BULLISH" | "BEARISH" | "SIDEWAYS";
   volatility: number;
-  isEligible: boolean; // meets minConfidence threshold
+  isEligible: boolean;
   scanVerdict: string;
   rationale: string;
+  dataSource?: "FINANCIAL_DATASETS" | "BINANCE" | "SYNTHETIC" | "UNKNOWN";
 }
 
 export interface StrategyVaultEntry {
   id: string;
-  signature: string; // Hash/fingerprint to prevent duplicate parameter sets
+  signature: string;
   name: string;
   category: "TREND_FOLLOWING" | "MEAN_REVERSION" | "VOLATILITY_BREAKOUT" | "SCALPING";
   asset: string;
@@ -212,11 +244,13 @@ export interface StrategyVaultEntry {
   totalTrades: number;
   wins: number;
   losses: number;
-  winRate: number; // %
+  winRate: number;
   totalPnlUsd: number;
+  grossProfitUsd?: number;
+  grossLossUsd?: number;
   profitFactor: number;
   maxDrawdownPercent: number;
-  status: "PROVEN_PROFITABLE" | "TESTING_PAPER" | "DISCARDED_FAILED";
+  status: "DRAFT" | "TESTING_PAPER" | "PROVISIONALLY_VALIDATED" | "DISCARDED_FAILED";
   failureReason?: string;
   successNotes?: string;
   lastTestedTime: number;
@@ -229,6 +263,7 @@ export interface DailyPerformanceGoal {
   tradesCountToday: number;
   targetAchieved: boolean;
   streakDays: number;
+  deprecated?: boolean;
 }
 
 export type NotificationType =

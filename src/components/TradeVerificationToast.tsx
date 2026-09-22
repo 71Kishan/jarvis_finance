@@ -37,7 +37,7 @@ export const TradeVerificationToast: React.FC<TradeVerificationToastProps> = ({
           <div>
             <div className="flex items-center gap-2">
               <span className="text-xs font-bold text-emerald-400 font-mono tracking-wider uppercase">
-                Trade Filled & Verified
+                Paper Fill Recorded
               </span>
               <span className="px-1.5 py-0.2 bg-emerald-950 text-emerald-300 border border-emerald-800 text-[10px] font-mono rounded">
                 LIVE PAPER FILL

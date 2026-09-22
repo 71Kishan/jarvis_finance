@@ -78,7 +78,7 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
 }) => {
   const [orderType, setOrderType] = useState<"LONG" | "SHORT">("LONG");
   const [amountUsd, setAmountUsd] = useState<number>(500);
-  const [leverage, setLeverage] = useState<number>(2);
+  const [leverage, setLeverage] = useState<number>(1);
   const [stopLossPercent, setStopLossPercent] = useState<number>(strategy.stopLossPercent || 1.0);
   const [takeProfitPercent, setTakeProfitPercent] = useState<number>(strategy.takeProfitPercent || 2.5);
   const [trailingStop, setTrailingStop] = useState<boolean>(true);
@@ -146,11 +146,11 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
             <div className="font-bold text-neutral-100 flex items-center gap-2">
               <span>Paper Trading Terminal</span>
               <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-neutral-800 text-neutral-300">
-                Risk-Free Live Environment
+                Simulated Capital • Real Market Data
               </span>
             </div>
             <div className="text-[11px] text-neutral-400">
-              Zero capital risk. Real live market fills and trailing execution.
+              No real capital is connected. Paper fills use modeled fees and slippage.
             </div>
           </div>
         </div>
@@ -160,22 +160,22 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
           <button
             id="feed-toggle-live-exchange"
             type="button"
-            onClick={() => onToggleMarketSource("LIVE_EXCHANGE")}
+            onClick={() => onToggleMarketSource("LIVE_MARKET_DATA")}
             className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
-              marketSource === "LIVE_EXCHANGE"
+              marketSource === "LIVE_MARKET_DATA"
                 ? "bg-emerald-950 text-emerald-300 border border-emerald-700/80 shadow-sm"
                 : "text-neutral-400 hover:text-neutral-200"
             }`}
           >
             <span
               className={`w-2 h-2 rounded-full ${
-                marketSource === "LIVE_EXCHANGE"
+                marketSource === "LIVE_MARKET_DATA"
                   ? "bg-emerald-400 animate-pulse shadow-[0_0_8px_#34d399]"
                   : "bg-neutral-600"
               }`}
             />
             <Radio className="w-3.5 h-3.5" />
-            <span>Live Exchange Feed</span>
+            <span>Verified Live Data</span>
           </button>
 
           <button
@@ -216,8 +216,7 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
         <div>
           <div className="text-[10px] text-neutral-400 font-sans">24h High / Low</div>
           <div className="text-neutral-300 text-[11px]">
-            ${ticker?.high24h?.toFixed(1) || (currentPrice * 1.02).toFixed(1)} / $
-            {ticker?.low24h?.toFixed(1) || (currentPrice * 0.98).toFixed(1)}
+            {ticker?.high24h ? `${ticker.high24h.toFixed(1)}` : "—"} / {ticker?.low24h ? `${ticker.low24h.toFixed(1)}` : "—"}
           </div>
         </div>
         <div>
@@ -230,51 +229,37 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
 
       {/* Autonomous Action & Verification Command Bar */}
       <div className="bg-gradient-to-r from-neutral-950 via-neutral-900 to-neutral-950 p-3.5 rounded-xl border border-neutral-800 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 shadow-md">
-        {/* Daily Profit Goal Micro-Widget */}
+        {/* Daily Process Metrics */}
         <div className="flex items-center gap-3">
           <div className="p-2 bg-emerald-500/10 text-emerald-400 rounded-lg border border-emerald-500/20">
             <Target className="w-5 h-5" />
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <span className="text-xs font-bold text-neutral-200">
-                Daily Goal: ${dailyGoal.dailyTargetUsd.toFixed(0)}/day
-              </span>
-              <span
-                className={`text-[10px] font-mono font-bold px-1.5 py-0.2 rounded ${
-                  dailyGoal.currentDailyPnlUsd >= 0
-                    ? "bg-emerald-950 text-emerald-300 border border-emerald-800"
-                    : "bg-rose-950 text-rose-300 border border-rose-800"
-                }`}
-              >
-                {dailyGoal.currentDailyPnlUsd >= 0 ? "+" : ""}$
-                {dailyGoal.currentDailyPnlUsd.toFixed(2)} Today
-              </span>
-              <span className="text-[10px] text-amber-400 font-mono hidden sm:inline">
-                {dailyGoal.streakDays}d Streak 🔥
+              <span className="text-xs font-bold text-neutral-200">Daily Process</span>
+              <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-neutral-800 text-neutral-300 border border-neutral-700">
+                {dailyGoal.tradesCountToday} paper trade{dailyGoal.tradesCountToday === 1 ? "" : "s"} today
               </span>
             </div>
             <div className="text-[11px] text-neutral-400">
-              {dailyGoal.targetAchieved
-                ? "Daily target reached! Preserving capital."
-                : "Scanning setups to hit daily income target."}
+              No daily income target. Prioritize data quality, risk limits, trade quality and review.
             </div>
           </div>
         </div>
 
         {/* Primary Command Actions */}
         <div className="flex items-center gap-2 flex-wrap">
-          {/* RUN 1 VERIFIED TRADE BUTTON */}
+          {/* RUN QUALIFIED PAPER SCAN BUTTON */}
           <button
             id="run-verified-trade-btn"
             type="button"
             onClick={onRunImmediateTrade}
             disabled={botState === "HALTED_DEAD" || !!activeTrade}
             className="px-3.5 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs rounded-xl flex items-center gap-2 transition-all shadow-lg shadow-emerald-950/40 disabled:opacity-50"
-            title="Instantly executes 1 paper trade on live market to verify fills and record outcome into Strategy Vault"
+            title="Runs one fresh rules-based paper scan; it will not enter unless the signal and risk gates both pass"
           >
             <Zap className="w-4 h-4 fill-white" />
-            <span>⚡ Run 1 Trade to Verify</span>
+            <span>⚡ Run Qualified Scan</span>
           </button>
 
           {/* MULTI-ASSET RADAR BUTTON */}
@@ -283,7 +268,7 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
             type="button"
             onClick={onOpenMultiAssetRadar}
             className="px-3 py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 font-semibold text-xs rounded-xl flex items-center gap-1.5 transition-colors border border-neutral-700"
-            title="Scan 12 assets across Crypto, Stocks, Forex & Indices"
+            title="Review supported assets from trusted market-data sources"
           >
             <Radar className="w-4 h-4 text-indigo-400" />
             <span>Multi-Market Radar</span>
@@ -553,7 +538,7 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-neutral-300 uppercase tracking-wide flex items-center gap-1.5">
                 <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
-                <span>Autonomous Execution Core</span>
+                <span>Paper Execution Core</span>
               </span>
 
               {/* Execution State Badge */}
@@ -584,7 +569,7 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
                 </div>
                 <div className="text-[11px] text-neutral-400">
                   {isAutoTrading
-                    ? "System executes automatically on verified confluence"
+                    ? "Session-local autopilot: enters only on a fresh eligible signal; unattended operation requires the server worker."
                     : "Automated execution paused"}
                 </div>
               </div>

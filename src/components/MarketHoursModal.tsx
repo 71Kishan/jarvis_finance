@@ -53,8 +53,8 @@ export const MarketHoursModal: React.FC<MarketHoursModalProps> = ({
     const res = await systemNotificationService.requestPermission();
     setPermission(res);
     if (res === "granted") {
-      systemNotificationService.notify("AEGIS Quantitative Terminal Connected", {
-        body: "Real-time alerts active! You will be notified instantly when entries, take-profits, and risk limits trigger.",
+      systemNotificationService.notify("Jarvis Finance Connected", {
+        body: "Real-time alerts are available when the server and notification channel are connected.",
         vibrate: [60, 40, 60],
       });
       setTestNotificationSent(true);
@@ -64,7 +64,7 @@ export const MarketHoursModal: React.FC<MarketHoursModalProps> = ({
 
   const handleTestAlert = () => {
     systemNotificationService.notify("BTC/USD Limit Filled: +$142.50", {
-      body: "AEGIS Quantitative System secured +1.8% take-profit target according to verified trend rules.",
+      body: "Jarvis Finance event notification: verify the actual trade record and market data before acting.",
       vibrate: [60, 60, 80],
     });
     systemNotificationService.triggerHaptic("SUCCESS");
@@ -86,7 +86,7 @@ export const MarketHoursModal: React.FC<MarketHoursModalProps> = ({
             </div>
             <div>
               <h2 className="text-base sm:text-lg font-bold font-mono text-white flex items-center gap-2">
-                24/7 Market Hours & Android Auto-Pilot
+                Market Sessions & Runtime Architecture
               </h2>
               <p className="text-xs text-neutral-400 font-sans">
                 Global exchange schedules, push notifications, and background operation guide
@@ -106,7 +106,7 @@ export const MarketHoursModal: React.FC<MarketHoursModalProps> = ({
 
         {/* Modal Scrollable Body */}
         <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-5 divide-y divide-neutral-900">
-          {/* Section 1: Android & Phone 24/7 Setup Guide */}
+          {/* Section 1: Android & Phone Monitoring */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <span className="text-xs font-mono font-bold uppercase text-neutral-300 flex items-center gap-2">
@@ -170,7 +170,7 @@ export const MarketHoursModal: React.FC<MarketHoursModalProps> = ({
                     )}
                   </div>
                   <p className="text-[11px] text-neutral-400">
-                    Receive lock screen banners and vibration on every autonomous trade execution.
+                    Receive push alerts for supported events. The phone is a monitoring/control surface; it is not a reliable server-side execution worker.
                   </p>
                 </div>
               </div>
@@ -257,31 +257,21 @@ export const MarketHoursModal: React.FC<MarketHoursModalProps> = ({
             </div>
           </div>
 
-          {/* Section 3: Autonomous Asset Rotation (24/7 Market Adaptation) */}
+          {/* Section 3: Server-Side Runtime & Asset Scheduling */}
           <div className="pt-4 space-y-3">
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-xs font-mono font-bold text-white uppercase flex items-center gap-2">
                   <Zap className="w-4 h-4 text-emerald-400" />
-                  Autonomous Market Adaptation & Asset Rotation
+                  Server Runtime & Research Scheduling
                 </div>
                 <p className="text-[11px] text-neutral-400">
-                  When stock/forex markets close for the weekend, automatically rotate scanner to 24/7 crypto (BTC, ETH, SOL, DOGE) to maintain continuous paper profit compounding.
+                  A server-side scheduler may change the research universe across market sessions. Do not treat weekend crypto rotation as a promise of continuous profitability or unattended Android execution.
                 </p>
               </div>
-
-              <button
-                id="toggle-modal-auto-rotate-btn"
-                type="button"
-                onClick={onToggleAutoRotate}
-                className={`px-3 py-1.5 rounded-xl font-mono text-xs font-bold transition-all cursor-pointer ${
-                  autoRotateAssets
-                    ? "bg-emerald-500 text-black shadow-md shadow-emerald-500/20"
-                    : "bg-neutral-800 text-neutral-400 hover:text-white"
-                }`}
-              >
-                {autoRotateAssets ? "AUTO-SWITCH ACTIVE" : "DISABLED"}
-              </button>
+              <span className="px-3 py-1.5 rounded-xl font-mono text-xs font-bold bg-neutral-800 text-neutral-400 border border-neutral-700">
+                SERVER SCHEDULER NOT CONNECTED
+              </span>
             </div>
           </div>
         </div>
@@ -290,7 +280,7 @@ export const MarketHoursModal: React.FC<MarketHoursModalProps> = ({
         <div className="p-3.5 border-t border-neutral-800 bg-neutral-900/50 flex items-center justify-between text-xs font-mono text-neutral-400">
           <div className="flex items-center gap-2">
             <ShieldCheck className="w-4 h-4 text-emerald-400" />
-            <span>Autonomous Safe Mode: Online & Armed</span>
+            <span>Paper Research Mode: Online</span>
           </div>
 
           <button

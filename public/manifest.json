@@ -1,7 +1,7 @@
 {
-  "name": "Autonomous Survival Trading Bot",
-  "short_name": "AegisQuant",
-  "description": "An autonomous quantitative execution terminal with algorithmic risk management, continuous strategy optimization, and strict capital preservation circuit breakers.",
+  "name": "Jarvis Finance",
+  "short_name": "Jarvis Finance",
+  "description": "Research and paper-trading terminal with evidence-driven strategy research, market-data validation, and explicit risk controls.",
   "start_url": "/",
   "display": "standalone",
   "orientation": "portrait-primary",
