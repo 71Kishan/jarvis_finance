@@ -1,6 +1,8 @@
 import { BinanceMarketDataService } from "./binanceMarketData";
 import { DEFAULT_STRATEGY, TradingEngine } from "../engine/tradingEngine";
-import { StrategyConfig } from "../types/trading";
+import { Candle, StrategyConfig } from "../types/trading";
+import { attachIndicators } from "../engine/indicators";
+import { PaperStateStore, PaperStateStoreResult } from "./paperStateStore";
 
 export type PaperRuntimeStatus =
   | "STOPPED"
@@ -29,6 +31,10 @@ export class AutonomousPaperRuntime {
   private readonly symbol: string;
   private readonly gateway: BinanceMarketDataService;
   private readonly pollIntervalMs: number;
+  private readonly stateStore: PaperStateStore;
+  private restoredFromDisk = false;
+  private recoveryNote = "";
+  private pollInFlight = false;
   private timer: ReturnType<typeof setInterval> | null = null;
   private status: PaperRuntimeStatus = "STOPPED";
   private startedAt: number | null = null;
@@ -55,6 +61,10 @@ export class AutonomousPaperRuntime {
       6,
       { ...strategy, indicatorWeights: { ...strategy.indicatorWeights } },
     );
+    this.stateStore = new PaperStateStore();
+    const recovery = this.stateStore.loadInto(this.engine);
+    this.applyRecoveryResult(recovery);
+    this.lastProcessedCandleAt = this.engine.getLastProcessedCandleTimestamp() || null;
   }
 
   public start(): void {
@@ -62,7 +72,9 @@ export class AutonomousPaperRuntime {
 
     this.status = "STARTING";
     this.startedAt = Date.now();
-    this.message = "Paper runtime starting; waiting for trusted closed-candle data.";
+    this.message = this.restoredFromDisk
+      ? "Recovered durable paper state; waiting for trusted market data to reconcile missed completed candles."
+      : "Paper runtime starting; waiting for trusted closed-candle data.";
 
     this.timer = setInterval(() => {
       void this.poll();
@@ -74,15 +86,18 @@ export class AutonomousPaperRuntime {
   public stop(reason = "Paper runtime stopped by operator."): void {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
-
-    if (this.engine.getActiveTrade()) {
+    try {
+      this.stateStore.save(this.engine);
+    } catch (error: any) {
       this.status = "ERROR";
-      this.message = "Runtime stop requested while a paper position is open. Position remains in memory; restart recovery requires durable state.";
+      this.message = "Runtime stopped, but durable state could not be saved: " + (error?.message || "unknown storage error");
       return;
     }
 
     this.status = "STOPPED";
-    this.message = reason;
+    this.message = this.engine.getActiveTrade()
+      ? reason + " An open paper position is durably preserved for restart recovery."
+      : reason;
   }
 
   public getStatus(): PaperRuntimeSnapshot {
@@ -93,7 +108,7 @@ export class AutonomousPaperRuntime {
       lastProcessedCandleAt: this.lastProcessedCandleAt,
       lastPollAt: this.lastPollAt,
       lastDataAt: this.lastDataAt,
-      message: this.message,
+      message: this.recoveryNote ? this.message + " " + this.recoveryNote : this.message,
       botState: this.engine.getBotState(),
       vitality: { ...this.engine.getVitality() },
       activeTrade: this.engine.getActiveTrade() ? { ...this.engine.getActiveTrade()! } : null,
@@ -103,6 +118,8 @@ export class AutonomousPaperRuntime {
 
   private async poll(): Promise<void> {
     this.lastPollAt = Date.now();
+    if (this.pollInFlight) return;
+    this.pollInFlight = true;
 
     try {
       const snapshot = this.gateway.getSnapshot(this.symbol, 100);
@@ -119,7 +136,7 @@ export class AutonomousPaperRuntime {
         return;
       }
 
-      const candles = snapshot.candles;
+      const candles = attachIndicators(snapshot.candles);
       const latest = candles[candles.length - 1];
 
       if (!latest) {
@@ -141,10 +158,28 @@ export class AutonomousPaperRuntime {
 
       this.lastDataAt = snapshot.ticker.lastUpdated;
 
-      // TradingEngine is already idempotent by candle timestamp. The runtime only
-      // feeds completed candles from the server-owned websocket gateway.
-      this.engine.onTick(latest, candles);
-      this.lastProcessedCandleAt = latest.timestamp;
+      const priorTimestamp = this.engine.getLastProcessedCandleTimestamp();
+      const unprocessed = candles.filter((candle) => candle.timestamp > priorTimestamp);
+
+      // On a fresh runtime, establish the current market baseline without replaying
+      // historical bars as if they were live. After a restart, however, replay every
+      // completed bar still present in the gateway window so stops/signals are not
+      // skipped during recovery.
+      const toProcess: Candle[] = this.restoredFromDisk
+        ? unprocessed
+        : unprocessed.length > 0
+          ? [unprocessed[unprocessed.length - 1]]
+          : [];
+
+      for (const candle of toProcess) {
+        this.engine.onTick(candle, candles);
+        this.lastProcessedCandleAt = this.engine.getLastProcessedCandleTimestamp();
+        this.stateStore.save(this.engine);
+
+        if (this.engine.getBotState() === "HALTED_DEAD") break;
+      }
+
+      this.restoredFromDisk = true;
 
       const state = this.engine.getBotState();
       if (state === "HALTED_DEAD") {
@@ -158,6 +193,16 @@ export class AutonomousPaperRuntime {
       this.status = "ERROR";
       this.message = error?.message || "Paper runtime encountered an unexpected error.";
       console.error("Autonomous paper runtime error:", error);
+    } finally {
+      this.pollInFlight = false;
+    }
+  }
+
+  private applyRecoveryResult(result: PaperStateStoreResult): void {
+    this.restoredFromDisk = result.restored;
+    if (result.recoveredFromCorruptFile) {
+      this.recoveryNote = result.error || "Previous paper state was corrupt and was quarantined.";
+      this.message = this.recoveryNote;
     }
   }
 }
