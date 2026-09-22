@@ -221,7 +221,7 @@ export const Header: React.FC<HeaderProps> = ({
             {isAutoTrading ? (
               <>
                 <Play className="w-3.5 h-3.5 fill-emerald-400 text-emerald-400" />
-                <span>AUTO-PILOT ACTIVE</span>
+                <span>PAPER AUTO ACTIVE</span>
               </>
             ) : (
               <>
