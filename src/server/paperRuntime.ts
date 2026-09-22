@@ -160,12 +160,25 @@ export class AutonomousPaperRuntime {
 
       const priorTimestamp = this.engine.getLastProcessedCandleTimestamp();
       const unprocessed = candles.filter((candle) => candle.timestamp > priorTimestamp);
+      const hadRestoredPosition = this.restoredFromDisk && Boolean(this.engine.getActiveTrade());
 
-      // On a fresh runtime, establish the current market baseline without replaying
-      // historical bars as if they were live. After a restart, however, replay every
-      // completed bar still present in the gateway window so stops/signals are not
-      // skipped during recovery.
-      const toProcess: Candle[] = this.restoredFromDisk
+      // Never backfill missed entry opportunities after an outage: an old signal
+      // cannot be truthfully filled at a historical open once the server is back.
+      // A restored open position is different: every missed completed candle must
+      // be replayed when the gateway still contains the full gap so stop/target
+      // handling cannot be skipped.
+      if (hadRestoredPosition && priorTimestamp > 0 && unprocessed.length > 0) {
+        const earliestAvailable = candles[0]?.timestamp || 0;
+        const expectedNext = priorTimestamp + 60_000;
+        if (earliestAvailable > expectedNext) {
+          this.status = "ERROR";
+          this.message = "Restart recovery is blocked: completed candles are missing while a paper position is open. Manual reconciliation is required before resuming.";
+          this.stateStore.save(this.engine);
+          return;
+        }
+      }
+
+      const toProcess: Candle[] = hadRestoredPosition
         ? unprocessed
         : unprocessed.length > 0
           ? [unprocessed[unprocessed.length - 1]]
