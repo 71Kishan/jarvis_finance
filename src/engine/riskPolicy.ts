@@ -1,16 +1,16 @@
-import { Candle, StrategyConfig } from "../types/trading";
+import { Candle, RiskPolicyConfig, StrategyConfig } from "../types/trading";
 
-export interface RiskPolicyConfig {
-  maxDailyLossPercent: number;
-  maxPeakDrawdownPercent: number;
-  maxPositionNotionalPercent: number;
-  maxLeverage: number;
-  maxOpenPositions: number;
-  maxSpreadBps: number;
-  maxAtrToPricePercent: number;
-  cooldownAfterLosses: number;
-  cooldownMinutes: number;
-}
+export const DEFAULT_RISK_POLICY: RiskPolicyConfig = {
+  maxDailyLossPercent: 2,
+  maxPeakDrawdownPercent: 6,
+  maxPositionNotionalPercent: 35,
+  maxLeverage: 1,
+  maxOpenPositions: 1,
+  maxSpreadBps: 20,
+  maxAtrToPricePercent: 5,
+  cooldownAfterLosses: 3,
+  cooldownMinutes: 30,
+};
 
 export interface RiskCheckInput {
   equity: number;
@@ -33,58 +33,28 @@ export interface RiskCheckResult {
   maxLossBudgetUsd: number;
 }
 
-export const DEFAULT_RISK_POLICY: RiskPolicyConfig = {
-  maxDailyLossPercent: 2,
-  maxPeakDrawdownPercent: 6,
-  maxPositionNotionalPercent: 35,
-  maxLeverage: 1,
-  maxOpenPositions: 1,
-  maxSpreadBps: 20,
-  maxAtrToPricePercent: 5,
-  cooldownAfterLosses: 3,
-  cooldownMinutes: 30,
-};
-
-export function evaluateRisk(
-  policy: RiskPolicyConfig,
-  input: RiskCheckInput,
-  strategy: StrategyConfig,
-): RiskCheckResult {
+export function evaluateRisk(policy: RiskPolicyConfig, input: RiskCheckInput, strategy: StrategyConfig): RiskCheckResult {
   const reasons: string[] = [];
   const equity = Math.max(0, input.equity);
   const peakEquity = Math.max(equity, input.peakEquity);
   const dailyStartEquity = Math.max(0, input.dailyStartEquity);
   const now = input.nowMs ?? Date.now();
 
-  if (input.openPositions >= policy.maxOpenPositions) {
-    reasons.push(`Maximum concurrent positions reached (${policy.maxOpenPositions}).`);
-  }
-  if (input.leverage > policy.maxLeverage) {
-    reasons.push(`Requested leverage ${input.leverage}x exceeds policy cap of ${policy.maxLeverage}x.`);
-  }
-  if (input.requestedNotional > equity * (policy.maxPositionNotionalPercent / 100)) {
-    reasons.push(`Requested notional exceeds ${policy.maxPositionNotionalPercent}% of current equity.`);
-  }
+  if (input.openPositions >= policy.maxOpenPositions) reasons.push(`Maximum concurrent positions reached (${policy.maxOpenPositions}).`);
+  if (input.leverage > policy.maxLeverage) reasons.push(`Requested leverage ${input.leverage}x exceeds policy cap of ${policy.maxLeverage}x.`);
+  if (input.requestedNotional > equity * policy.maxPositionNotionalPercent / 100) reasons.push(`Requested notional exceeds ${policy.maxPositionNotionalPercent}% of equity.`);
 
   const peakDrawdownPct = peakEquity > 0 ? ((peakEquity - equity) / peakEquity) * 100 : 0;
-  if (peakDrawdownPct >= policy.maxPeakDrawdownPercent) {
-    reasons.push(`Peak-to-trough drawdown is ${peakDrawdownPct.toFixed(2)}%, at or above the risk halt.`);
-  }
+  if (peakDrawdownPct >= policy.maxPeakDrawdownPercent) reasons.push(`Peak drawdown ${peakDrawdownPct.toFixed(2)}% reached the configured halt threshold.`);
 
   const dailyDrawdownPct = dailyStartEquity > 0 ? ((dailyStartEquity - equity) / dailyStartEquity) * 100 : 0;
-  if (dailyDrawdownPct >= policy.maxDailyLossPercent) {
-    reasons.push(`Daily drawdown is ${dailyDrawdownPct.toFixed(2)}%, at or above the daily loss limit.`);
-  }
+  if (dailyDrawdownPct >= policy.maxDailyLossPercent) reasons.push(`Daily drawdown ${dailyDrawdownPct.toFixed(2)}% reached the configured daily loss limit.`);
 
-  if (input.spreadBps !== undefined && input.spreadBps > policy.maxSpreadBps) {
-    reasons.push(`Observed spread ${input.spreadBps.toFixed(1)} bps exceeds ${policy.maxSpreadBps} bps.`);
-  }
+  if (input.spreadBps !== undefined && input.spreadBps > policy.maxSpreadBps) reasons.push(`Spread ${input.spreadBps.toFixed(1)} bps exceeds the ${policy.maxSpreadBps} bps cap.`);
 
-  if (input.candle && input.candle.close > 0) {
-    const atrPct = ((input.candle.indicators?.atr ?? 0) / input.candle.close) * 100;
-    if (atrPct > policy.maxAtrToPricePercent) {
-      reasons.push(`ATR is ${atrPct.toFixed(2)}% of price, above the ${policy.maxAtrToPricePercent}% volatility cap.`);
-    }
+  if (input.candle && input.candle.close > 0 && input.candle.indicators?.atr !== undefined) {
+    const atrPct = input.candle.indicators.atr / input.candle.close * 100;
+    if (atrPct > policy.maxAtrToPricePercent) reasons.push(`ATR ${atrPct.toFixed(2)}% exceeds the ${policy.maxAtrToPricePercent}% volatility cap.`);
   }
 
   if (input.recentLossCount >= policy.cooldownAfterLosses && input.lastLossAtMs && now - input.lastLossAtMs < policy.cooldownMinutes * 60_000) {
@@ -92,8 +62,7 @@ export function evaluateRisk(
     reasons.push(`Loss-streak cooldown active for approximately ${remaining} more minute(s).`);
   }
 
-  const configuredRiskPct = Math.max(0, strategy.maxRiskPerTrade);
+  const configuredRiskPct = Math.max(0, Number(strategy.maxRiskPerTrade) || 0);
   const maxLossBudgetUsd = equity * Math.min(configuredRiskPct, 1) / 100;
-
   return { allowed: reasons.length === 0 && maxLossBudgetUsd > 0, reasons, maxLossBudgetUsd };
 }
