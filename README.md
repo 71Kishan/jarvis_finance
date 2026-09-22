@@ -22,7 +22,7 @@ The repository now includes a server-owned autonomous **paper** runtime for supp
 
 Android and laptop browsers are not treated as reliable unattended workers. The phone app is therefore a monitoring/control surface; the long-lived trading process belongs on an always-on server.
 
-Set `JARVIS_PAPER_AUTOSTART=true` only after the strategy has completed the research/validation lifecycle. Runtime state is currently process-local, so a production deployment still needs durable state and restart reconciliation before unattended real-money execution.
+Set `JARVIS_PAPER_AUTOSTART=true` only after the strategy has completed the research/validation lifecycle. The current paper runtime persists its account snapshot atomically to disk and replays missed completed candles after restart. A production live-capital deployment still needs a transactional database, broker-order reconciliation, authenticated control plane, and incident recovery.
 
 ## Setup
 
