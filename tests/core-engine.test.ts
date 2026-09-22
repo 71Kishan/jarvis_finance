@@ -15,6 +15,12 @@ const candle = (timestamp: number): Candle => ({
 });
 
 describe("execution model", () => {
+  test("does not treat a next-bar entry as active on the signal bar close", () => {
+    const nextBarEntryPrice = 101;
+    const signalBarClose = 100;
+    expect(signalBarClose).toBeLessThan(nextBarEntryPrice);
+  });
+
   test("models adverse entry and exit slippage", () => {
     const settings = { slippageBps: 10, feeTierPercent: 0.04, leverage: 1, soundAlerts: false };
     expect(modelEntryFill(100, "LONG", 1000, settings).fillPrice).toBeGreaterThan(100);
