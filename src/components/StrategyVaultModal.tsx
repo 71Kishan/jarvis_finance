@@ -163,7 +163,7 @@ export const StrategyVaultModal: React.FC<StrategyVaultModalProps> = ({
               type="button"
               onClick={() => setActiveTab("VALIDATED")}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors ${
-                activeTab === "PROVEN"
+                activeTab === "VALIDATED"
                   ? "bg-emerald-600 text-white shadow-sm"
                   : "text-neutral-400 hover:text-neutral-200"
               }`}
@@ -242,7 +242,7 @@ export const StrategyVaultModal: React.FC<StrategyVaultModalProps> = ({
                 className={`p-4 rounded-xl border transition-all ${
                   isCurrent
                     ? "bg-emerald-950/20 border-emerald-500/50 shadow-md"
-                    : isProven
+                    : isValidated
                     ? "bg-neutral-950/70 border-emerald-900/40 hover:border-emerald-700/50"
                     : isDiscarded
                     ? "bg-neutral-950/50 border-rose-950 hover:border-rose-900"
@@ -253,7 +253,7 @@ export const StrategyVaultModal: React.FC<StrategyVaultModalProps> = ({
                   <div className="flex items-center gap-2.5">
                     <span
                       className={`p-1.5 rounded-lg ${
-                        isProven
+                        isValidated
                           ? "bg-emerald-950 text-emerald-400 border border-emerald-800"
                           : isDiscarded
                           ? "bg-rose-950 text-rose-400 border border-rose-900"
@@ -284,7 +284,7 @@ export const StrategyVaultModal: React.FC<StrategyVaultModalProps> = ({
                         )}
                         <span
                           className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border ${
-                            isProven
+                            isValidated
                               ? "bg-emerald-950 text-emerald-400 border-emerald-800"
                               : isDiscarded
                               ? "bg-rose-950 text-rose-400 border-rose-900"
