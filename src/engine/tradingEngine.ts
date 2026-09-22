@@ -220,13 +220,44 @@ export class TradingEngine {
 
   private manageActiveTrade(candle: Candle) {
     const trade = this.activeTrade; if (!trade) return;
-    if (trade.type === "LONG") { trade.highestPrice = Math.max(trade.highestPrice || trade.entryPrice, candle.high); if (this.strategy.trailingStop) trade.stopLoss = Number(Math.max(trade.stopLoss, trade.highestPrice * (1 - this.strategy.trailingStopPercent / 100)).toFixed(4)); }
-    else { trade.lowestPrice = Math.min(trade.lowestPrice || trade.entryPrice, candle.low); if (this.strategy.trailingStop) trade.stopLoss = Number(Math.min(trade.stopLoss, trade.lowestPrice * (1 + this.strategy.trailingStopPercent / 100)).toFixed(4)); }
-    const result = resolveStopTarget(trade.type, candle, trade.stopLoss, trade.takeProfit);
-    if (result.kind === "NONE") { trade.pnl = Number(grossPnL(trade.type, trade.entryPrice, candle.close, trade.amount).toFixed(2)); trade.pnlPercent = Number((trade.pnl / Math.max(1, trade.sizeUsd) * 100).toFixed(2)); return; }
-    const status = result.kind === "TARGET" ? "CLOSED_TAKE_PROFIT" : "CLOSED_STOP_LOSS";
-    const reason = result.ambiguous ? "OHLC bar hit stop and target; conservative stop-first resolution applied." : result.kind === "TARGET" ? "Target reached." : "Protective stop reached.";
-    this.closeTrade(result.price, status, reason);
+
+    // Resolve the current completed bar using the stop/target state that existed
+    // before this bar began. Updating a trailing stop from the same bar's high/low
+    // before resolving that bar would introduce intrabar look-ahead bias.
+    const priorStop = trade.stopLoss;
+    const result = resolveStopTarget(trade.type, candle, priorStop, trade.takeProfit);
+
+    if (result.kind !== "NONE") {
+      const status = result.kind === "TARGET" ? "CLOSED_TAKE_PROFIT" : "CLOSED_STOP_LOSS";
+      const reason = result.ambiguous
+        ? "OHLC bar hit stop and target; conservative stop-first resolution applied."
+        : result.kind === "TARGET"
+        ? "Target reached."
+        : "Protective stop reached.";
+      this.closeTrade(result.price, status, reason);
+      return;
+    }
+
+    // The bar closed without an exit. Its favorable excursion can now update the
+    // trailing stop for the NEXT bar only.
+    if (trade.type === "LONG") {
+      trade.highestPrice = Math.max(trade.highestPrice || trade.entryPrice, candle.high);
+      if (this.strategy.trailingStop) {
+        trade.stopLoss = Number(
+          Math.max(trade.stopLoss, trade.highestPrice * (1 - this.strategy.trailingStopPercent / 100)).toFixed(4)
+        );
+      }
+    } else {
+      trade.lowestPrice = Math.min(trade.lowestPrice || trade.entryPrice, candle.low);
+      if (this.strategy.trailingStop) {
+        trade.stopLoss = Number(
+          Math.min(trade.stopLoss, trade.lowestPrice * (1 + this.strategy.trailingStopPercent / 100)).toFixed(4)
+        );
+      }
+    }
+
+    trade.pnl = Number(grossPnL(trade.type, trade.entryPrice, candle.close, trade.amount).toFixed(2));
+    trade.pnlPercent = Number((trade.pnl / Math.max(1, trade.sizeUsd) * 100).toFixed(2));
   }
 
   private evaluateEntry(candle: Candle, recentCandles: Candle[]) {
