@@ -197,7 +197,7 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
         <div>
           <div className="text-[10px] text-neutral-400 font-sans">Asset Price</div>
           <div className="text-neutral-100 font-bold text-sm">
-            ${currentPrice.toFixed(2)}
+            {currentPrice > 0 ? `${currentPrice.toFixed(2)}` : "N/A"}
           </div>
         </div>
         <div>
@@ -502,7 +502,7 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
             </label>
             <span className="font-mono text-[11px] text-neutral-400">
               R:R <strong className="text-indigo-300">{riskRewardRatio} : 1</strong>
-              <span className="ml-2">Stop risk <strong className="text-rose-300">$(positionSizeUsd * (stopLossPercent / 100)).toFixed(2)</strong></span>
+              <span className="ml-2">Stop risk <strong className="text-rose-300">{(positionSizeUsd * (stopLossPercent / 100)).toFixed(2)}</strong></span>
             </span>
           </div>
 
@@ -510,7 +510,7 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
           <button
             id="submit-paper-order-btn"
             type="submit"
-            disabled={!!activeTrade || botState === "HALTED_DEAD"}
+            disabled={!!activeTrade || botState === "HALTED_DEAD" || currentPrice <= 0}
             className={`w-full py-2.5 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all shadow-md ${
               orderType === "LONG"
                 ? "bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white shadow-emerald-950/40"
@@ -534,7 +534,7 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-neutral-300 uppercase tracking-wide flex items-center gap-1.5">
                 <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
-                <span>Autonomous Execution Core</span>
+                <span>Paper Auto-Execution Core</span>
               </span>
 
               {/* Execution State Badge */}
@@ -565,8 +565,8 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
                 </div>
                 <div className="text-[11px] text-neutral-400">
                   {isAutoTrading
-                    ? "System executes automatically on verified confluence"
-                    : "Automated execution paused"}
+                    ? "Paper engine may execute on qualifying confluence"
+                    : "Automated paper execution paused"}
                 </div>
               </div>
               <button
@@ -595,7 +595,7 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
               <span>Trigger Quantitative Confluence Scan</span>
             </button>
             <div className="text-[11px] text-neutral-400 leading-snug px-1">
-              Evaluates the latest verified candle data. If the heuristic signal threshold is met, the engine may open a paper position; otherwise it records abstention. Signal score is not a probability.
+              This browser/PWA is a control surface, not a 24/7 execution worker. The current paper engine evaluates the latest verified candle data. If the heuristic signal threshold is met, it may open a paper position; otherwise it records abstention. Signal score is not a probability.
             </div>
           </div>
 
