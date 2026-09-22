@@ -40,7 +40,6 @@ interface PaperTradingDeckProps {
   onToggleAutoTrading: () => void;
   onToggleMarketSource: (source: MarketDataSource) => void;
   onExecutePaperTrade: (request: PaperOrderRequest) => boolean;
-  onRunImmediateTrade: () => void;
   onOpenMultiAssetRadar: () => void;
   onOpenStrategyVault: () => void;
   autoRotateAssets: boolean;
@@ -65,7 +64,6 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
   onToggleAutoTrading,
   onToggleMarketSource,
   onExecutePaperTrade,
-  onRunImmediateTrade,
   onOpenMultiAssetRadar,
   onOpenStrategyVault,
   autoRotateAssets,
@@ -146,11 +144,11 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
             <div className="font-bold text-neutral-100 flex items-center gap-2">
               <span>Paper Trading Terminal</span>
               <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-neutral-800 text-neutral-300">
-                Risk-Free Live Environment
+                PAPER ONLY
               </span>
             </div>
             <div className="text-[11px] text-neutral-400">
-              Zero capital risk. Real live market fills and trailing execution.
+              Simulated fills with explicit costs. Live market data is reference-only; no broker order is sent.
             </div>
           </div>
         </div>
@@ -216,8 +214,7 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
         <div>
           <div className="text-[10px] text-neutral-400 font-sans">24h High / Low</div>
           <div className="text-neutral-300 text-[11px]">
-            ${ticker?.high24h?.toFixed(1) || (currentPrice * 1.02).toFixed(1)} / $
-            {ticker?.low24h?.toFixed(1) || (currentPrice * 0.98).toFixed(1)}
+            {ticker?.high24h != null ? `${ticker.high24h.toFixed(1)}` : "N/A"} / {ticker?.low24h != null ? `${ticker.low24h.toFixed(1)}` : "N/A"}
           </div>
         </div>
         <div>
@@ -230,16 +227,14 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
 
       {/* Autonomous Action & Verification Command Bar */}
       <div className="bg-gradient-to-r from-neutral-950 via-neutral-900 to-neutral-950 p-3.5 rounded-xl border border-neutral-800 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 shadow-md">
-        {/* Daily Profit Goal Micro-Widget */}
+        {/* Daily Performance Journal */}
         <div className="flex items-center gap-3">
-          <div className="p-2 bg-emerald-500/10 text-emerald-400 rounded-lg border border-emerald-500/20">
+          <div className="p-2 bg-neutral-800 text-neutral-300 rounded-lg border border-neutral-700">
             <Target className="w-5 h-5" />
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <span className="text-xs font-bold text-neutral-200">
-                Daily Goal: ${dailyGoal.dailyTargetUsd.toFixed(0)}/day
-              </span>
+              <span className="text-xs font-bold text-neutral-200">Today</span>
               <span
                 className={`text-[10px] font-mono font-bold px-1.5 py-0.2 rounded ${
                   dailyGoal.currentDailyPnlUsd >= 0
@@ -248,35 +243,20 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
                 }`}
               >
                 {dailyGoal.currentDailyPnlUsd >= 0 ? "+" : ""}$
-                {dailyGoal.currentDailyPnlUsd.toFixed(2)} Today
+                {dailyGoal.currentDailyPnlUsd.toFixed(2)} P&L
               </span>
-              <span className="text-[10px] text-amber-400 font-mono hidden sm:inline">
-                {dailyGoal.streakDays}d Streak 🔥
+              <span className="text-[10px] text-neutral-400 font-mono hidden sm:inline">
+                {dailyGoal.tradesCountToday} trades
               </span>
             </div>
             <div className="text-[11px] text-neutral-400">
-              {dailyGoal.targetAchieved
-                ? "Daily target reached! Preserving capital."
-                : "Scanning setups to hit daily income target."}
+              Journal the process. There is no required daily profit target.
             </div>
           </div>
         </div>
 
         {/* Primary Command Actions */}
         <div className="flex items-center gap-2 flex-wrap">
-          {/* RUN 1 VERIFIED TRADE BUTTON */}
-          <button
-            id="run-verified-trade-btn"
-            type="button"
-            onClick={onRunImmediateTrade}
-            disabled={botState === "HALTED_DEAD" || !!activeTrade}
-            className="px-3.5 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs rounded-xl flex items-center gap-2 transition-all shadow-lg shadow-emerald-950/40 disabled:opacity-50"
-            title="Instantly executes 1 paper trade on live market to verify fills and record outcome into Strategy Vault"
-          >
-            <Zap className="w-4 h-4 fill-white" />
-            <span>⚡ Run 1 Trade to Verify</span>
-          </button>
-
           {/* MULTI-ASSET RADAR BUTTON */}
           <button
             id="open-multi-asset-radar-btn"
@@ -453,7 +433,7 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
               </span>
             </div>
             <div className="grid grid-cols-4 gap-1.5">
-              {[1, 2, 5, 10].map((lev) => (
+              {[1, 2, 3].map((lev) => (
                 <button
                   key={lev}
                   type="button"
@@ -522,6 +502,7 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
             </label>
             <span className="font-mono text-[11px] text-neutral-400">
               R:R <strong className="text-indigo-300">{riskRewardRatio} : 1</strong>
+              <span className="ml-2">Stop risk <strong className="text-rose-300">$(positionSizeUsd * (stopLossPercent / 100)).toFixed(2)</strong></span>
             </span>
           </div>
 
@@ -614,7 +595,7 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
               <span>Trigger Quantitative Confluence Scan</span>
             </button>
             <div className="text-[11px] text-neutral-400 leading-snug px-1">
-              Evaluates live RSI, Bollinger Bands, MACD & EMA confluence. If threshold is met, executes order; if not, logs rationale for capital preservation.
+              Evaluates the latest verified candle data. If the heuristic signal threshold is met, the engine may open a paper position; otherwise it records abstention. Signal score is not a probability.
             </div>
           </div>
 
