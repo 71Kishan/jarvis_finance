@@ -221,17 +221,25 @@ export class StrategyOptimizer {
     const mean = this.mean(returns);
     const sd = this.standardDeviation(returns);
     const barsPerYear = this.estimateBarsPerYear(candles);
-    const sharpe = sd > 0 ? (mean / sd) * Math.sqrt(barsPerYear) : 0;
+    const sampleDays = candles.length > 1
+      ? Math.max(0, (candles[candles.length - 1].timestamp - candles[0].timestamp) / 86_400_000)
+      : 0;
+    // Annualized statistics from a very short sample can become numerically
+    // impressive while being statistically fragile. Keep them unavailable until
+    // the backtest spans at least 30 calendar days.
+    const annualizationReliable = sampleDays >= 30;
+    const annualizationFactor = annualizationReliable ? Math.sqrt(barsPerYear) : 1;
+    const sharpe = sd > 0 && annualizationReliable ? (mean / sd) * annualizationFactor : 0;
     const downside = this.downsideDeviation(returns);
-    const sortino = downside > 0 ? (mean / downside) * Math.sqrt(barsPerYear) : 0;
+    const sortino = downside > 0 && annualizationReliable ? (mean / downside) * annualizationFactor : 0;
     const finalEquity = cash;
     const totalPnl = finalEquity - initialBalance;
     const profitFactor = grossLosses > 0 ? grossWins / grossLosses : grossWins > 0 ? Infinity : 0;
     const expectancy = totalTrades > 0 ? (grossWins - grossLosses) / totalTrades : 0;
-    const annualizedReturn = finalEquity > 0 && initialBalance > 0
+    const annualizedReturn = annualizationReliable && finalEquity > 0 && initialBalance > 0
       ? Math.pow(finalEquity / initialBalance, barsPerYear / Math.max(1, candles.length - 1)) - 1
-      : -1;
-    const volatilityAnnualized = sd * Math.sqrt(barsPerYear);
+      : undefined;
+    const volatilityAnnualized = annualizationReliable ? sd * Math.sqrt(barsPerYear) : undefined;
 
     let verdict: BacktestResult["verdict"] = "FAILED";
     if (totalTrades >= 30 && totalPnl > 0 && maxDrawdown < 10 && sharpe > 0) {
@@ -249,8 +257,10 @@ export class StrategyOptimizer {
       maxDrawdown: Number(maxDrawdown.toFixed(2)),
       sharpeRatio: Number(sharpe.toFixed(2)),
       sortinoRatio: Number(sortino.toFixed(2)),
-      annualizedReturn: Number(annualizedReturn.toFixed(4)),
-      volatilityAnnualized: Number(volatilityAnnualized.toFixed(4)),
+      annualizedReturn: annualizedReturn === undefined ? undefined : Number(annualizedReturn.toFixed(4)),
+      volatilityAnnualized: volatilityAnnualized === undefined ? undefined : Number(volatilityAnnualized.toFixed(4)),
+      sampleDays: Number(sampleDays.toFixed(2)),
+      annualizationReliable,
       expectancyPerTrade: Number(expectancy.toFixed(4)),
       avgWin: wins ? Number((grossWins / wins).toFixed(2)) : 0,
       avgLoss: losses ? Number((grossLosses / losses).toFixed(2)) : 0,
@@ -318,6 +328,7 @@ export class StrategyOptimizer {
         "Test results include modeled entry and exit fees plus adverse slippage.",
         "Ambiguous OHLC bars resolve stop-first rather than assuming a favorable intrabar path.",
         "A small sample is not production validation; forward paper and shadow evidence remain required.",
+        "Annualized return, annualized volatility, Sharpe, and Sortino are withheld for samples shorter than 30 calendar days to avoid overstating short-sample performance.",
         "The selected candidate is a research hypothesis, not an automatic deployment decision."
       ],
     };
