@@ -111,7 +111,7 @@ export const MarketHoursModal: React.FC<MarketHoursModalProps> = ({
             <div className="flex items-center justify-between">
               <span className="text-xs font-mono font-bold uppercase text-neutral-300 flex items-center gap-2">
                 <Smartphone className="w-4 h-4 text-emerald-400" />
-                How To Keep It Running Automatically on Android
+                Android / Browser Monitoring Limits
               </span>
               <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
                 PWA Ready
@@ -125,17 +125,17 @@ export const MarketHoursModal: React.FC<MarketHoursModalProps> = ({
                   <span>1. Install to Home Screen</span>
                 </div>
                 <p className="text-neutral-400 text-[11px] leading-relaxed">
-                  Open Chrome on Android, tap the <strong>⋮ (three dots)</strong> menu, and select <strong>"Add to Home screen"</strong> or <strong>"Install app"</strong>. It runs full-screen as a standalone native app.
+                  Install Jarvis as a PWA for convenient full-screen access. Installation improves the app experience; it does not turn a browser/PWA into a reliable unattended trading worker.
                 </p>
               </div>
 
               <div className="p-3 rounded-xl bg-neutral-900/60 border border-neutral-800 flex flex-col gap-1.5">
                 <div className="flex items-center gap-1.5 text-sky-400 font-mono font-bold text-[11px]">
                   <BatteryCharging className="w-3.5 h-3.5" />
-                  <span>2. Unrestricted Battery</span>
+                  <span>2. Battery settings</span>
                 </div>
                 <p className="text-neutral-400 text-[11px] leading-relaxed">
-                  In Android App Settings &rarr; Battery, change to <strong>"Unrestricted"</strong> so the operating system doesn't pause the background tab when your screen is locked.
+                  Battery settings may reduce app suspension, but Android/browser lifecycle rules still mean a PWA cannot be treated as a guaranteed 24/7 execution process when the phone is locked or the app is not active.
                 </p>
               </div>
 
@@ -266,7 +266,7 @@ export const MarketHoursModal: React.FC<MarketHoursModalProps> = ({
                   Server Runtime & Research Scheduling
                 </div>
                 <p className="text-[11px] text-neutral-400">
-                  A server-side scheduler may change the research universe across market sessions. Do not treat weekend crypto rotation as a promise of continuous profitability or unattended Android execution.
+                  A server-side worker can schedule research jobs across market sessions. Client-side asset rotation is for research/navigation only and must never be interpreted as a guarantee of continuous execution.
                 </p>
               </div>
               <span className="px-3 py-1.5 rounded-xl font-mono text-xs font-bold bg-neutral-800 text-neutral-400 border border-neutral-700">
