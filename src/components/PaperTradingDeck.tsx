@@ -175,7 +175,7 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
               }`}
             />
             <Radio className="w-3.5 h-3.5" />
-            <span>Live Exchange Feed</span>
+            <span>Verified Live Data</span>
           </button>
 
           <button
@@ -230,7 +230,7 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
 
       {/* Autonomous Action & Verification Command Bar */}
       <div className="bg-gradient-to-r from-neutral-950 via-neutral-900 to-neutral-950 p-3.5 rounded-xl border border-neutral-800 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 shadow-md">
-        {/* Daily Profit Goal Micro-Widget */}
+        {/* Daily Process Metrics */}
         <div className="flex items-center gap-3">
           <div className="p-2 bg-emerald-500/10 text-emerald-400 rounded-lg border border-emerald-500/20">
             <Target className="w-5 h-5" />
@@ -256,22 +256,22 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
             </div>
             <div className="text-[11px] text-neutral-400">
               {dailyGoal.targetAchieved
-                ? "Daily target reached! Preserving capital."
-                : "Scanning setups to hit daily income target."}
+                ? "No income target. Preserving process discipline."
+                : "Scanning only when the rules produce an eligible setup."}
             </div>
           </div>
         </div>
 
         {/* Primary Command Actions */}
         <div className="flex items-center gap-2 flex-wrap">
-          {/* RUN 1 VERIFIED TRADE BUTTON */}
+          {/* RUN QUALIFIED PAPER SCAN BUTTON */}
           <button
             id="run-verified-trade-btn"
             type="button"
             onClick={onRunImmediateTrade}
             disabled={botState === "HALTED_DEAD" || !!activeTrade}
             className="px-3.5 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs rounded-xl flex items-center gap-2 transition-all shadow-lg shadow-emerald-950/40 disabled:opacity-50"
-            title="Instantly executes 1 paper trade on live market to verify fills and record outcome into Strategy Vault"
+            title="Runs one fresh rules-based paper scan; it will not enter unless the signal and risk gates both pass"
           >
             <Zap className="w-4 h-4 fill-white" />
             <span>⚡ Run 1 Trade to Verify</span>
@@ -553,7 +553,7 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-neutral-300 uppercase tracking-wide flex items-center gap-1.5">
                 <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
-                <span>Autonomous Execution Core</span>
+                <span>Paper Execution Core</span>
               </span>
 
               {/* Execution State Badge */}
@@ -584,7 +584,7 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
                 </div>
                 <div className="text-[11px] text-neutral-400">
                   {isAutoTrading
-                    ? "System executes automatically on verified confluence"
+                    ? "Session-local autopilot: enters only on a fresh eligible signal; unattended operation requires the server worker."
                     : "Automated execution paused"}
                 </div>
               </div>
