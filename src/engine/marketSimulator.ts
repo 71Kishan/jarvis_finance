@@ -161,7 +161,7 @@ export class MarketSimulator {
     return this.assetInfo;
   }
 
-  public getRegime(): MarketRegime | "LIVE_DATA" {
+  public getRegime(): MarketRegime {
     return this.currentRegime;
   }
 
