@@ -92,18 +92,9 @@ export class StrategyOptimizer {
       }
 
       if (position) {
-        if (position.type === "LONG") {
-          position.highestPrice = Math.max(position.highestPrice, candle.high);
-          if (s.trailingStop) {
-            position.stopLoss = Math.max(position.stopLoss, position.highestPrice * (1 - s.trailingStopPercent / 100));
-          }
-        } else {
-          position.lowestPrice = Math.min(position.lowestPrice, candle.low);
-          if (s.trailingStop) {
-            position.stopLoss = Math.min(position.stopLoss, position.lowestPrice * (1 + s.trailingStopPercent / 100));
-          }
-        }
-
+        // Resolve exits using the stop/target state that existed before the bar.
+        // Trailing-stop updates from this bar's extreme are applied only after the
+        // bar has survived, preventing intrabar look-ahead bias.
         const resolved = resolveStopTarget(position.type, candle, position.stopLoss, position.takeProfit);
         if (resolved.kind !== "NONE") {
           const wasPositive = (() => {
@@ -117,6 +108,20 @@ export class StrategyOptimizer {
           } else {
             consecutiveLosses += 1;
             lastLossAtMs = candle.timestamp;
+          }
+        }
+      } else {
+        // No exit occurred on this bar. Update the trailing stop only now so it
+        // becomes effective starting with the next bar.
+        if (position.type === "LONG") {
+          position.highestPrice = Math.max(position.highestPrice, candle.high);
+          if (s.trailingStop) {
+            position.stopLoss = Math.max(position.stopLoss, position.highestPrice * (1 - s.trailingStopPercent / 100));
+          }
+        } else {
+          position.lowestPrice = Math.min(position.lowestPrice, candle.low);
+          if (s.trailingStop) {
+            position.stopLoss = Math.min(position.stopLoss, position.lowestPrice * (1 + s.trailingStopPercent / 100));
           }
         }
       }
