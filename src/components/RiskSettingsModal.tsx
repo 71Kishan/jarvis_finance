@@ -74,7 +74,7 @@ export const RiskSettingsModal: React.FC<RiskSettingsModalProps> = ({
       "Status",
       "Entry Time",
       "Exit Time",
-      "Confidence",
+      "Signal Score",
       "Survival Note",
     ];
 
@@ -90,7 +90,7 @@ export const RiskSettingsModal: React.FC<RiskSettingsModalProps> = ({
       t.status,
       new Date(t.entryTime).toISOString(),
       t.exitTime ? new Date(t.exitTime).toISOString() : "",
-      `${t.confidence}%`,
+      `${t.signalScore}%`,
       `"${(t.botSurvivalNote || "").replace(/"/g, '""')}"`,
     ]);
 
