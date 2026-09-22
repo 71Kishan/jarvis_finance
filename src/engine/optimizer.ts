@@ -1,263 +1,278 @@
-import { BacktestResult, Candle, StrategyConfig } from "../types/trading";
+import { BacktestResult, Candle, PaperTradingSettings, StrategyConfig } from "../types/trading";
+import { evaluateSignal } from "./signalEngine";
+import { modelEntryFill, modelExitFill, resolveStopTarget, grossPnL } from "./executionModel";
+
+interface SimPosition {
+  type: "LONG" | "SHORT";
+  entryPrice: number;
+  amount: number;
+  sizeUsd: number;
+  entryFeeUsd: number;
+  stopLoss: number;
+  takeProfit: number;
+  highestPrice: number;
+  lowestPrice: number;
+}
 
 export class StrategyOptimizer {
-  /**
-   * Run a deterministic historical backtest for a strategy candidate
-   */
-  public static backtest(
-    strategy: StrategyConfig,
-    candles: Candle[],
-    initialBalance: number = 10000
-  ): BacktestResult {
-    let balance = initialBalance;
-    let peakBalance = initialBalance;
-    let maxDrawdown = 0;
-    let wins = 0;
-    let losses = 0;
-    let totalPnl = 0;
-    let totalWinPnl = 0;
-    let totalLossPnl = 0;
-
-    let inPosition: {
-      type: "LONG" | "SHORT";
-      entryPrice: number;
-      stopLoss: number;
-      takeProfit: number;
-      amount: number;
-      sizeUsd: number;
-      highestPrice?: number;
-      lowestPrice?: number;
-    } | null = null;
-
-    // Evaluate over historical slice
-    for (let i = 25; i < candles.length; i++) {
-      const candle = candles[i];
-      const ind = candle?.indicators;
-      if (!ind) continue;
-
-      // Update in-position trade
-      if (inPosition) {
-        let closed = false;
-        let pnl = 0;
-
-        if (inPosition.type === "LONG") {
-          if (!inPosition.highestPrice || candle.high > inPosition.highestPrice) {
-            inPosition.highestPrice = candle.high;
-            if (strategy.trailingStop) {
-              const trail = inPosition.highestPrice * (1 - strategy.trailingStopPercent / 100);
-              if (trail > inPosition.stopLoss) inPosition.stopLoss = trail;
-            }
-          }
-
-          if (candle.high >= inPosition.takeProfit) {
-            pnl = (inPosition.takeProfit - inPosition.entryPrice) * inPosition.amount;
-            closed = true;
-          } else if (candle.low <= inPosition.stopLoss) {
-            pnl = (inPosition.stopLoss - inPosition.entryPrice) * inPosition.amount;
-            closed = true;
-          }
-        } else {
-          if (!inPosition.lowestPrice || candle.low < inPosition.lowestPrice) {
-            inPosition.lowestPrice = candle.low;
-            if (strategy.trailingStop) {
-              const trail = inPosition.lowestPrice * (1 + strategy.trailingStopPercent / 100);
-              if (trail < inPosition.stopLoss) inPosition.stopLoss = trail;
-            }
-          }
-
-          if (candle.low <= inPosition.takeProfit) {
-            pnl = (inPosition.entryPrice - inPosition.takeProfit) * inPosition.amount;
-            closed = true;
-          } else if (candle.high >= inPosition.stopLoss) {
-            pnl = (inPosition.entryPrice - inPosition.stopLoss) * inPosition.amount;
-            closed = true;
-          }
-        }
-
-        if (closed) {
-          totalPnl += pnl;
-          balance += pnl;
-          if (pnl > 0) {
-            wins++;
-            totalWinPnl += pnl;
-          } else {
-            losses++;
-            totalLossPnl += Math.abs(pnl);
-          }
-
-          if (balance > peakBalance) peakBalance = balance;
-          const dd = peakBalance > 0 ? ((peakBalance - balance) / peakBalance) * 100 : 0;
-          if (dd > maxDrawdown) maxDrawdown = dd;
-
-          inPosition = null;
-        }
-      } else {
-        // Evaluate entry criteria
-        let longScore = 0;
-        let shortScore = 0;
-
-        if (ind.ema9 > ind.ema21 && ind.ema21 > ind.ema50 && candle.close > ind.ema9) {
-          longScore += 30;
-        } else if (ind.ema9 < ind.ema21 && ind.ema21 < ind.ema50 && candle.close < ind.ema9) {
-          shortScore += 30;
-        }
-
-        if (ind.rsi <= strategy.rsiOversold + 5 && ind.rsi >= strategy.rsiOversold) {
-          longScore += 25;
-        } else if (ind.rsi >= strategy.rsiOverbought - 5 && ind.rsi <= strategy.rsiOverbought) {
-          shortScore += 25;
-        }
-
-        if (candle.close <= ind.bbandLower * 1.004) longScore += 20;
-        if (candle.close >= ind.bbandUpper * 0.996) shortScore += 20;
-        if (ind.macdHist > 0 && ind.macd > ind.macdSignal) longScore += 15;
-        if (ind.macdHist < 0 && ind.macd < ind.macdSignal) shortScore += 15;
-
-        const isLong = longScore > shortScore;
-        const conf = isLong ? longScore : shortScore;
-
-        if (conf >= strategy.minConfidence) {
-          const maxRiskDollars = balance * (strategy.maxRiskPerTrade / 100);
-          const stopDist = strategy.stopLossPercent / 100;
-          const sizeUsd = Math.min(maxRiskDollars / stopDist, balance * 0.85);
-          const amount = sizeUsd / candle.close;
-
-          const stopLoss = isLong
-            ? candle.close * (1 - strategy.stopLossPercent / 100)
-            : candle.close * (1 + strategy.stopLossPercent / 100);
-
-          const takeProfit = isLong
-            ? candle.close * (1 + strategy.takeProfitPercent / 100)
-            : candle.close * (1 - strategy.takeProfitPercent / 100);
-
-          inPosition = {
-            type: isLong ? "LONG" : "SHORT",
-            entryPrice: candle.close,
-            stopLoss,
-            takeProfit,
-            amount,
-            sizeUsd,
-          };
-        }
-      }
+  public static backtest(strategy: StrategyConfig, candles: Candle[], initialBalance = 10000): BacktestResult {
+    if (candles.length < 120 || initialBalance <= 0) {
+      return {
+        strategyName: strategy.name,
+        totalTrades: 0,
+        winRate: 0,
+        totalPnl: 0,
+        profitFactor: 0,
+        maxDrawdown: 0,
+        sharpeRatio: 0,
+        verdict: "FAILED",
+      };
     }
 
-    const totalTrades = wins + losses;
-    const winRate = totalTrades > 0 ? Number(((wins / totalTrades) * 100).toFixed(1)) : 100;
-    const profitFactor =
-      totalLossPnl > 0 ? Number((totalWinPnl / totalLossPnl).toFixed(2)) : totalWinPnl > 0 ? 5.0 : 1.0;
-    const sharpeRatio =
-      maxDrawdown > 0 ? Number(((totalPnl / initialBalance) * 100 / maxDrawdown).toFixed(2)) : 2.5;
+    const s = {
+      ...strategy,
+      maxRiskPerTrade: Math.min(1, Math.max(0.05, Number(strategy.maxRiskPerTrade) || 0.5)),
+    };
+    const settings: PaperTradingSettings = {
+      slippageBps: 2,
+      feeTierPercent: 0.04,
+      leverage: 1,
+      soundAlerts: false,
+    };
 
-    let verdict: BacktestResult["verdict"] = "SURVIVED_AND_PROFITABLE";
-    if (maxDrawdown > 3.0 || totalPnl < 0) {
-      verdict = totalPnl < 0 ? "FAILED" : "UNSAFE_HIGH_DRAWDOWN";
+    let cash = initialBalance;
+    let peak = initialBalance;
+    let maxDrawdown = 0;
+    let totalFees = 0;
+    let totalSlippage = 0;
+    let wins = 0;
+    let losses = 0;
+    let grossWins = 0;
+    let grossLosses = 0;
+    let position: SimPosition | null = null;
+    const returns: number[] = [];
+    let previousEquity = initialBalance;
+
+    const recordClosedTrade = (net: number, fees: number, slippage: number, sizeUsd: number) => {
+      totalFees += fees;
+      totalSlippage += slippage;
+      if (net > 0) {
+        wins += 1;
+        grossWins += net;
+      } else if (net < 0) {
+        losses += 1;
+        grossLosses += Math.abs(net);
+      }
+      return sizeUsd + net;
+    };
+
+    const closePosition = (p: SimPosition, exitPrice: number) => {
+      const exit = modelExitFill(exitPrice, p.type, Math.abs(p.amount * exitPrice), settings);
+      const gross = grossPnL(p.type, p.entryPrice, exit.fillPrice, p.amount);
+      const net = gross - p.entryFeeUsd - exit.feeUsd;
+      cash += recordClosedTrade(net, p.entryFeeUsd + exit.feeUsd, exit.slippageUsd, p.sizeUsd);
+      position = null;
+    };
+
+    for (let i = 60; i < candles.length - 1; i += 1) {
+      const candle = candles[i];
+
+      if (position) {
+        if (position.type === "LONG") {
+          position.highestPrice = Math.max(position.highestPrice, candle.high);
+          if (s.trailingStop) {
+            position.stopLoss = Math.max(position.stopLoss, position.highestPrice * (1 - s.trailingStopPercent / 100));
+          }
+        } else {
+          position.lowestPrice = Math.min(position.lowestPrice, candle.low);
+          if (s.trailingStop) {
+            position.stopLoss = Math.min(position.stopLoss, position.lowestPrice * (1 + s.trailingStopPercent / 100));
+          }
+        }
+
+        const resolved = resolveStopTarget(position.type, candle, position.stopLoss, position.takeProfit);
+        if (resolved.kind !== "NONE") closePosition(position, resolved.price);
+      }
+
+      if (!position) {
+        const signal = evaluateSignal(candle, candles.slice(0, i), s);
+        if (signal.eligible) {
+          const next = candles[i + 1];
+          const stopDistance = Math.max(0.001, s.stopLossPercent / 100);
+          const riskBudget = cash * s.maxRiskPerTrade / 100;
+          const notional = Math.min(riskBudget / stopDistance, cash * 0.35);
+
+          if (notional >= 10) {
+            const entry = modelEntryFill(next.open, signal.direction as "LONG" | "SHORT", notional, settings);
+            if (notional + entry.feeUsd <= cash) {
+              cash -= notional + entry.feeUsd;
+              totalFees += entry.feeUsd;
+              totalSlippage += entry.slippageUsd;
+
+              const stopLoss = signal.direction === "LONG"
+                ? entry.fillPrice * (1 - s.stopLossPercent / 100)
+                : entry.fillPrice * (1 + s.stopLossPercent / 100);
+              const takeProfit = signal.direction === "LONG"
+                ? entry.fillPrice * (1 + s.takeProfitPercent / 100)
+                : entry.fillPrice * (1 - s.takeProfitPercent / 100);
+
+              position = {
+                type: signal.direction as "LONG" | "SHORT",
+                entryPrice: entry.fillPrice,
+                amount: notional / entry.fillPrice,
+                sizeUsd: notional,
+                entryFeeUsd: entry.feeUsd,
+                stopLoss,
+                takeProfit,
+                highestPrice: entry.fillPrice,
+                lowestPrice: entry.fillPrice,
+              };
+            }
+          }
+        }
+      }
+
+      const openPnl = position
+        ? grossPnL(position.type, position.entryPrice, candle.close, position.amount)
+        : 0;
+      const equity = cash + (position ? position.sizeUsd : 0) + openPnl;
+      peak = Math.max(peak, equity);
+      const drawdown = peak > 0 ? ((peak - equity) / peak) * 100 : 0;
+      maxDrawdown = Math.max(maxDrawdown, drawdown);
+      returns.push(previousEquity > 0 ? equity / previousEquity - 1 : 0);
+      previousEquity = equity;
+    }
+
+    if (position) closePosition(position, candles[candles.length - 1].close);
+
+    const totalTrades = wins + losses;
+    const mean = this.mean(returns);
+    const sd = this.standardDeviation(returns);
+    const barsPerYear = this.estimateBarsPerYear(candles);
+    const sharpe = sd > 0 ? (mean / sd) * Math.sqrt(barsPerYear) : 0;
+    const downside = this.downsideDeviation(returns);
+    const sortino = downside > 0 ? (mean / downside) * Math.sqrt(barsPerYear) : 0;
+    const finalEquity = cash;
+    const totalPnl = finalEquity - initialBalance;
+    const profitFactor = grossLosses > 0 ? grossWins / grossLosses : grossWins > 0 ? Infinity : 0;
+    const expectancy = totalTrades > 0 ? (grossWins - grossLosses) / totalTrades : 0;
+    const annualizedReturn = finalEquity > 0 && initialBalance > 0
+      ? Math.pow(finalEquity / initialBalance, barsPerYear / Math.max(1, candles.length - 1)) - 1
+      : -1;
+    const volatilityAnnualized = sd * Math.sqrt(barsPerYear);
+
+    let verdict: BacktestResult["verdict"] = "FAILED";
+    if (totalTrades >= 30 && totalPnl > 0 && maxDrawdown < 10 && sharpe > 0) {
+      verdict = "SURVIVED_AND_PROFITABLE";
+    } else if (totalPnl >= 0 && maxDrawdown < 10) {
+      verdict = "UNSAFE_HIGH_DRAWDOWN";
     }
 
     return {
-      strategyName: strategy.name,
+      strategyName: s.name,
       totalTrades,
-      winRate,
+      winRate: totalTrades ? Number((wins / totalTrades * 100).toFixed(1)) : 0,
       totalPnl: Number(totalPnl.toFixed(2)),
-      profitFactor,
+      profitFactor: Number.isFinite(profitFactor) ? Number(profitFactor.toFixed(2)) : 999,
       maxDrawdown: Number(maxDrawdown.toFixed(2)),
-      sharpeRatio,
+      sharpeRatio: Number(sharpe.toFixed(2)),
+      sortinoRatio: Number(sortino.toFixed(2)),
+      annualizedReturn: Number(annualizedReturn.toFixed(4)),
+      volatilityAnnualized: Number(volatilityAnnualized.toFixed(4)),
+      expectancyPerTrade: Number(expectancy.toFixed(4)),
+      avgWin: wins ? Number((grossWins / wins).toFixed(2)) : 0,
+      avgLoss: losses ? Number((grossLosses / losses).toFixed(2)) : 0,
+      totalFees: Number(totalFees.toFixed(2)),
+      totalSlippage: Number(totalSlippage.toFixed(2)),
       verdict,
     };
   }
 
-  /**
-   * Run experimental optimization simulation: tests multiple parameter configurations
-   * to find the one with the highest survival rate & win rate
-   */
-  public static runOptimizationStudy(
-    baseStrategy: StrategyConfig,
-    candles: Candle[]
-  ): {
-    bestStrategy: StrategyConfig;
-    bestResult: BacktestResult;
-    candidatesTested: { strategy: StrategyConfig; result: BacktestResult }[];
-    optimizationInsights: string[];
-  } {
-    const candidates: StrategyConfig[] = [];
+  public static runOptimizationStudy(baseStrategy: StrategyConfig, candles: Candle[]) {
+    if (candles.length < 360) {
+      return {
+        bestStrategy: baseStrategy,
+        bestResult: this.backtest(baseStrategy, candles),
+        candidatesTested: [],
+        optimizationInsights: [
+          "Not enough history for a meaningful 60/20/20 train-validation-test study. Supply substantially more bars before optimization.",
+        ],
+      };
+    }
 
-    // Candidate 1: High Win-Rate Sniper (ultra strict confidence, tight stops)
-    candidates.push({
-      ...baseStrategy,
-      id: `${baseStrategy.id}-sniper`,
-      name: `${baseStrategy.name} (Sniper 88% Conf)`,
-      version: baseStrategy.version + 1,
-      minConfidence: 85,
-      rsiOversold: 32,
-      rsiOverbought: 70,
-      stopLossPercent: 0.75,
-      takeProfitPercent: 2.4,
-      trailingStopPercent: 0.5,
-      maxRiskPerTrade: 1.2,
-      description: "Ultra-selective setup filter prioritizing near-zero loss rate.",
-    });
-
-    // Candidate 2: Adaptive Volatility Breakout
-    candidates.push({
-      ...baseStrategy,
-      id: `${baseStrategy.id}-vol-breakout`,
-      name: `${baseStrategy.name} (Vol Breakout)`,
-      version: baseStrategy.version + 1,
-      minConfidence: 75,
-      rsiOversold: 36,
-      rsiOverbought: 65,
-      stopLossPercent: 1.1,
-      takeProfitPercent: 3.2,
-      trailingStopPercent: 0.8,
-      maxRiskPerTrade: 1.5,
-      description: "Wider take profit to capture extended trending impulses.",
-    });
-
-    // Candidate 3: Mean Reversion Scalper
-    candidates.push({
-      ...baseStrategy,
-      id: `${baseStrategy.id}-mean-rev`,
-      name: `${baseStrategy.name} (Mean Reversion Squeeze)`,
-      version: baseStrategy.version + 1,
-      minConfidence: 80,
-      rsiOversold: 30,
-      rsiOverbought: 72,
-      stopLossPercent: 0.65,
-      takeProfitPercent: 1.8,
-      trailingStopPercent: 0.45,
-      maxRiskPerTrade: 1.0,
-      description: "Fast in-and-out profit taking on extreme Bollinger band excursions.",
-    });
-
-    // Candidate 4: Base strategy for benchmark
-    candidates.push({ ...baseStrategy });
-
-    const results = candidates.map((cand) => ({
-      strategy: cand,
-      result: this.backtest(cand, candles),
-    }));
-
-    // Fitness score = WinRate * 2 + (TotalPnL > 0 ? 30 : 0) - MaxDrawdown * 15
-    results.sort((a, b) => {
-      const scoreA = a.result.winRate * 2 + a.result.totalPnl * 0.1 - a.result.maxDrawdown * 10;
-      const scoreB = b.result.winRate * 2 + b.result.totalPnl * 0.1 - b.result.maxDrawdown * 10;
-      return scoreB - scoreA;
-    });
-
-    const best = results[0];
-
-    const insights = [
-      `Optimal parameter candidate achieved ${best.result.winRate}% win rate across ${candles.length} historical candles.`,
-      `Maximum drawdown capped at ${best.result.maxDrawdown}% (well below emergency circuit breaker threshold).`,
-      `Stop-Loss calibrated to ${best.strategy.stopLossPercent}% with trailing stop ${best.strategy.trailingStopPercent}%.`,
-      `Confidence threshold set to ${best.strategy.minConfidence}% to filter out fake breakouts.`,
+    const candidates: StrategyConfig[] = [
+      { ...baseStrategy, id: baseStrategy.id + "-trend", version: baseStrategy.version + 1, name: baseStrategy.name + " / Trend", minConfidence: 72 },
+      { ...baseStrategy, id: baseStrategy.id + "-strict", version: baseStrategy.version + 1, name: baseStrategy.name + " / Strict", minConfidence: 82, maxRiskPerTrade: 0.5 },
+      { ...baseStrategy, id: baseStrategy.id + "-balanced", version: baseStrategy.version + 1, name: baseStrategy.name + " / Balanced", minConfidence: 68, maxRiskPerTrade: 0.4 },
+      { ...baseStrategy, id: baseStrategy.id + "-baseline", name: baseStrategy.name + " / Baseline" },
     ];
 
+    const trainEnd = Math.floor(candles.length * 0.6);
+    const validationEnd = Math.floor(candles.length * 0.8);
+
+    const rows = candidates.map((strategy) => {
+      const train = this.backtest(strategy, candles.slice(0, trainEnd));
+      const validation = this.backtest(strategy, candles.slice(Math.max(0, trainEnd - 60), validationEnd));
+      const test = this.backtest(strategy, candles.slice(Math.max(0, validationEnd - 60)));
+
+      const selectionScore =
+        (test.totalTrades >= 10 ? 1 : 0) +
+        (test.totalPnl > 0 ? 1 : 0) +
+        (test.sharpeRatio > 0 ? 1 : 0) +
+        (test.maxDrawdown < 10 ? 1 : 0) +
+        (validation.totalPnl > 0 ? 1 : 0);
+
+      return { strategy, result: test, selectionScore, train, validation };
+    }).sort((a, b) =>
+      b.selectionScore - a.selectionScore ||
+      b.result.sharpeRatio - a.result.sharpeRatio ||
+      b.result.totalPnl - a.result.totalPnl
+    );
+
+    const selected = rows[0];
+
     return {
-      bestStrategy: best.strategy,
-      bestResult: best.result,
-      candidatesTested: results,
-      optimizationInsights: insights,
+      bestStrategy: selected.strategy,
+      bestResult: selected.result,
+      candidatesTested: rows.map((row) => ({ strategy: row.strategy, result: row.result })),
+      optimizationInsights: [
+        "Walk-forward split: 60% train, 20% validation, 20% test, with warm-up overlap for indicator calculation.",
+        "Entry signals are generated from a completed bar and filled at the next bar open.",
+        "Test results include modeled entry and exit fees plus adverse slippage.",
+        "Ambiguous OHLC bars resolve stop-first rather than assuming a favorable intrabar path.",
+        "A small sample is not production validation; forward paper and shadow evidence remain required.",
+        "The selected candidate is a research hypothesis, not an automatic deployment decision.",
+      ],
     };
+  }
+
+  private static estimateBarsPerYear(candles: Candle[]): number {
+    if (candles.length < 3) return 252;
+    const deltas = [];
+    for (let i = 1; i < Math.min(candles.length, 25); i += 1) {
+      const delta = candles[i].timestamp - candles[i - 1].timestamp;
+      if (delta > 0) deltas.push(delta);
+    }
+    if (!deltas.length) return 252;
+    deltas.sort((a, b) => a - b);
+    const medianMs = deltas[Math.floor(deltas.length / 2)];
+    const dayMs = 86_400_000;
+    if (medianMs >= 18 * 60 * 60 * 1000) return 252;
+    return Math.max(1, Math.round((365 * dayMs) / medianMs));
+  }
+
+  private static mean(values: number[]) {
+    return values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0;
+  }
+
+  private static standardDeviation(values: number[]) {
+    if (values.length < 2) return 0;
+    const mean = this.mean(values);
+    return Math.sqrt(values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / (values.length - 1));
+  }
+
+  private static downsideDeviation(values: number[]) {
+    const downside = values.filter((value) => value < 0);
+    return downside.length ? Math.sqrt(this.mean(downside.map((value) => value ** 2))) : 0;
   }
 }

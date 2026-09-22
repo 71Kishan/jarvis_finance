@@ -193,7 +193,7 @@ export const TradeExecutionTable: React.FC<TradeExecutionTableProps> = ({
         <div className="overflow-x-auto max-h-[300px]">
           {tradeHistory.length === 0 ? (
             <div className="py-10 text-center text-xs font-mono text-neutral-500">
-              No completed trades yet. The system logs verified execution metrics and attribution reports here.
+              No completed trades yet. The system logs recorded execution metrics and attribution reports here.
             </div>
           ) : (
             <table className="w-full text-left font-mono text-xs">

@@ -35,7 +35,7 @@ export const StrategyVaultModal: React.FC<StrategyVaultModalProps> = ({
   currentStrategy,
   onApplyStrategy,
 }) => {
-  const [activeTab, setActiveTab] = useState<"PROVEN" | "ALL" | "TESTING" | "DISCARDED">("PROVEN");
+  const [activeTab, setActiveTab] = useState<"PROVEN" | "ALL" | "TESTING" | "DISCARDED">("ALL");
   const [strategies, setStrategies] = useState<StrategyVaultEntry[]>(() =>
     strategyVaultInstance.getAllStrategies()
   );
@@ -52,7 +52,7 @@ export const StrategyVaultModal: React.FC<StrategyVaultModalProps> = ({
   };
 
   const filteredStrategies = strategies.filter((s) => {
-    if (activeTab === "PROVEN") return s.status === "PROVEN_PROFITABLE";
+    if (activeTab === "PROVEN") return s.status === "PROVISIONALLY_VALIDATED";
     if (activeTab === "TESTING") return s.status === "TESTING_PAPER";
     if (activeTab === "DISCARDED") return s.status === "DISCARDED_FAILED";
     return true;
@@ -60,23 +60,16 @@ export const StrategyVaultModal: React.FC<StrategyVaultModalProps> = ({
 
   const handleActivate = (strat: StrategyVaultEntry) => {
     onApplyStrategy({ ...strat.config });
-    setFeedback(`Activated "${strat.name}" as live paper strategy!`);
+    setFeedback(`Activated "${strat.name}" as the active paper research strategy.`);
     setTimeout(() => setFeedback(null), 3000);
   };
 
   const handleScanBestModel = () => {
-    const proven = strategyVaultInstance.getProvenStrategies();
-    if (proven.length > 0) {
-      // Pick strategy with highest profit factor
-      proven.sort((a, b) => b.profitFactor - a.profitFactor);
-      handleActivate(proven[0]);
-    }
+    setFeedback("Jarvis does not auto-select or auto-deploy a 'best' strategy. Review the validation evidence and activate a candidate manually.");
+    setTimeout(() => setFeedback(null), 4000);
   };
 
-  const progressPercent = Math.min(
-    100,
-    Math.max(0, (dailyGoal.currentDailyPnlUsd / dailyGoal.dailyTargetUsd) * 100)
-  );
+  const progressPercent = 0;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
@@ -96,11 +89,11 @@ export const StrategyVaultModal: React.FC<StrategyVaultModalProps> = ({
                   Strategy Memory Vault & Anti-Duplication Engine
                 </h3>
                 <span className="px-2 py-0.5 rounded text-[10px] font-mono uppercase bg-emerald-950 text-emerald-300 border border-emerald-800">
-                  Self-Evolving
+                  Evidence-Driven
                 </span>
               </div>
               <p className="text-xs text-neutral-400">
-                Maintains systematic logs of all tested models. Automatically promotes winning strategies and blacklists failed configurations so duplicate parameters are never repeated.
+                Maintains systematic logs of all tested models. Records candidates, test results and failures. A strategy is not treated as validated without sufficient out-of-sample and forward-paper evidence.
               </p>
             </div>
           </div>
@@ -115,7 +108,7 @@ export const StrategyVaultModal: React.FC<StrategyVaultModalProps> = ({
           </button>
         </div>
 
-        {/* Daily Profit Target Performance Tracker */}
+        {/* Daily Process Metrics */}
         <div className="bg-gradient-to-r from-neutral-950 via-emerald-950/20 to-neutral-950 p-4 border-b border-neutral-800">
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-2.5">
             <div className="flex items-center gap-2">
@@ -156,10 +149,8 @@ export const StrategyVaultModal: React.FC<StrategyVaultModalProps> = ({
             />
           </div>
           <div className="flex justify-between items-center text-[10px] text-neutral-500 mt-1 font-mono">
-            <span>Progress: {progressPercent.toFixed(1)}%</span>
-            <span>
-              {dailyGoal.targetAchieved ? "🎉 DAILY TARGET SECURED" : "Executing paper trades toward target"}
-            </span>
+            <span>Income targets disabled</span>
+            <span>Only qualified paper setups are eligible for entry.</span>
           </div>
         </div>
 
@@ -168,7 +159,7 @@ export const StrategyVaultModal: React.FC<StrategyVaultModalProps> = ({
           {/* Tab Filter */}
           <div className="flex items-center gap-1 bg-neutral-950 p-1 rounded-xl border border-neutral-800">
             <button
-              id="vault-tab-proven"
+              id="vault-tab-validated"
               type="button"
               onClick={() => setActiveTab("PROVEN")}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors ${
@@ -178,7 +169,7 @@ export const StrategyVaultModal: React.FC<StrategyVaultModalProps> = ({
               }`}
             >
               <Award className="w-3.5 h-3.5" />
-              <span>Proven Working ({strategies.filter((s) => s.status === "PROVEN_PROFITABLE").length})</span>
+              <span>Validated Candidates ({strategies.filter((s) => s.status === "PROVISIONALLY_VALIDATED").length})</span>
             </button>
             <button
               id="vault-tab-all"
@@ -215,18 +206,18 @@ export const StrategyVaultModal: React.FC<StrategyVaultModalProps> = ({
               }`}
             >
               <XCircle className="w-3.5 h-3.5" />
-              <span>Blacklisted ({strategies.filter((s) => s.status === "DISCARDED_FAILED").length})</span>
+              <span>Discarded / Failed ({strategies.filter((s) => s.status === "DISCARDED_FAILED").length})</span>
             </button>
           </div>
 
           <button
-            id="deploy-best-proven-btn"
+            id="review-validated-candidates-btn"
             type="button"
             onClick={handleScanBestModel}
             className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl flex items-center gap-2 transition-colors shadow-md shadow-emerald-950/40"
           >
             <Sparkles className="w-4 h-4" />
-            <span>Deploy #1 Highest Profit Factor Strategy</span>
+            <span>Review Validated Candidates</span>
           </button>
         </div>
 
@@ -242,7 +233,7 @@ export const StrategyVaultModal: React.FC<StrategyVaultModalProps> = ({
         <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3">
           {filteredStrategies.map((item) => {
             const isCurrent = item.config.name === currentStrategy.name;
-            const isProven = item.status === "PROVEN_PROFITABLE";
+            const isProven = item.status === "PROVISIONALLY_VALIDATED";
             const isDiscarded = item.status === "DISCARDED_FAILED";
 
             return (
@@ -288,7 +279,7 @@ export const StrategyVaultModal: React.FC<StrategyVaultModalProps> = ({
                         </span>
                         {isCurrent && (
                           <span className="px-2 py-0.5 bg-emerald-950 text-emerald-300 border border-emerald-800 text-[10px] font-bold rounded-full">
-                            ACTIVE LIVE
+                            ACTIVE PAPER
                           </span>
                         )}
                         <span

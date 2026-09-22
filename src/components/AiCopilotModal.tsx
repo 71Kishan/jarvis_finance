@@ -41,7 +41,7 @@ const QUICK_PROMPTS = [
   "Analyze current market regime & indicators",
   "Audit my win rate and active position",
   "Explain the EMA + RSI + BB confluence formula",
-  "Can this terminal run 24/7 autonomously?",
+  "What can run while my phone is offline?",
 ];
 
 const INITIAL_MESSAGES: ChatMessage[] = [
@@ -49,7 +49,7 @@ const INITIAL_MESSAGES: ChatMessage[] = [
     id: "welcome-1",
     role: "model",
     timestamp: Date.now() - 30000,
-    content: `### **Welcome to AEGIS AI Copilot**\n\nI am your institutional quantitative advisor and terminal specialist. Ask me anything about the **AEGIS Autonomous Terminal**, mathematical formulas, **Circuit Breaker capital preservation**, or **Automated Profit Withdrawals**.\n\n*Select any prompt below or type your inquiry.*`,
+    content: `### **Welcome to Jarvis Finance AI Copilot**\n\nI am your research assistant and terminal specialist. Ask me anything about the **Jarvis Finance Autonomous Terminal**, mathematical formulas, **configured risk controls**, or **paper reserve transfers**.\n\n*Select any prompt below or type your inquiry.*`,
     modelUsed: "gemini-3.5-flash",
   },
 ];
@@ -68,7 +68,7 @@ export const AiCopilotModal: React.FC<AiCopilotModalProps> = ({
   const [messages, setMessages] = useState<ChatMessage[]>(() => {
     if (typeof window !== "undefined") {
       try {
-        const saved = localStorage.getItem("aegis_copilot_chat_v1");
+        const saved = localStorage.getItem("jarvis_copilot_chat_v2");
         if (saved) return JSON.parse(saved);
       } catch {}
     }
@@ -102,7 +102,7 @@ export const AiCopilotModal: React.FC<AiCopilotModalProps> = ({
   useEffect(() => {
     if (typeof window !== "undefined") {
       try {
-        localStorage.setItem("aegis_copilot_chat_v1", JSON.stringify(messages.slice(-30)));
+        localStorage.setItem("jarvis_copilot_chat_v2", JSON.stringify(messages.slice(-30)));
       } catch {}
     }
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -322,7 +322,7 @@ export const AiCopilotModal: React.FC<AiCopilotModalProps> = ({
         "I have analyzed your query with respect to current portfolio metrics. Capital preservation buffers remain active."
       );
     } catch (err) {
-      return "The quantitative assistant operates locally with verified capital preservation safeguards. Please verify network connectivity.";
+      return "The quantitative assistant operates locally with configured paper-trading risk controls. Please verify network connectivity.";
     }
   };
 
@@ -366,7 +366,7 @@ export const AiCopilotModal: React.FC<AiCopilotModalProps> = ({
     if (confirm("Reset conversation history?")) {
       setMessages(INITIAL_MESSAGES);
       if (typeof window !== "undefined") {
-        localStorage.removeItem("aegis_copilot_chat_v1");
+        localStorage.removeItem("jarvis_copilot_chat_v2");
       }
     }
   };
@@ -391,7 +391,7 @@ export const AiCopilotModal: React.FC<AiCopilotModalProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <h2 className="text-lg font-bold text-white tracking-wide">
-                  AEGIS Quantitative AI Copilot
+                  Jarvis Finance Quantitative AI Copilot
                 </h2>
                 <span className="px-2 py-0.5 text-xs font-semibold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 rounded-full flex items-center gap-1">
                   <Sparkles className="w-3 h-3" />
@@ -699,7 +699,7 @@ export const AiCopilotModal: React.FC<AiCopilotModalProps> = ({
                     >
                       <div className="flex justify-between items-center text-[10px] text-slate-400 mb-1">
                         <span className="font-semibold uppercase tracking-wider text-slate-400">
-                          {item.role === "user" ? "You" : "AEGIS Voice"}
+                          {item.role === "user" ? "You" : "Jarvis Finance Voice"}
                         </span>
                         <span className="font-mono">{item.time}</span>
                       </div>
