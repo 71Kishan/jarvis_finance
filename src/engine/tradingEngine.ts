@@ -100,14 +100,14 @@ export class TradingEngine {
       totalTrades: 0,
       winningTrades: 0,
       losingTrades: 0,
-      winRate: 100,
-      profitFactor: 3.5,
+      winRate: 0,
+      profitFactor: 0,
       totalPnl: 0,
       survivalStreak: 0,
       generationsLearned: 1,
       securedProfitVault: savedVault,
       totalProfitWithdrawn: savedWithdrawals.reduce((sum, r) => sum + (r.withdrawnAmount || 0), 0),
-      autoWithdrawProfitEnabled: true,
+      autoWithdrawProfitEnabled: false,
       withdrawPercentage: 50,
       minProfitThresholdUsd: 5.0,
     };
@@ -378,8 +378,8 @@ export class TradingEngine {
       totalTrades: 0,
       winningTrades: 0,
       losingTrades: 0,
-      winRate: 100,
-      profitFactor: 3.5,
+      winRate: 0,
+      profitFactor: 0,
       totalPnl: 0,
       survivalStreak: 0,
       generationsLearned: this.vitality.generationsLearned + 1,
@@ -1007,20 +1007,9 @@ export class TradingEngine {
         5
       );
 
-      // Autonomous Profit Sweep & Vault Locking: Auto-withdraw a portion of winning trade profits
-      if (this.vitality.autoWithdrawProfitEnabled && pnl >= this.vitality.minProfitThresholdUsd) {
-        const withdrawPct = this.vitality.withdrawPercentage || 50;
-        const withdrawAmount = Number(((pnl * withdrawPct) / 100).toFixed(2));
-        if (withdrawAmount > 0) {
-          this.executeProfitWithdrawal(
-            trade,
-            withdrawAmount,
-            pnl,
-            "AUTO_SWEEP_WIN",
-            `Autonomous Profit Sweep: Transferred $${withdrawAmount.toFixed(2)} (${withdrawPct}%) from winning trade ${trade.id} into Cold Storage Vault. Capital permanently insulated from drawdowns.`
-          ).catch((e) => console.error("Error executing auto-profit withdrawal:", e));
-        }
-      }
+      // Realized profit is left in the paper trading account. Any capital
+      // allocation to a separate paper ledger must be an explicit user action,
+      // not an automatic response to winning trades.
     } else {
       this.vitality.losingTrades++;
       this.vitality.survivalStreak = 0;
@@ -1092,14 +1081,14 @@ export class TradingEngine {
     this.addNotification({
       type: "CIRCUIT_BREAKER",
       title: "EMERGENCY CIRCUIT BREAKER ACTIVATED",
-      message: `Drawdown breached ${this.vitality.circuitBreakerThresholdPercent}%. All operations halted. Portfolio preserved at $${this.vitality.currentEquity.toFixed(2)}.`,
+      message: `Drawdown breached ${this.vitality.circuitBreakerThresholdPercent}%. All paper execution halted. Review the event before resuming.`,
       badgeText: "HALT",
     });
 
     this.logThought(
       "PERISH_ALERT",
       "EMERGENCY CIRCUIT BREAKER ACTIVATED - TRADING HALTED",
-      `CRITICAL SAFETY STOP: Total drawdown reached ${this.vitality.currentDrawdownPercent}% (limit was ${this.vitality.circuitBreakerThresholdPercent}%). Operations immediately halted to guarantee capital preservation ($${this.vitality.currentEquity.toFixed(2)} protected).`,
+      `CRITICAL SAFETY STOP: Total drawdown reached ${this.vitality.currentDrawdownPercent}% (limit was ${this.vitality.circuitBreakerThresholdPercent}%). Paper execution halted for risk review. No outcome is guaranteed.`,
       0,
       -100
     );
