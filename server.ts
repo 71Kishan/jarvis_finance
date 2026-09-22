@@ -213,6 +213,102 @@ function computeQuantitativeMarketIntelligence(asset: string, context: any = {})
   };
 }
 
+// Grounded market/news interpretation. No source data means no generated market claim.
+app.post("/api/bot/market-news", async (req: Request, res: Response) => {
+  const body = req.body || {};
+  const asset = typeof body.asset === "string" ? body.asset : "UNKNOWN";
+  const marketContext =
+    body.marketContext && typeof body.marketContext === "object"
+      ? body.marketContext
+      : {};
+
+  const grounded =
+    Array.isArray(marketContext.news) ||
+    Array.isArray(marketContext.orderBook) ||
+    Number.isFinite(Number(marketContext.price));
+
+  if (!grounded) {
+    return res.status(422).json({
+      success: false,
+      error: "INSUFFICIENT_MARKET_CONTEXT",
+      message: "Provide source-backed news or market observations before requesting an interpretation.",
+      ...computeQuantitativeMarketIntelligence(asset),
+    });
+  }
+
+  const localIntel = computeQuantitativeMarketIntelligence(asset, marketContext);
+
+  try {
+    const ai = getAIClient();
+    if (!ai) return res.json(localIntel);
+
+    const response = await ai.models.generateContent({
+      model: "gemini-3.8-flash",
+      contents:
+        "Analyze only this source-backed market context for " +
+        asset +
+        ". Do not invent news, sentiment, order flow, institutional activity, or price facts. " +
+        "Return JSON with headline, sentimentScore (0-100 or null), sentimentLabel, hazardAlert, botActionPlan. " +
+        "The botActionPlan is research commentary only, never a guarantee or unreviewed trade instruction.\n\n" +
+        JSON.stringify(marketContext, null, 2),
+      config: { responseMimeType: "application/json", temperature: 0.2 },
+    });
+
+    const parsed = JSON.parse(response.text || "{}");
+    return res.json({
+      ...localIntel,
+      ...parsed,
+      dataBacked: true,
+      promotionAllowed: false,
+    });
+  } catch (error: any) {
+    console.warn("Market interpretation unavailable:", error?.message || error);
+    return res.json(localIntel);
+  }
+});
+
+// Verified stock research gateway backed by Financial Datasets.
+// Credentials remain server-side and are never embedded in the browser bundle.
+app.get("/api/research/stock/:ticker", async (req: Request, res: Response) => {
+  const ticker = String(req.params.ticker || "").trim().toUpperCase();
+
+  if (!/^[A-Z][A-Z0-9.\-]{0,9}$/.test(ticker)) {
+    return res.status(400).json({
+      success: false,
+      error: "INVALID_TICKER",
+      message: "Ticker format is invalid.",
+    });
+  }
+
+  try {
+    const [snapshot, metrics, financials] = await Promise.all([
+      financialDatasetsGet("/prices/snapshot", { ticker }),
+      financialDatasetsGet("/financial-metrics/snapshot", { ticker }),
+      financialDatasetsGet("/financials", { ticker }),
+    ]);
+
+    return res.json({
+      success: true,
+      source: "FINANCIAL_DATASETS",
+      fetchedAt: Date.now(),
+      ticker,
+      snapshot,
+      metrics,
+      financials,
+    });
+  } catch (error: any) {
+    const message = String(error?.message || error);
+    const status = message.includes("not configured") ? 503 : 502;
+    return res.status(status).json({
+      success: false,
+      error: status === 503 ? "DATA_SOURCE_NOT_CONFIGURED" : "DATA_SOURCE_ERROR",
+      source: "FINANCIAL_DATASETS",
+      ticker,
+      message,
+    });
+  }
+});
+
 const SYMBOL_MAP: Record<string, string> = {
   "BTC/USD": "BTCUSDT",
   "ETH/USD": "ETHUSDT",
