@@ -35,7 +35,7 @@ export const StrategyVaultModal: React.FC<StrategyVaultModalProps> = ({
   currentStrategy,
   onApplyStrategy,
 }) => {
-  const [activeTab, setActiveTab] = useState<"PROVEN" | "ALL" | "TESTING" | "DISCARDED">("ALL");
+  const [activeTab, setActiveTab] = useState<"VALIDATED" | "ALL" | "TESTING" | "DISCARDED">("ALL");
   const [strategies, setStrategies] = useState<StrategyVaultEntry[]>(() =>
     strategyVaultInstance.getAllStrategies()
   );
@@ -52,7 +52,7 @@ export const StrategyVaultModal: React.FC<StrategyVaultModalProps> = ({
   };
 
   const filteredStrategies = strategies.filter((s) => {
-    if (activeTab === "PROVEN") return s.status === "PROVISIONALLY_VALIDATED";
+    if (activeTab === "VALIDATED") return s.status === "PROVISIONALLY_VALIDATED";
     if (activeTab === "TESTING") return s.status === "TESTING_PAPER";
     if (activeTab === "DISCARDED") return s.status === "DISCARDED_FAILED";
     return true;
@@ -161,7 +161,7 @@ export const StrategyVaultModal: React.FC<StrategyVaultModalProps> = ({
             <button
               id="vault-tab-validated"
               type="button"
-              onClick={() => setActiveTab("PROVEN")}
+              onClick={() => setActiveTab("VALIDATED")}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors ${
                 activeTab === "PROVEN"
                   ? "bg-emerald-600 text-white shadow-sm"
@@ -233,7 +233,7 @@ export const StrategyVaultModal: React.FC<StrategyVaultModalProps> = ({
         <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3">
           {filteredStrategies.map((item) => {
             const isCurrent = item.config.name === currentStrategy.name;
-            const isProven = item.status === "PROVISIONALLY_VALIDATED";
+            const isValidated = item.status === "PROVISIONALLY_VALIDATED";
             const isDiscarded = item.status === "DISCARDED_FAILED";
 
             return (
@@ -260,7 +260,7 @@ export const StrategyVaultModal: React.FC<StrategyVaultModalProps> = ({
                           : "bg-indigo-950 text-indigo-400 border border-indigo-800"
                       }`}
                     >
-                      {isProven ? (
+                      {isValidated ? (
                         <CheckCircle2 className="w-4 h-4" />
                       ) : isDiscarded ? (
                         <ShieldAlert className="w-4 h-4" />
