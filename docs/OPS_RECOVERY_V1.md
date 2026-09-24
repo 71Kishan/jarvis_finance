@@ -2,7 +2,7 @@
 
 ## Backup
 
-Run `./scripts/backup-postgres.sh` from the deployment host. The script uses `pg_dump -Fc`, writes files with restrictive permissions, verifies a non-empty dump, and does not store secrets in Git.
+Run `bash scripts/backup-postgres.sh` from the deployment host. The script uses `pg_dump -Fc`, writes files with restrictive permissions, verifies a non-empty dump, and does not store secrets in Git.
 
 Recommended production practice is an off-host backup schedule plus retention. The repository does not assume a cloud object-storage provider; the deployment environment should supply the durable destination.
 
