@@ -2,7 +2,7 @@ import type { BinanceMarketDataService } from "./binanceMarketData";
 import type { BinanceInstrumentCatalog } from "./binanceInstrumentCatalog";
 import { valueSpotBalances, type TrustedAssetMark, type ValuedPortfolio } from "../platform/portfolioValuation";
 import type { WalletBalance } from "../platform/types";
-import { multiplyDecimals, normalizeDecimal } from "../platform/decimal";
+import { compareDecimals, multiplyDecimals, normalizeDecimal } from "../platform/decimal";
 
 export interface ValuedBalanceRow {
   accountId: string;
@@ -48,7 +48,7 @@ export class BinanceSpotPortfolioService {
 
     for (const balance of balances) {
       const asset = balance.asset.toUpperCase();
-      if (asset === base || balance.total === "0") continue;
+      if (asset === base || compareDecimals(balance.total, "0") === 0) continue;
 
       const instrument = this.catalog
         .list({ quoteAsset: base, tradableOnly: true, limit: 5000 })
