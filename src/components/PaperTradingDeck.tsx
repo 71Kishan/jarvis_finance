@@ -87,15 +87,17 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
   const availableCash = vitality.cash;
   const positionSizeUsd = amountUsd;
   const hasTrustedPrice = Number.isFinite(currentPrice) && Number(currentPrice) > 0;
-  const calculatedStopPrice =
-    orderType === "LONG"
+  const calculatedStopPrice = hasTrustedPrice
+    ? orderType === "LONG"
       ? Number(currentPrice) * (1 - stopLossPercent / 100)
-      : Number(currentPrice) * (1 + stopLossPercent / 100);
+      : Number(currentPrice) * (1 + stopLossPercent / 100)
+    : null;
 
-  const calculatedTargetPrice =
-    orderType === "LONG"
+  const calculatedTargetPrice = hasTrustedPrice
+    ? orderType === "LONG"
       ? Number(currentPrice) * (1 + takeProfitPercent / 100)
-      : Number(currentPrice) * (1 - takeProfitPercent / 100);
+      : Number(currentPrice) * (1 - takeProfitPercent / 100)
+    : null;
 
   const riskRewardRatio = (takeProfitPercent / (stopLossPercent || 0.1)).toFixed(1);
 
