@@ -271,17 +271,6 @@ export class StrategyOptimizer {
   }
 
   public static runOptimizationStudy(baseStrategy: StrategyConfig, candles: Candle[]) {
-    if (candles.length < 360) {
-      return {
-        bestStrategy: baseStrategy,
-        bestResult: this.backtest(baseStrategy, candles),
-        candidatesTested: [],
-        optimizationInsights: [
-          "Not enough history for a meaningful 60/20/20 train-validation-test study. Supply substantially more bars before optimization.",
-        ],
-      };
-    }
-
     const candidates: StrategyConfig[] = [
       { ...baseStrategy, id: baseStrategy.id + "-trend", version: baseStrategy.version + 1, name: baseStrategy.name + " / Trend", minConfidence: 72 },
       { ...baseStrategy, id: baseStrategy.id + "-strict", version: baseStrategy.version + 1, name: baseStrategy.name + " / Strict", minConfidence: 82, maxRiskPerTrade: 0.5 },
@@ -289,50 +278,216 @@ export class StrategyOptimizer {
       { ...baseStrategy, id: baseStrategy.id + "-baseline", name: baseStrategy.name + " / Baseline" },
     ];
 
-    const trainEnd = Math.floor(candles.length * 0.6);
-    const validationEnd = Math.floor(candles.length * 0.8);
+    // One split is easy to over-interpret. Use rolling train/validation/test
+    // folds once enough history exists. Each reported test window begins with
+    // a 60-bar warm-up overlap, but performance starts only after that overlap,
+    // so consecutive OOS windows do not reuse scored bars.
+    const trainBars = 360;
+    const validationBars = 120;
+    const testBars = 120;
+    const warmup = 60;
+    const minimumForWalkForward = trainBars + validationBars + testBars;
 
-    const rows = candidates.map((strategy) => {
-      const train = this.backtest(strategy, candles.slice(0, trainEnd));
-      const validation = this.backtest(strategy, candles.slice(Math.max(0, trainEnd - 60), validationEnd));
-      const test = this.backtest(strategy, candles.slice(Math.max(0, validationEnd - 60)));
+    if (candles.length < minimumForWalkForward) {
+      return {
+        bestStrategy: baseStrategy,
+        bestResult: this.backtest(baseStrategy, candles),
+        candidatesTested: [],
+        walkForwardFolds: [],
+        walkForwardReliable: false,
+        optimizationInsights: [
+          `Not enough history for rolling walk-forward validation. At least ${minimumForWalkForward} bars are required for one 360/120/120 fold; supply more history before optimization.`,
+        ],
+      };
+    }
 
-      // Select only from training/validation evidence. The test set is held out until
-      // after the candidate has been selected so it remains a genuinely out-of-sample report.
-      const validationScore =
-        (validation.totalTrades >= 20 ? 2 : validation.totalTrades >= 10 ? 1 : 0) +
-        (validation.totalPnl > 0 ? 2 : 0) +
-        (validation.profitFactor >= 1.2 ? 1 : 0) +
-        (validation.sharpeRatio > 0 ? 1 : 0) +
-        (validation.maxDrawdown < 10 ? 1 : 0) +
-        (train.totalPnl > 0 ? 1 : 0);
+    const folds: Array<{
+      start: number;
+      trainEnd: number;
+      validationEnd: number;
+      testEnd: number;
+      selected: StrategyConfig;
+      selectionScore: number;
+      test: BacktestResult;
+    }> = [];
 
-      return { strategy, result: test, selectionScore: validationScore, train, validation };
-    }).sort((a, b) =>
-      b.selectionScore - a.selectionScore ||
-      b.validation.sharpeRatio - a.validation.sharpeRatio ||
-      b.validation.totalPnl - a.validation.totalPnl ||
-      b.train.sharpeRatio - a.train.sharpeRatio
+    const actualTestReturns: number[] = [];
+    const selectionCounts = new Map<string, number>();
+
+    for (let start = 0; start + minimumForWalkForward <= candles.length; start += testBars) {
+      const trainEnd = start + trainBars;
+      const validationEnd = trainEnd + validationBars;
+      const testEnd = validationEnd + testBars;
+
+      const rows = candidates.map((strategy) => {
+        const train = this.backtest(strategy, candles.slice(start, trainEnd));
+        const validation = this.backtest(
+          strategy,
+          candles.slice(Math.max(start, trainEnd - warmup), validationEnd),
+        );
+        const test = this.backtest(
+          strategy,
+          candles.slice(Math.max(start, validationEnd - warmup), testEnd),
+        );
+
+        // Candidate selection is restricted to train + validation. The OOS test
+        // result is never used to choose the fold's candidate.
+        const selectionScore =
+          (validation.totalTrades >= 20 ? 2 : validation.totalTrades >= 10 ? 1 : 0) +
+          (validation.totalPnl > 0 ? 2 : 0) +
+          (validation.profitFactor >= 1.2 ? 1 : 0) +
+          (validation.sharpeRatio > 0 ? 1 : 0) +
+          (validation.maxDrawdown < 10 ? 1 : 0) +
+          (train.totalPnl > 0 ? 1 : 0);
+
+        return { strategy, train, validation, test, selectionScore };
+      });
+
+      rows.sort((a, b) =>
+        b.selectionScore - a.selectionScore ||
+        b.validation.sharpeRatio - a.validation.sharpeRatio ||
+        b.validation.totalPnl - a.validation.totalPnl ||
+        b.train.sharpeRatio - a.train.sharpeRatio
+      );
+
+      const selected = rows[0];
+      folds.push({
+        start,
+        trainEnd,
+        validationEnd,
+        testEnd,
+        selected: selected.strategy,
+        selectionScore: selected.selectionScore,
+        test: selected.test,
+      });
+
+      selectionCounts.set(
+        selected.strategy.id,
+        (selectionCounts.get(selected.strategy.id) || 0) + 1,
+      );
+
+      const normalizedOosReturn = selected.test.totalPnl / 10_000;
+      actualTestReturns.push(normalizedOosReturn);
+    }
+
+    const mostSelected = [...selectionCounts.entries()]
+      .sort((a, b) => b[1] - a[1])[0]?.[0];
+    const selectedStrategy =
+      candidates.find((candidate) => candidate.id === mostSelected) || baseStrategy;
+
+    const selectedFolds = folds.filter((fold) => fold.selected.id === selectedStrategy.id);
+    const oosTotalTrades = selectedFolds.reduce((sum, fold) => sum + fold.test.totalTrades, 0);
+    const oosPositiveFolds = selectedFolds.filter((fold) => fold.test.totalPnl > 0).length;
+    const oosMeanReturn = selectedFolds.length
+      ? selectedFolds.reduce((sum, fold) => sum + fold.test.totalPnl / 10_000, 0) / selectedFolds.length
+      : 0;
+    const sortedOos = selectedFolds.map((fold) => fold.test.totalPnl / 10_000).sort((a, b) => a - b);
+    const oosMedianReturn = sortedOos.length
+      ? sortedOos[Math.floor(sortedOos.length / 2)]
+      : 0;
+    const worstOosDrawdown = selectedFolds.length
+      ? Math.max(...selectedFolds.map((fold) => fold.test.maxDrawdown))
+      : 0;
+
+    const aggregateTestTrades = selectedFolds.reduce((sum, fold) => sum + fold.test.totalTrades, 0);
+    const aggregateWins = selectedFolds.reduce(
+      (sum, fold) => sum + Math.round(fold.test.totalTrades * fold.test.winRate / 100),
+      0,
     );
+    const aggregatePnlPercent = oosMeanReturn * 100;
 
-    const selected = rows[0];
+    const bestResult: BacktestResult = {
+      strategyName: selectedStrategy.name,
+      totalTrades: aggregateTestTrades,
+      winRate: aggregateTestTrades ? Number((aggregateWins / aggregateTestTrades * 100).toFixed(1)) : 0,
+      totalPnl: Number((aggregatePnlPercent / 100 * 10_000).toFixed(2)),
+      profitFactor: 0,
+      maxDrawdown: Number(worstOosDrawdown.toFixed(2)),
+      sharpeRatio: 0,
+      sortinoRatio: 0,
+      sampleDays: 0,
+      annualizationReliable: false,
+      expectancyPerTrade: aggregateTestTrades ? Number(((aggregatePnlPercent / 100 * 10_000) / aggregateTestTrades).toFixed(4)) : 0,
+      avgWin: 0,
+      avgLoss: 0,
+      totalFees: Number(selectedFolds.reduce((sum, fold) => sum + fold.test.totalFees, 0).toFixed(2)),
+      totalSlippage: Number(selectedFolds.reduce((sum, fold) => sum + fold.test.totalSlippage, 0).toFixed(2)),
+      verdict: aggregateTestTrades >= 30 && oosPositiveFolds / Math.max(1, selectedFolds.length) >= 0.5
+        ? "SURVIVED_AND_PROFITABLE"
+        : worstOosDrawdown >= 10
+          ? "UNSAFE_HIGH_DRAWDOWN"
+          : "FAILED",
+    };
+
+    const candidatesTested = candidates.map((strategy) => {
+      const strategyFolds = folds.filter((fold) => fold.selected.id === strategy.id);
+      const tests = strategyFolds.map((fold) => fold.test);
+      const pnlPercent = tests.length
+        ? tests.reduce((sum, result) => sum + result.totalPnl / 10_000, 0) / tests.length
+        : 0;
+      return {
+        strategy,
+        result: strategyFolds.length
+          ? {
+              ...tests[tests.length - 1],
+              totalPnl: Number((pnlPercent * 10_000).toFixed(2)),
+              sampleDays: 0,
+              annualizationReliable: false,
+              annualizedReturn: undefined,
+              volatilityAnnualized: undefined,
+              sharpeRatio: 0,
+              sortinoRatio: 0,
+            }
+          : this.backtest(strategy, candles.slice(-testBars - warmup)),
+        selectedFolds: strategyFolds.length,
+      };
+    });
 
     return {
-      bestStrategy: selected.strategy,
-      bestResult: selected.result,
-      candidatesTested: rows.map((row) => ({ strategy: row.strategy, result: row.result })),
+      bestStrategy: selectedStrategy,
+      bestResult,
+      candidatesTested,
+      walkForwardFolds: folds.map((fold) => ({
+        trainStartBar: fold.start,
+        trainEndBar: fold.trainEnd,
+        validationEndBar: fold.validationEnd,
+        testEndBar: fold.testEnd,
+        selectedStrategyId: fold.selected.id,
+        selectionScore: fold.selectionScore,
+        oos: {
+          totalTrades: fold.test.totalTrades,
+          returnPercent: Number((fold.test.totalPnl / 10_000 * 100).toFixed(3)),
+          maxDrawdownPercent: fold.test.maxDrawdown,
+          winRate: fold.test.winRate,
+        },
+      })),
+      walkForwardReliable:
+        folds.length >= 3 &&
+        selectedFolds.length >= 3 &&
+        selectedFolds.every((fold) => fold.test.sampleDays >= 0),
+      walkForwardSummary: {
+        folds: folds.length,
+        selectedFolds: selectedFolds.length,
+        selectedFoldHitRatePercent: selectedFolds.length
+          ? Number((oosPositiveFolds / selectedFolds.length * 100).toFixed(1))
+          : 0,
+        meanOosReturnPercent: Number((oosMeanReturn * 100).toFixed(3)),
+        medianOosReturnPercent: Number((oosMedianReturn * 100).toFixed(3)),
+        worstOosDrawdownPercent: Number(worstOosDrawdown.toFixed(2)),
+        selectionCounts: Object.fromEntries(selectionCounts),
+      },
       optimizationInsights: [
-        "Walk-forward split: 60% train, 20% validation, 20% held-out test, with warm-up overlap for indicator calculation.",
-        "Candidate selection uses training/validation evidence only; the held-out test set is reported after selection.",
-        "Entry signals are generated from a completed bar and filled at the next bar open; the final bar is used only for exit/equity accounting.",
-        "Test results include modeled entry and exit fees plus adverse slippage.",
-        "Ambiguous OHLC bars resolve stop-first rather than assuming a favorable intrabar path.",
-        "A small sample is not production validation; forward paper and shadow evidence remain required.",
-        "Annualized return, annualized volatility, Sharpe, and Sortino are withheld for samples shorter than 30 calendar days to avoid overstating short-sample performance.",
-        "The selected candidate is a research hypothesis, not an automatic deployment decision."
+        "Research now uses rolling 360-bar train, 120-bar validation and 120-bar held-out test windows when enough history exists.",
+        "The 60-bar overlap is warm-up only; scored OOS bars do not overlap between consecutive test windows.",
+        "Candidate selection uses train + validation evidence only. Held-out test results are never used to choose a candidate within a fold.",
+        "Each test fold includes modeled entry/exit fees, adverse slippage, next-bar entries, conservative stop-first ambiguity handling, and final-bar accounting.",
+        "Fold-level return statistics are normalized against a common $10,000 research capital so they are comparable; they are not a promise of realized capital growth.",
+        "A strategy appearing in multiple folds is stronger evidence than a single split, but rolling backtests remain historical evidence and can still fail in future regimes.",
+        "Walk-forward evidence does not authorize live-money execution. Forward paper/shadow validation remains required.",
       ],
     };
   }
+
 
   private static estimateBarsPerYear(candles: Candle[]): number {
     if (candles.length < 3) return 252;
