@@ -33,6 +33,7 @@ export interface PortfolioRiskSnapshot {
   openOrderExposure: string;
   complete: boolean;
   unpricedAssets: string[];
+  unpricedOpenOrders: number;
   openOrders: number;
   asOf: number;
 }
@@ -42,6 +43,7 @@ export interface PortfolioRiskRequest {
   balances: WalletBalance[];
   marks: PortfolioRiskMark[];
   openOrders?: PortfolioRiskOrder[];
+  unpricedOpenOrders?: number;
   candidate?: {
     side: OrderSide;
     type: OrderType;
@@ -154,6 +156,7 @@ export function evaluateSpotPortfolioRisk(request: PortfolioRiskRequest): Portfo
   const base = request.baseCurrency.toUpperCase();
   const { cash, holdings, assetValues, unpricedAssets } = valueBalances(request.balances, base, request.marks);
   const openOrders = request.openOrders || [];
+  const unpricedOpenOrders = Math.max(0, Math.floor(request.unpricedOpenOrders || 0));
   const openOrderExposure = orderExposure(openOrders);
   const equity = addDecimals(cash, holdings);
   const snapshot: PortfolioRiskSnapshot = {
@@ -163,8 +166,9 @@ export function evaluateSpotPortfolioRisk(request: PortfolioRiskRequest): Portfo
     holdingsValue: holdings,
     grossExposure: holdings,
     openOrderExposure,
-    complete: unpricedAssets.length === 0,
+    complete: unpricedAssets.length === 0 && unpricedOpenOrders === 0,
     unpricedAssets,
+    unpricedOpenOrders,
     openOrders: openOrders.length,
     asOf: request.asOf ?? Date.now(),
   };
@@ -205,6 +209,26 @@ export function evaluateSpotPortfolioRisk(request: PortfolioRiskRequest): Portfo
     reasons.push(
       "Portfolio valuation is incomplete because non-zero assets have no trusted base-currency marks: " +
       snapshot.unpricedAssets.join(", ") + ".",
+    );
+  }
+  if (snapshot.unpricedOpenOrders > 0) {
+    reasons.push(
+      `Portfolio risk is incomplete because ${snapshot.unpricedOpenOrders} active order(s) could not be valued in the base currency.`,
+    );
+  }
+
+  for (const [asset, currentValue] of assetValues.entries()) {
+    if (asset === base || compareDecimals(currentValue, "0") === 0) continue;
+    if (exceedsPercent(currentValue, equity, policy.maxSingleAssetExposurePercent) && request.candidate) {
+      reasons.push(
+        `Existing ${asset} exposure already exceeds ${policy.maxSingleAssetExposurePercent}% of equity; no additional order is allowed until exposure is reduced.`,
+      );
+    }
+  }
+
+  if (request.candidate && request.candidate.quoteAsset.toUpperCase() !== base) {
+    reasons.push(
+      `Candidate quote asset ${request.candidate.quoteAsset.toUpperCase()} is not the configured portfolio base currency ${base}; cross-currency risk is fail-closed in this phase.`,
     );
   }
 
