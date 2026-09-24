@@ -11,6 +11,7 @@ import { BinanceMarketDataService } from "./src/server/binanceMarketData";
 import { BinanceInstrumentCatalog } from "./src/server/binanceInstrumentCatalog";
 import { AutonomousPaperRuntime } from "./src/server/paperRuntime";
 import { AutonomousShadowRuntime } from "./src/server/shadowRuntime";
+import { BinanceSpotPortfolioService } from "./src/server/binancePortfolioService";
 import { PlatformDatabase } from "./src/server/platformDatabase";
 import { PlatformRepository } from "./src/platform/platformRepository";
 import { BinanceSpotAccountAdapter } from "./src/platform/binanceSpotAccountAdapter";
@@ -459,7 +460,13 @@ const binanceInstrumentCatalog = new BinanceInstrumentCatalog(
   platformDatabase.isConfigured()
     ? { persist: (instruments) => platformRepository.syncInstruments(instruments) }
     : undefined,
-);const binanceSpotUserDataStream = new BinanceSpotUserDataStream({
+);
+const binanceSpotPortfolioService = new BinanceSpotPortfolioService(
+  binanceMarketData,
+  binanceInstrumentCatalog,
+);
+
+const binanceSpotUserDataStream = new BinanceSpotUserDataStream({
   accountId: binanceSpotTestnetAccount.getAccountId(),
   onOrderUpdate: async (order) => {
     const operatorEmail = process.env.JARVIS_ADMIN_EMAIL;
@@ -672,6 +679,41 @@ app.get("/api/account/overview", requireSession, async (req: AuthenticatedReques
     return res.status(503).json({
       success: false,
       error: error?.message || "Connected account data is unavailable.",
+    });
+  }
+});
+
+app.get("/api/account/portfolio", requireSession, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const overview = await platformRepository.getAccountOverview(req.jarvisUser!.id);
+    const baseCurrency = (process.env.JARVIS_PORTFOLIO_BASE_CURRENCY || "USDT").toUpperCase();
+    const portfolio = binanceSpotPortfolioService.valueBalances(
+      overview.balances,
+      baseCurrency,
+    );
+
+    await platformRepository.recordAuditEvent({
+      userId: req.jarvisUser!.id,
+      eventType: "PORTFOLIO_VALUATION",
+      payload: {
+        baseCurrency: portfolio.valuation.baseCurrency,
+        complete: portfolio.valuation.complete,
+        unpricedAssets: portfolio.valuation.unpricedAssets,
+      },
+    }).catch(() => undefined);
+
+    return res.json({
+      success: true,
+      baseCurrency,
+      valuation: portfolio.valuation,
+      balances: portfolio.balances,
+      openOrders: overview.openOrders,
+      fills: overview.fills,
+    });
+  } catch (error: any) {
+    return res.status(503).json({
+      success: false,
+      error: error?.message || "Portfolio valuation unavailable.",
     });
   }
 });
