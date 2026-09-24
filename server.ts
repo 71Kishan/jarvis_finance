@@ -2321,6 +2321,7 @@ async function startServer() {
     binanceInstrumentCatalog.stop();
     binanceMarketData.stop();
     autonomousPaperRuntime.stop("Server shutdown.");
+    await autonomousShadowRuntime.stop("Server shutdown.");
     await new Promise<void>((resolve) => httpServer.close(() => resolve()));
   };
 
