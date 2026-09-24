@@ -1,9 +1,13 @@
 # Jarvis Finance
 
-Jarvis Finance is a research and paper-trading terminal for evidence-driven market analysis.
+Jarvis Finance is being built as a real multi-market financial platform: one terminal for market discovery, charting, connected broker/exchange accounts, portfolio/wallet visibility, research, risk controls and eventually automated execution.
+
+The current repository remains in the safe research/paper stage while the production platform core is assembled. Real-money execution is not enabled.
 
 ## Current scope
 
+- Provider-neutral platform core: canonical instruments, accounts, balances, positions, orders, fills and ledger models.
+- Dynamic Binance Spot instrument catalog with provider trading-rule metadata and server-side search.
 - Trusted market-data ingestion with explicit source and freshness.
 - Deterministic technical signal engine.
 - Risk-gated paper execution.
@@ -93,4 +97,4 @@ A green backtest is evidence for research, not permission to risk capital.
 
 ## Before real-money work
 
-The project still requires durable cross-device state, production authentication, centralized secrets, broker sandbox testing, order idempotency/reconciliation, multiple non-overlapping out-of-sample periods, stronger execution/short-cost modeling, monitoring, incident recovery, and an independently reviewable live-capital gate.
+The platform core is now defined in `db/migrations/0001_platform_core.sql` and `docs/PLATFORM_CORE_V1.md`. The project still requires production authentication, database migration/runtime wiring, centralized secrets, broker sandbox testing, order idempotency/reconciliation, multiple non-overlapping out-of-sample periods, stronger execution/short-cost modeling, monitoring, incident recovery, and an independently reviewable live-capital gate.
