@@ -48,8 +48,14 @@ export class PlatformDatabase {
     this.migrationsDir = path.resolve(
       options.migrationsDir ?? process.env.JARVIS_DB_MIGRATIONS_PATH ?? path.join(process.cwd(), "db", "migrations"),
     );
-    this.maxConnections = Math.min(20, Math.max(1, options.maxConnections ?? Number(process.env.JARVIS_DB_MAX_CONNECTIONS) || 8));
-    this.connectionTimeoutMs = Math.max(1000, options.connectionTimeoutMs ?? Number(process.env.JARVIS_DB_CONNECTION_TIMEOUT_MS) || 5000);
+    this.maxConnections = Math.min(
+      20,
+      Math.max(1, options.maxConnections ?? (Number(process.env.JARVIS_DB_MAX_CONNECTIONS) || 8)),
+    );
+    this.connectionTimeoutMs = Math.max(
+      1000,
+      options.connectionTimeoutMs ?? (Number(process.env.JARVIS_DB_CONNECTION_TIMEOUT_MS) || 5000),
+    );
     this.autoMigrate = options.autoMigrate ?? process.env.JARVIS_DB_AUTO_MIGRATE !== "false";
     this.required = options.required ?? process.env.JARVIS_DB_REQUIRED === "true";
   }
