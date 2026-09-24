@@ -41,7 +41,7 @@ import {
 } from "./types/trading";
 
 export default function App() {
-  const [currentAsset, setCurrentAsset] = useState<AssetSymbol>("BTC/USD");
+  const [currentAsset, setCurrentAsset] = useState<string>("BTC/USD");
   const [marketSource, setMarketSource] = useState<MarketDataSource>("LIVE_MARKET_DATA");
   const [isAutoTrading, setIsAutoTrading] = useState<boolean>(false);
   const [simulationSpeed, setSimulationSpeed] = useState<number>(2); // 2x default for simulator
@@ -256,7 +256,8 @@ export default function App() {
   }, [marketSource, currentAsset, isAutoTrading, botState, syncStateFromEngine]);
 
   // Handle Asset Switch
-  const handleSelectAsset = (asset: AssetSymbol) => {
+  const handleSelectAsset = (asset: string) => {
+    if (!asset) return;
     if (activeTrade) {
       tradingEngineRef.current?.addNotification({
         type: "RISK_ALERT",
@@ -267,16 +268,32 @@ export default function App() {
       syncStateFromEngine();
       return;
     }
+
     setCurrentAsset(asset);
-    if (simulatorRef.current && tradingEngineRef.current) {
-      simulatorRef.current.setAsset(asset, 80);
-      const strat = tradingEngineRef.current.getStrategy();
-      tradingEngineRef.current.updateStrategy({
-        ...strat,
-        asset,
-      });
-      syncStateFromEngine();
+    const strat = tradingEngineRef.current?.getStrategy();
+    if (strat && tradingEngineRef.current) {
+      tradingEngineRef.current.updateStrategy({ ...strat, asset });
     }
+
+    // The synthetic simulator only knows its explicit demo universe. Any dynamically
+    // discovered market is immediately treated as live-market-data-only.
+    if (simulatorRef.current) {
+      const knownSynthetic = Object.prototype.hasOwnProperty.call(
+        SUPPORTED_ASSETS,
+        asset as AssetSymbol,
+      );
+      if (knownSynthetic) {
+        simulatorRef.current.setAsset(asset as AssetSymbol, 80);
+      } else {
+        setMarketSource("LIVE_MARKET_DATA");
+        setCandles([]);
+      }
+    }
+
+    if (!Object.prototype.hasOwnProperty.call(SUPPORTED_ASSETS, asset)) {
+      setIsAutoTrading(false);
+    }
+    syncStateFromEngine();
   };
 
   // Toggle Auto Trading
@@ -357,7 +374,7 @@ export default function App() {
   };
 
   // Select an asset for review; selecting an asset never places an order automatically.
-  const handleSelectAndTradeAsset = (asset: AssetSymbol, _executeTrade?: boolean) => {
+  const handleSelectAndTradeAsset = (asset: string, _executeTrade?: boolean) => {
     handleSelectAsset(asset);
   };
 
