@@ -148,6 +148,22 @@ export interface ShadowEvidenceSummary {
   totalFees: string;
 }
 
+export interface StrategyDeploymentRecord {
+  id: string;
+  userId: string;
+  strategyId: string;
+  strategyVersion: number;
+  environment: "SHADOW";
+  status: "ACTIVE" | "PAUSED" | "REVOKED";
+  validationRunId: string;
+  strategy: Record<string, unknown>;
+  activatedAt: number;
+  deactivatedAt?: number;
+  reason?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface StrategyValidationRecord {
   id: string;
   userId: string;
@@ -784,6 +800,165 @@ export class PlatformRepository implements InstrumentPersistence {
       delistingTime: row.delisting_time ? new Date(row.delisting_time).getTime() : undefined,
       session: row.session ?? undefined,
       updatedAt: row.updated_at ? new Date(row.updated_at).getTime() : Date.now(),
+    };
+  }
+
+  public async deployShadowStrategy(input: {
+    userId: string;
+    strategyId: string;
+    validationRunId: string;
+    strategyVersion: number;
+    strategy: Record<string, unknown>;
+    reason?: string;
+  }): Promise<StrategyDeploymentRecord> {
+    if (!this.database.isReady()) {
+      throw new Error("PostgreSQL is required for strategy deployment.");
+    }
+
+    return this.database.transaction(async (client) => {
+      const validation = await client.query<{
+        id: string;
+        status: "INSUFFICIENT_EVIDENCE" | "FAILED" | "PROVISIONALLY_VALIDATED";
+        source: "CLIENT_SUBMITTED" | "SERVER_RECOMPUTED";
+        strategy_id: string;
+        strategy_version: number;
+        strategy: Record<string, unknown> | null;
+      }>(
+        [
+          "SELECT id, status, source, strategy_id, strategy_version, strategy",
+          "FROM strategy_validation_runs",
+          "WHERE id = $1 AND user_id = $2",
+          "LIMIT 1",
+        ].join("
+"),
+        [input.validationRunId, input.userId],
+      );
+
+      const run = validation.rows[0];
+      if (!run) throw new Error("Strategy validation run was not found.");
+      if (run.status !== "PROVISIONALLY_VALIDATED") {
+        throw new Error("Only a provisionally validated strategy may be deployed to shadow.");
+      }
+      if (run.source !== "SERVER_RECOMPUTED") {
+        throw new Error("Only server-recomputed validation evidence may be deployed to shadow.");
+      }
+      if (run.strategy_id !== input.strategyId || Number(run.strategy_version) !== input.strategyVersion) {
+        throw new Error("Deployment strategy does not match the validated strategy version.");
+      }
+      if (!run.strategy) throw new Error("Validated strategy configuration is missing.");
+
+      await client.query(
+        [
+          "UPDATE strategy_deployments",
+          "SET status = 'PAUSED', deactivated_at = now(), updated_at = now(), reason = $3",
+          "WHERE user_id = $1 AND environment = 'SHADOW' AND status = 'ACTIVE'",
+        ].join("
+"),
+        [input.userId, input.strategyId, "Replaced by explicit shadow strategy deployment."],
+      );
+
+      const result = await client.query<{
+        id: string;
+        user_id: string;
+        strategy_id: string;
+        strategy_version: number;
+        environment: "SHADOW";
+        status: "ACTIVE" | "PAUSED" | "REVOKED";
+        validation_run_id: string;
+        strategy: Record<string, unknown>;
+        activated_at: Date;
+        deactivated_at: Date | null;
+        reason: string | null;
+        created_at: Date;
+        updated_at: Date;
+      }>(
+        [
+          "INSERT INTO strategy_deployments(",
+          "  user_id, strategy_id, strategy_version, environment, status, validation_run_id, strategy, reason",
+          ") VALUES ($1,$2,$3,'SHADOW','ACTIVE',$4,$5::jsonb,$6)",
+          "RETURNING id, user_id, strategy_id, strategy_version, environment, status,",
+          "          validation_run_id, strategy, activated_at, deactivated_at, reason, created_at, updated_at",
+        ].join("
+"),
+        [
+          input.userId,
+          input.strategyId,
+          input.strategyVersion,
+          input.validationRunId,
+          JSON.stringify(run.strategy),
+          input.reason || null,
+        ],
+      );
+
+      const row = result.rows[0];
+      if (!row) throw new Error("Shadow strategy deployment could not be created.");
+
+      return {
+        id: row.id,
+        userId: row.user_id,
+        strategyId: row.strategy_id,
+        strategyVersion: row.strategy_version,
+        environment: row.environment,
+        status: row.status,
+        validationRunId: row.validation_run_id,
+        strategy: row.strategy,
+        activatedAt: row.activated_at.getTime(),
+        deactivatedAt: row.deactivated_at?.getTime(),
+        reason: row.reason ?? undefined,
+        createdAt: row.created_at.getTime(),
+        updatedAt: row.updated_at.getTime(),
+      };
+    });
+  }
+
+  public async getActiveShadowStrategyDeployment(userId: string): Promise<StrategyDeploymentRecord | null> {
+    if (!this.database.isReady()) {
+      throw new Error("PostgreSQL is required for strategy deployment reads.");
+    }
+
+    const result = await this.database.query<{
+      id: string;
+      user_id: string;
+      strategy_id: string;
+      strategy_version: number;
+      environment: "SHADOW";
+      status: "ACTIVE" | "PAUSED" | "REVOKED";
+      validation_run_id: string;
+      strategy: Record<string, unknown>;
+      activated_at: Date;
+      deactivated_at: Date | null;
+      reason: string | null;
+      created_at: Date;
+      updated_at: Date;
+    }>(
+      [
+        "SELECT id, user_id, strategy_id, strategy_version, environment, status,",
+        "       validation_run_id, strategy, activated_at, deactivated_at, reason, created_at, updated_at",
+        "FROM strategy_deployments",
+        "WHERE user_id = $1 AND environment = 'SHADOW' AND status = 'ACTIVE'",
+        "LIMIT 1",
+      ].join("
+"),
+      [userId],
+    );
+
+    const row = result.rows[0];
+    if (!row) return null;
+
+    return {
+      id: row.id,
+      userId: row.user_id,
+      strategyId: row.strategy_id,
+      strategyVersion: row.strategy_version,
+      environment: row.environment,
+      status: row.status,
+      validationRunId: row.validation_run_id,
+      strategy: row.strategy,
+      activatedAt: row.activated_at.getTime(),
+      deactivatedAt: row.deactivated_at?.getTime(),
+      reason: row.reason ?? undefined,
+      createdAt: row.created_at.getTime(),
+      updatedAt: row.updated_at.getTime(),
     };
   }
 
