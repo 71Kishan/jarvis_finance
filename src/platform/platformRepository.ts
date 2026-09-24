@@ -1,6 +1,7 @@
 import type { PoolClient } from "pg";
 import type { AccountConnection, BrokerOrder, Fill, Instrument, OrderIntent, OrderStatus, TradingPermission } from "./types";
 import { PlatformDatabase } from "../server/platformDatabase";
+import { canTransitionOrderStatus } from "./orderStateMachine";
 
 interface AccountConnectionRow {
   id: string;
@@ -788,15 +789,72 @@ export class PlatformRepository implements InstrumentPersistence {
     });
   }
 
+  public async applyBinanceBalanceEvent(
+    userId: string,
+    externalAccountId: string,
+    balances: Array<{ asset: string; free: string; locked: string; total: string; updatedAt: number }>,
+  ): Promise<void> {
+    if (!balances.length || !this.database.isReady()) return;
+
+    await this.database.transaction(async (client) => {
+      const account = await client.query<{ id: string }>(
+        [
+          "SELECT id FROM account_connections",
+          "WHERE user_id = $1 AND provider = 'BINANCE_SPOT_TESTNET' AND external_account_id = $2",
+          "LIMIT 1 FOR UPDATE",
+        ].join("\n"),
+        [userId, externalAccountId],
+      );
+      const accountId = account.rows[0]?.id;
+      if (!accountId) return;
+
+      for (const balance of balances) {
+        await client.query(
+          [
+            "INSERT INTO balances(account_id, asset, free, locked, provider_updated_at, updated_at)",
+            "VALUES ($1, $2, $3::numeric, $4::numeric, to_timestamp($5 / 1000.0), now())",
+            "ON CONFLICT (account_id, asset)",
+            "DO UPDATE SET",
+            "  free = EXCLUDED.free, locked = EXCLUDED.locked,",
+            "  provider_updated_at = EXCLUDED.provider_updated_at, updated_at = now()",
+            "WHERE balances.provider_updated_at IS NULL",
+            "   OR EXCLUDED.provider_updated_at >= balances.provider_updated_at",
+          ].join("\n"),
+          [accountId, balance.asset, balance.free, balance.locked, balance.updatedAt],
+        );
+      }
+    });
+  }
+
   public async updateOrderFromProvider(userId: string, clientOrderId: string, brokerOrder: BrokerOrder): Promise<PersistedOrder> {
+    const current = await this.getUserOrder(userId, clientOrderId);
+    if (!current) {
+      throw new Error("Persisted sandbox order was not found for the authenticated user.");
+    }
+
+    const providerEventAt = brokerOrder.lastProviderEventAt ?? brokerOrder.updatedAt;
+    const currentProviderEventAt = current.lastProviderEventAt ?? 0;
+    const sameEvent = providerEventAt > 0 && currentProviderEventAt > 0 && providerEventAt === currentProviderEventAt;
+    const newer = currentProviderEventAt === 0 || providerEventAt >= currentProviderEventAt;
+    const transitionAllowed = canTransitionOrderStatus(
+      current.status as import("./types").OrderStatus,
+      brokerOrder.status,
+    );
+
+    if (!transitionAllowed || (!sameEvent && !newer)) {
+      await this.persistFills(userId, brokerOrder.fills || []);
+      return current;
+    }
+
     const result = await this.database.query<any>(
       [
         "UPDATE orders o SET",
-        "  external_order_id = $2, status = $3, filled_quantity = $4::numeric,",
+        "  external_order_id = COALESCE($2, o.external_order_id), status = $3, filled_quantity = $4::numeric,",
         "  average_fill_price = $5::numeric, submitted_at = CASE WHEN $6::bigint > 0 THEN to_timestamp($6 / 1000.0) ELSE o.submitted_at END,",
         "  updated_at = to_timestamp($7 / 1000.0), last_provider_event_at = to_timestamp($8 / 1000.0)",
         "FROM account_connections a",
         "WHERE o.client_order_id = $1 AND o.account_id = a.id AND a.user_id = $9",
+        "  AND (o.last_provider_event_at IS NULL OR to_timestamp($8 / 1000.0) >= o.last_provider_event_at)",
         "RETURNING o.client_order_id, o.account_id, o.instrument_id, o.external_order_id, o.side, o.order_type,",
         "          o.quantity::text, o.limit_price::text, o.stop_price::text, o.time_in_force, o.reduce_only,",
         "          o.strategy_id, o.strategy_version, o.reason, o.requested_at, o.status,",
@@ -811,12 +869,14 @@ export class PlatformRepository implements InstrumentPersistence {
         brokerOrder.averageFillPrice ?? null,
         brokerOrder.submittedAt ?? 0,
         brokerOrder.updatedAt,
-        brokerOrder.lastProviderEventAt ?? brokerOrder.updatedAt,
+        providerEventAt,
         userId,
       ],
     );
-    if (!result.rows[0]) throw new Error("Persisted sandbox order was not found for the authenticated user.");
     await this.persistFills(userId, brokerOrder.fills || []);
+    if (!result.rows[0]) {
+      return (await this.getUserOrder(userId, clientOrderId)) ?? current;
+    }
     return this.mapPersistedOrderRow(result.rows[0]);
   }
 
