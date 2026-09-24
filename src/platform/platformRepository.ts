@@ -1364,7 +1364,14 @@ export class PlatformRepository implements InstrumentPersistence {
         [accountId, idempotencyKey],
       );
       if (duplicate.rows[0]) {
-        return { order: this.mapPersistedOrderRow(duplicate.rows[0]), created: false };
+        const existing = this.mapPersistedOrderRow(duplicate.rows[0]);
+        if (
+          existing.idempotencyFingerprint &&
+          existing.idempotencyFingerprint !== idempotencyFingerprint
+        ) {
+          throw new Error("Idempotency-Key was already used for a different order intent.");
+        }
+        return { order: existing, created: false };
       }
 
       await client.query(
