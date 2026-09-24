@@ -125,6 +125,21 @@ export interface ShadowRuntimeRecord {
   updatedAt: number;
 }
 
+export interface StrategyValidationRecord {
+  id: string;
+  userId: string;
+  strategyId: string;
+  strategyVersion: number;
+  strategyName: string;
+  status: "INSUFFICIENT_EVIDENCE" | "FAILED" | "PROVISIONALLY_VALIDATED";
+  evaluatedAt: number;
+  evidenceHash: string;
+  policy: Record<string, unknown>;
+  metrics: Record<string, unknown>;
+  source: "CLIENT_SUBMITTED" | "SERVER_RECOMPUTED";
+  createdAt: number;
+}
+
 export interface InstrumentPersistence {
   syncInstruments(instruments: Instrument[]): Promise<void>;
 }
@@ -745,6 +760,131 @@ export class PlatformRepository implements InstrumentPersistence {
       delistingTime: row.delisting_time ? new Date(row.delisting_time).getTime() : undefined,
       session: row.session ?? undefined,
       updatedAt: row.updated_at ? new Date(row.updated_at).getTime() : Date.now(),
+    };
+  }
+
+  public async recordStrategyValidation(input: {
+    userId: string;
+    strategyId: string;
+    strategyVersion: number;
+    strategyName: string;
+    status: StrategyValidationRecord["status"];
+    evaluatedAt: number;
+    evidenceHash: string;
+    policy: Record<string, unknown>;
+    metrics: Record<string, unknown>;
+    source?: StrategyValidationRecord["source"];
+  }): Promise<StrategyValidationRecord> {
+    if (!this.database.isReady()) {
+      throw new Error("PostgreSQL is required for strategy validation persistence.");
+    }
+
+    const result = await this.database.query<{
+      id: string;
+      user_id: string;
+      strategy_id: string;
+      strategy_version: number;
+      strategy_name: string;
+      status: StrategyValidationRecord["status"];
+      evaluated_at: Date;
+      evidence_hash: string;
+      policy: Record<string, unknown>;
+      metrics: Record<string, unknown>;
+      source: StrategyValidationRecord["source"];
+      created_at: Date;
+    }>(
+      [
+        "INSERT INTO strategy_validation_runs(",
+        "  user_id, strategy_id, strategy_version, strategy_name, status, evaluated_at,",
+        "  evidence_hash, policy, metrics, source",
+        ") VALUES ($1,$2,$3,$4,$5,to_timestamp($6 / 1000.0),$7,$8::jsonb,$9::jsonb,$10)",
+        "ON CONFLICT (user_id, strategy_id, strategy_version, evidence_hash)",
+        "DO UPDATE SET",
+        "  status = EXCLUDED.status, evaluated_at = EXCLUDED.evaluated_at,",
+        "  policy = EXCLUDED.policy, metrics = EXCLUDED.metrics, source = EXCLUDED.source",
+        "RETURNING id, user_id, strategy_id, strategy_version, strategy_name, status, evaluated_at,",
+        "          evidence_hash, policy, metrics, source, created_at",
+      ].join("\n"),
+      [
+        input.userId,
+        input.strategyId,
+        input.strategyVersion,
+        input.strategyName,
+        input.status,
+        input.evaluatedAt,
+        input.evidenceHash,
+        JSON.stringify(input.policy),
+        JSON.stringify(input.metrics),
+        input.source || "CLIENT_SUBMITTED",
+      ],
+    );
+
+    const row = result.rows[0];
+    if (!row) throw new Error("Strategy validation evidence could not be persisted.");
+    return {
+      id: row.id,
+      userId: row.user_id,
+      strategyId: row.strategy_id,
+      strategyVersion: row.strategy_version,
+      strategyName: row.strategy_name,
+      status: row.status,
+      evaluatedAt: row.evaluated_at.getTime(),
+      evidenceHash: row.evidence_hash,
+      policy: row.policy,
+      metrics: row.metrics,
+      source: row.source,
+      createdAt: row.created_at.getTime(),
+    };
+  }
+
+  public async getLatestStrategyValidation(
+    userId: string,
+    strategyId: string,
+  ): Promise<StrategyValidationRecord | null> {
+    if (!this.database.isReady()) {
+      throw new Error("PostgreSQL is required for strategy validation persistence.");
+    }
+
+    const result = await this.database.query<{
+      id: string;
+      user_id: string;
+      strategy_id: string;
+      strategy_version: number;
+      strategy_name: string;
+      status: StrategyValidationRecord["status"];
+      evaluated_at: Date;
+      evidence_hash: string;
+      policy: Record<string, unknown>;
+      metrics: Record<string, unknown>;
+      source: StrategyValidationRecord["source"];
+      created_at: Date;
+    }>(
+      [
+        "SELECT id, user_id, strategy_id, strategy_version, strategy_name, status, evaluated_at,",
+        "       evidence_hash, policy, metrics, source, created_at",
+        "FROM strategy_validation_runs",
+        "WHERE user_id = $1 AND strategy_id = $2",
+        "ORDER BY strategy_version DESC, evaluated_at DESC",
+        "LIMIT 1",
+      ].join("\n"),
+      [userId, strategyId],
+    );
+
+    const row = result.rows[0];
+    if (!row) return null;
+    return {
+      id: row.id,
+      userId: row.user_id,
+      strategyId: row.strategy_id,
+      strategyVersion: row.strategy_version,
+      strategyName: row.strategy_name,
+      status: row.status,
+      evaluatedAt: row.evaluated_at.getTime(),
+      evidenceHash: row.evidence_hash,
+      policy: row.policy,
+      metrics: row.metrics,
+      source: row.source,
+      createdAt: row.created_at.getTime(),
     };
   }
 
