@@ -28,10 +28,23 @@ interface StoredTicker {
   lastQuoteAt: number;
 }
 
+interface StoredMiniTicker {
+  providerSymbol: string;
+  price: number;
+  open: number;
+  high: number;
+  low: number;
+  volume: number;
+  change24hPercent: number;
+  lastUpdated: number;
+}
+
 export class BinanceMarketDataService {
   private readonly symbolMap: Record<string, string>;
   private readonly candles = new Map<string, Candle[]>();
   private readonly tickers = new Map<string, StoredTicker>();
+  private readonly miniTickers = new Map<string, StoredMiniTicker>();
+  private readonly subscribedStreams = new Set<string>();
   private socket: WebSocket | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private stopped = false;
@@ -39,6 +52,8 @@ export class BinanceMarketDataService {
   private reconnectAttempts = 0;
   private lastMessageAt: number | null = null;
   private lastClosedCandleAt: number | null = null;
+  private subscriptionRequestId = 0;
+  private static readonly MAX_STREAMS_PER_CONNECTION = 1024;
 
   constructor(symbolMap: Record<string, string>) {
     this.symbolMap = { ...symbolMap };
@@ -95,6 +110,28 @@ export class BinanceMarketDataService {
     return this.tickers.get(symbol)?.ticker || null;
   }
 
+  public getMiniTicker(providerSymbol: string): StoredMiniTicker | null {
+    const ticker = this.miniTickers.get(providerSymbol.toUpperCase());
+    return ticker ? { ...ticker } : null;
+  }
+
+  public async ensureSymbol(symbol: string, exchangeSymbol: string): Promise<void> {
+    const appSymbol = String(symbol || "").trim();
+    const providerSymbol = String(exchangeSymbol || "").trim().toUpperCase();
+    if (!appSymbol || !providerSymbol) throw new Error("Both application and provider symbols are required.");
+
+    const previous = this.symbolMap[appSymbol];
+    this.symbolMap[appSymbol] = providerSymbol;
+
+    if (previous !== providerSymbol) {
+      this.candles.delete(appSymbol);
+      this.tickers.delete(appSymbol);
+    }
+
+    await this.bootstrapSymbol(appSymbol, providerSymbol);
+    this.subscribeStreams(this.getSymbolStreams(providerSymbol));
+  }
+
   public getHealth(): BinanceGatewayHealth {
     return {
       state: this.state,
@@ -106,41 +143,35 @@ export class BinanceMarketDataService {
     };
   }
 
+  private getSymbolStreams(exchangeSymbol: string): string[] {
+    const symbol = exchangeSymbol.toLowerCase();
+    return [
+      symbol + "@kline_1m",
+      symbol + "@bookTicker",
+      symbol + "@miniTicker",
+    ];
+  }
+
   private getStreams(): string[] {
-    const streams: string[] = [];
+    const streams = ["!miniTicker@arr"];
     for (const exchangeSymbol of Object.values(this.symbolMap)) {
-      const symbol = exchangeSymbol.toLowerCase();
-      streams.push(
-        `${symbol}@kline_1m`,
-        `${symbol}@bookTicker`,
-        `${symbol}@miniTicker`,
-      );
+      streams.push(...this.getSymbolStreams(exchangeSymbol));
     }
-    return streams;
+    return Array.from(new Set(streams));
   }
 
   private connect(): void {
     if (this.stopped) return;
 
     this.state = this.reconnectAttempts > 0 ? "RECONNECTING" : "CONNECTING";
-    const streams = encodeURIComponent(this.getStreams().join("/"));
-    const url = `${SPOT_STREAM_URL}?streams=${streams}`;
-
-    let socket: WebSocket;
-    try {
-      socket = new WebSocket(url);
-    } catch (error) {
-      console.warn("Failed to create Binance websocket:", error);
-      this.scheduleReconnect();
-      return;
-    }
-
+    const url = SPOT_STREAM_URL;
     this.socket = socket;
 
     socket.on("open", () => {
       if (this.socket !== socket || this.stopped) return;
       this.reconnectAttempts = 0;
       this.state = "READY";
+      this.subscribeStreams(this.getStreams());
       // A connection can be interrupted between the last bootstrap and open.
       // Refresh candles after every reconnect so the decision stream can recover
       // bars missed during the outage instead of silently continuing with a gap.
@@ -188,6 +219,10 @@ export class BinanceMarketDataService {
   }
 
   private handlePayload(payload: any): void {
+    if (Array.isArray(payload)) {
+      for (const item of payload) this.handleMiniTicker(item);
+      return;
+    }
     if (!payload || typeof payload !== "object") return;
 
     if (payload.e === "kline" && payload.k) {
@@ -258,8 +293,7 @@ export class BinanceMarketDataService {
 
   private handleMiniTicker(payload: any): void {
     const exchangeSymbol = String(payload?.s || "").toUpperCase();
-    const symbol = this.toAppSymbol(exchangeSymbol);
-    if (!symbol) return;
+    if (!exchangeSymbol) return;
 
     const price = Number(payload?.c);
     const open = Number(payload?.o);
@@ -268,13 +302,28 @@ export class BinanceMarketDataService {
     const volume = Number(payload?.v);
     if (!(price > 0) || !(open > 0)) return;
 
+    const lastUpdated = Number(payload?.E) || Date.now();
+    this.miniTickers.set(exchangeSymbol, {
+      providerSymbol: exchangeSymbol,
+      price,
+      open,
+      high: Number.isFinite(high) ? high : price,
+      low: Number.isFinite(low) ? low : price,
+      volume: Number.isFinite(volume) ? volume : 0,
+      change24hPercent: (price / open - 1) * 100,
+      lastUpdated,
+    });
+
+    const symbol = this.toAppSymbol(exchangeSymbol);
+    if (!symbol) return;
+
     this.mergeTicker(symbol, {
       price,
       high24h: Number.isFinite(high) ? high : price,
       low24h: Number.isFinite(low) ? low : price,
       volume24h: Number.isFinite(volume) ? volume : 0,
       change24hPercent: (price / open - 1) * 100,
-      lastUpdated: Date.now(),
+      lastUpdated,
     });
   }
 
@@ -314,42 +363,69 @@ export class BinanceMarketDataService {
   private async bootstrapCandles(): Promise<void> {
     await Promise.all(
       Object.entries(this.symbolMap).map(async ([symbol, exchangeSymbol]) => {
-        try {
-          const endpoint = `${REST_BASE_URL}/api/v3/klines?symbol=${encodeURIComponent(exchangeSymbol)}&interval=1m&limit=${BOOTSTRAP_LIMIT}`;
-          const response = await fetch(endpoint, {
-            headers: { Accept: "application/json", "User-Agent": "JarvisFinance/1.0" },
-          });
-          if (!response.ok) throw new Error(`HTTP ${response.status}`);
-          const rows: any = await response.json();
-          if (!Array.isArray(rows)) throw new Error("Invalid kline response.");
-
-          const now = Date.now();
-          const completed = rows
-            .filter((row: any[]) => Array.isArray(row) && Number(row[6]) <= now)
-            .map((row: any[]) => ({
-              timestamp: Number(row[0]),
-              open: Number(row[1]),
-              high: Number(row[2]),
-              low: Number(row[3]),
-              close: Number(row[4]),
-              volume: Number(row[5]),
-            }))
-            .filter((row: Candle) =>
-              [row.timestamp, row.open, row.high, row.low, row.close, row.volume].every(Number.isFinite),
-            );
-
-          if (completed.length) {
-            this.candles.set(symbol, completed.slice(-MAX_CANDLES_PER_SYMBOL));
-            this.lastClosedCandleAt = Math.max(
-              this.lastClosedCandleAt || 0,
-              completed[completed.length - 1].timestamp + 59_999,
-            );
-          }
-        } catch (error: any) {
-          console.warn(`Binance candle bootstrap failed for ${symbol}:`, error?.message || error);
-        }
+        await this.bootstrapSymbol(symbol, exchangeSymbol);
       }),
     );
+  }
+
+  private async bootstrapSymbol(symbol: string, exchangeSymbol: string): Promise<void> {
+    try {
+      const endpoint = REST_BASE_URL + "/api/v3/klines?symbol=" + encodeURIComponent(exchangeSymbol) + "&interval=1m&limit=" + BOOTSTRAP_LIMIT;
+      const response = await fetch(endpoint, {
+        headers: { Accept: "application/json", "User-Agent": "JarvisFinance/1.0" },
+      });
+      if (!response.ok) throw new Error("HTTP " + response.status);
+      const rows: any = await response.json();
+      if (!Array.isArray(rows)) throw new Error("Invalid kline response.");
+
+      const now = Date.now();
+      const completed = rows
+        .filter((row: any[]) => Array.isArray(row) && Number(row[6]) <= now)
+        .map((row: any[]) => ({
+          timestamp: Number(row[0]),
+          open: Number(row[1]),
+          high: Number(row[2]),
+          low: Number(row[3]),
+          close: Number(row[4]),
+          volume: Number(row[5]),
+        }))
+        .filter((row: Candle) =>
+          [row.timestamp, row.open, row.high, row.low, row.close, row.volume].every(Number.isFinite),
+        );
+
+      if (completed.length) {
+        this.candles.set(symbol, completed.slice(-MAX_CANDLES_PER_SYMBOL));
+        this.lastClosedCandleAt = Math.max(
+          this.lastClosedCandleAt || 0,
+          completed[completed.length - 1].timestamp + 59_999,
+        );
+      }
+    } catch (error: any) {
+      console.warn("Binance candle bootstrap failed for " + symbol + ":", error?.message || error);
+    }
+  }
+
+  private subscribeStreams(streams: string[]): void {
+    const socket = this.socket;
+    if (!socket || socket.readyState !== WebSocket.OPEN || this.stopped) return;
+
+    const unique = Array.from(new Set(streams)).filter((stream) => stream && !this.subscribedStreams.has(stream));
+    if (!unique.length) return;
+
+    if (this.subscribedStreams.size + unique.length > BinanceMarketDataService.MAX_STREAMS_PER_CONNECTION) {
+      console.warn("Binance stream subscription limit reached; detailed market data was not subscribed.");
+      return;
+    }
+
+    for (let i = 0; i < unique.length; i += 200) {
+      const batch = unique.slice(i, i + 200);
+      batch.forEach((stream) => this.subscribedStreams.add(stream));
+      socket.send(JSON.stringify({
+        method: "SUBSCRIBE",
+        params: batch,
+        id: ++this.subscriptionRequestId,
+      }));
+    }
   }
 
   private toAppSymbol(exchangeSymbol: string): string | null {
