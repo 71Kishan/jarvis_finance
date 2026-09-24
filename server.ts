@@ -692,16 +692,6 @@ app.get("/api/account/portfolio", requireSession, async (req: AuthenticatedReque
       baseCurrency,
     );
 
-    await platformRepository.recordAuditEvent({
-      userId: req.jarvisUser!.id,
-      eventType: "PORTFOLIO_VALUATION",
-      payload: {
-        baseCurrency: portfolio.valuation.baseCurrency,
-        complete: portfolio.valuation.complete,
-        unpricedAssets: portfolio.valuation.unpricedAssets,
-      },
-    }).catch(() => undefined);
-
     return res.json({
       success: true,
       baseCurrency,
@@ -714,6 +704,122 @@ app.get("/api/account/portfolio", requireSession, async (req: AuthenticatedReque
     return res.status(503).json({
       success: false,
       error: error?.message || "Portfolio valuation unavailable.",
+    });
+  }
+});
+
+function isStrategyValidationStatus(value: unknown): value is "INSUFFICIENT_EVIDENCE" | "FAILED" | "PROVISIONALLY_VALIDATED" {
+  return value === "INSUFFICIENT_EVIDENCE" ||
+    value === "FAILED" ||
+    value === "PROVISIONALLY_VALIDATED";
+}
+
+app.post("/api/research/strategy-validation", requireSameOrigin, requireSession, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const result = req.body?.result;
+
+    if (!result || typeof result !== "object" || Array.isArray(result)) {
+      return res.status(400).json({ error: "A strategy validation result is required." });
+    }
+
+    const strategyId = typeof result.strategyId === "string" ? result.strategyId.trim() : "";
+    const strategyName = typeof result.strategyName === "string" ? result.strategyName.trim() : "";
+    const strategyVersion = Number(result.strategyVersion);
+    const evaluatedAt = Number(result.evaluatedAt);
+    const status = result.status;
+
+    if (
+      !strategyId ||
+      strategyId.length > 160 ||
+      !strategyName ||
+      strategyName.length > 240 ||
+      !Number.isInteger(strategyVersion) ||
+      strategyVersion < 1 ||
+      !Number.isFinite(evaluatedAt) ||
+      evaluatedAt <= 0 ||
+      !isStrategyValidationStatus(status)
+    ) {
+      return res.status(400).json({ error: "Invalid strategy validation identity or status." });
+    }
+
+    if (!result.policy || typeof result.policy !== "object" || Array.isArray(result.policy)) {
+      return res.status(400).json({ error: "Validation policy is required." });
+    }
+    if (!result.backtest || typeof result.backtest !== "object" || Array.isArray(result.backtest)) {
+      return res.status(400).json({ error: "Backtest evidence is required." });
+    }
+    if (!Array.isArray(result.gates) || result.gates.length > 20) {
+      return res.status(400).json({ error: "Validation gate evidence is invalid." });
+    }
+
+    const evidence = {
+      strategyId,
+      strategyVersion,
+      strategyName,
+      status,
+      policy: result.policy,
+      backtest: result.backtest,
+      walkForward: result.walkForward ?? null,
+      gates: result.gates,
+      evaluatedAt,
+    };
+    const canonical = JSON.stringify(evidence);
+    const evidenceHash = createHash("sha256").update(canonical, "utf8").digest("hex");
+
+    const record = await platformRepository.recordStrategyValidation({
+      userId: req.jarvisUser!.id,
+      strategyId,
+      strategyVersion,
+      strategyName,
+      status,
+      evaluatedAt,
+      evidenceHash,
+      policy: result.policy,
+      metrics: {
+        backtest: result.backtest,
+        walkForward: result.walkForward ?? null,
+        gates: result.gates,
+      },
+      source: "CLIENT_SUBMITTED",
+    });
+
+    await platformRepository.recordAuditEvent({
+      userId: req.jarvisUser!.id,
+      eventType: "STRATEGY_VALIDATION_RECORDED",
+      payload: {
+        strategyId,
+        strategyVersion,
+        status,
+        source: "CLIENT_SUBMITTED",
+        evidenceHash,
+      },
+    }).catch(() => undefined);
+
+    return res.json({ success: true, record });
+  } catch (error: any) {
+    return res.status(503).json({
+      success: false,
+      error: error?.message || "Strategy validation evidence could not be persisted.",
+    });
+  }
+});
+
+app.get("/api/research/strategy-validations/latest", requireSession, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const strategyId = typeof req.query.strategyId === "string" ? req.query.strategyId.trim() : "";
+    if (!strategyId || strategyId.length > 160) {
+      return res.status(400).json({ error: "strategyId is required." });
+    }
+
+    const record = await platformRepository.getLatestStrategyValidation(
+      req.jarvisUser!.id,
+      strategyId,
+    );
+    return res.json({ success: true, record });
+  } catch (error: any) {
+    return res.status(503).json({
+      success: false,
+      error: error?.message || "Strategy validation history is unavailable.",
     });
   }
 });
