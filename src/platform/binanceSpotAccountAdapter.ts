@@ -336,11 +336,10 @@ function normalizeOrderType(type: string): OrderIntent["type"] {
       return "STOP";
     case "STOP_LOSS_LIMIT":
       return "STOP_LIMIT";
-    case "TAKE_PROFIT":
-    case "TAKE_PROFIT_LIMIT":
-      return type;
+    case "LIMIT_MAKER":
+      return "LIMIT_MAKER";
     default:
-      return "LIMIT";
+      throw new Error("Unsupported Binance Spot order type: " + type);
   }
 }
 
@@ -376,8 +375,26 @@ function addDecimalStrings(left: string, right: string): string {
 }
 
 function divideDecimalStrings(numerator: string, denominator: string): string {
-  const n = Number(numerator);
-  const d = Number(denominator);
-  if (!Number.isFinite(n) || !Number.isFinite(d) || d <= 0) return "0";
-  return (n / d).toFixed(18).replace(/0+$/, "").replace(/\.$/, "") || "0";
+  const [numInt, numFrac = ""] = numerator.split(".");
+  const [denInt, denFrac = ""] = denominator.split(".");
+  if (!/^\\d+$/.test(numInt || "") || !/^\\d*$/.test(numFrac) || !/^\\d+$/.test(denInt || "") || !/^\\d*$/.test(denFrac)) {
+    return "0";
+  }
+
+  const scale = 18;
+  const numeratorScale = numFrac.length;
+  const denominatorScale = denFrac.length;
+  const numeratorUnits = BigInt((numInt || "0") + numFrac);
+  const denominatorUnits = BigInt((denInt || "0") + denFrac);
+  if (denominatorUnits === 0n) return "0";
+
+  const exponent = scale + denominatorScale - numeratorScale;
+  const scaledNumerator = exponent >= 0
+    ? numeratorUnits * 10n ** BigInt(exponent)
+    : numeratorUnits / 10n ** BigInt(-exponent);
+
+  const quotient = scaledNumerator / denominatorUnits;
+  const digits = quotient.toString().padStart(scale + 1, "0");
+  const point = digits.length - scale;
+  return digits.slice(0, point) + "." + digits.slice(point).replace(/0+$/, "") || "0";
 }
