@@ -42,7 +42,10 @@ export class PlatformRepository implements InstrumentPersistence {
   constructor(private readonly database: PlatformDatabase) {}
 
   public async syncInstruments(instruments: Instrument[]): Promise<void> {
-    if (!this.database.isReady() || !instruments.length) return;
+    if (!instruments.length || !this.database.isConfigured()) return;
+    if (!this.database.isReady()) {
+      throw new Error("PostgreSQL is configured but not ready; instrument persistence is unavailable.");
+    }
 
     await this.database.transaction(async (client) => {
       for (const instrument of instruments) {
