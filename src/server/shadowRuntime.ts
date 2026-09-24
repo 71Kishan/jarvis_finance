@@ -36,7 +36,7 @@ export class AutonomousShadowRuntime {
   private readonly symbol: string;
   private readonly pollIntervalMs: number;
   private readonly researchCapital: number;
-  private readonly initialStrategy: StrategyConfig;
+  private initialStrategy: StrategyConfig;
   private engine: TradingEngine;
   private operatorUserId: string | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
@@ -72,6 +72,22 @@ export class AutonomousShadowRuntime {
     this.researchCapital = Math.max(100, options?.researchCapital || 10_000);
     this.pollIntervalMs = Math.max(500, options?.pollIntervalMs || 1000);
     this.engine = new TradingEngine(this.researchCapital, 6, this.initialStrategy);
+  }
+
+  public configureStrategy(strategy: StrategyConfig): void {
+    if (this.timer) {
+      throw new Error("Shadow strategy cannot be changed while the runtime is running.");
+    }
+
+    this.initialStrategy = {
+      ...strategy,
+      indicatorWeights: { ...strategy.indicatorWeights },
+    };
+    this.engine = new TradingEngine(this.researchCapital, 6, this.initialStrategy);
+    this.lastProcessedCandleAt = null;
+    this.startedAt = null;
+    this.recoveryNote = "";
+    this.message = "Shadow strategy configured; awaiting start.";
   }
 
   public async start(operatorUserId?: string): Promise<void> {
