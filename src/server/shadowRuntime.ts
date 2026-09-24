@@ -48,6 +48,7 @@ export class AutonomousShadowRuntime {
   private lastDataAt: number | null = null;
   private message = "Shadow runtime is stopped.";
   private recoveryNote = "";
+  private persistedRuntimeId: string | null = null;
 
   constructor(
     gateway: BinanceMarketDataService,
@@ -185,10 +186,12 @@ export class AutonomousShadowRuntime {
     if (!record) {
       this.engine = new TradingEngine(this.researchCapital, 6, this.initialStrategy);
       this.lastProcessedCandleAt = null;
+      this.persistedRuntimeId = null;
       this.recoveryNote = "";
       return;
     }
 
+    this.persistedRuntimeId = record.id;
     const state = record.runtimeState as any;
     if (state?.version !== 1 || !this.engine.hydrateRuntimeState(state)) {
       throw new Error("Persisted shadow runtime state is unsupported or invalid.");
@@ -199,10 +202,10 @@ export class AutonomousShadowRuntime {
     this.recoveryNote = "Durable PostgreSQL state restored.";
   }
 
-  private async persist(statusOverride?: ShadowRuntimeStatus): Promise<void> {
-    if (!this.operatorUserId) return;
+  private async persist(statusOverride?: ShadowRuntimeStatus): Promise<ShadowRuntimeRecord | null> {
+    if (!this.operatorUserId) return null;
 
-    await this.repository.saveShadowRuntime({
+    const record = await this.repository.saveShadowRuntime({
       userId: this.operatorUserId,
       strategyId: this.engine.getStrategy().id,
       strategyVersion: this.engine.getStrategy().version,
@@ -213,7 +216,9 @@ export class AutonomousShadowRuntime {
       startedAt: this.startedAt || undefined,
     });
 
+    this.persistedRuntimeId = record.id;
     this.lastProcessedCandleAt = this.engine.getLastProcessedCandleTimestamp() || null;
+    return record;
   }
 
   private async safePersist(): Promise<void> {
@@ -290,9 +295,65 @@ export class AutonomousShadowRuntime {
             : [];
 
       for (const candle of toProcess) {
+        const beforeActiveTrade = this.engine.getActiveTrade();
+        const beforeTradeIds = new Set(this.engine.getTradeHistory().map((trade) => trade.id));
+
         this.engine.onTick(candle, candles);
-        this.lastProcessedCandleAt = this.engine.getLastProcessedCandleTimestamp();
-        await this.persist();
+
+        const afterActiveTrade = this.engine.getActiveTrade();
+        const afterTradeHistory = this.engine.getTradeHistory();
+        const newlyClosedTrades = afterTradeHistory.filter((trade) => !beforeTradeIds.has(trade.id));
+
+        for (const trade of afterTradeHistory) {
+          await this.repository.upsertShadowTrade(this.persistedRuntimeId || (await this.persist())!.id, trade);
+        }
+        if (afterActiveTrade) {
+          await this.repository.upsertShadowTrade(
+            this.persistedRuntimeId || (await this.persist())!.id,
+            afterActiveTrade,
+          );
+        }
+
+        const eventType =
+          newlyClosedTrades.length > 0
+            ? "EXIT"
+            : !beforeActiveTrade && afterActiveTrade
+              ? "ENTRY"
+              : this.engine.getBotState() === "HALTED_DEAD"
+                ? "HALT"
+                : this.engine.getLastSignal()?.eligible
+                  ? "SIGNAL"
+                  : "HEARTBEAT";
+
+        const tradeEvent =
+          newlyClosedTrades[0]
+            ? { kind: "TRADE_CLOSED", trade: newlyClosedTrades[0] }
+            : !beforeActiveTrade && afterActiveTrade
+              ? { kind: "TRADE_OPENED", trade: afterActiveTrade }
+              : this.engine.getBotState() === "HALTED_DEAD"
+                ? { kind: "RISK_HALT" }
+                : null;
+
+        const persisted = await this.persist();
+        if (!persisted?.id) {
+          throw new Error("Shadow runtime persistence did not return a runtime identifier.");
+        }
+
+        const vitality = this.engine.getVitality();
+        await this.repository.recordShadowObservation({
+          runtimeId: persisted.id,
+          candleTimestamp: candle.timestamp,
+          closePrice: String(candle.close),
+          equity: String(vitality.currentEquity),
+          cash: String(vitality.cash),
+          drawdownPercent: String(vitality.currentDrawdownPercent),
+          dailyDrawdownPercent: String(vitality.dailyDrawdownPercent),
+          botState: this.engine.getBotState(),
+          eventType,
+          signal: this.engine.getLastSignal() as unknown as Record<string, unknown> | null,
+          activeTrade: afterActiveTrade as unknown as Record<string, unknown> | null,
+          tradeEvent: tradeEvent as unknown as Record<string, unknown> | null,
+        });
 
         if (this.engine.getBotState() === "HALTED_DEAD") break;
       }
