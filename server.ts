@@ -780,6 +780,9 @@ app.post("/api/research/strategy-validation", requireSameOrigin, requireSession,
       evaluatedAt,
       evidenceHash,
       policy: result.policy,
+      strategy: req.body?.strategy && typeof req.body.strategy === "object" && !Array.isArray(req.body.strategy)
+        ? req.body.strategy
+        : undefined,
       metrics: {
         backtest: result.backtest,
         walkForward: result.walkForward ?? null,
@@ -900,6 +903,7 @@ app.post("/api/research/strategy-validation/recompute", requireSameOrigin, requi
       evaluatedAt: validation.evaluatedAt,
       evidenceHash,
       policy: validation.policy,
+      strategy: optimization.bestStrategy as unknown as Record<string, unknown>,
       metrics: {
         backtest: validation.backtest,
         walkForward: validation.walkForward,
