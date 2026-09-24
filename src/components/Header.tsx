@@ -27,7 +27,6 @@ import {
   Mic,
 } from "lucide-react";
 import { BotState, MarketDataSource, ActionNotification } from "../types/trading";
-import { AssetSymbol, SUPPORTED_ASSETS } from "../engine/marketSimulator";
 import { soundFx } from "../utils/soundEffects";
 import { NotificationCenter } from "./NotificationCenter";
 import { InstrumentSearch } from "./InstrumentSearch";
@@ -86,8 +85,6 @@ export const Header: React.FC<HeaderProps> = ({
   onClearNotifications,
   onScrollToAnalytics,
 }) => {
-  const assetInfo = SUPPORTED_ASSETS[currentAsset];
-
   const getStateBadge = () => {
     switch (botState) {
       case "THRIVING":
