@@ -12,6 +12,18 @@ import { AutonomousPaperRuntime } from "./src/server/paperRuntime";
 import { PlatformDatabase } from "./src/server/platformDatabase";
 import { PlatformRepository } from "./src/platform/platformRepository";
 import { BinanceSpotAccountAdapter } from "./src/platform/binanceSpotAccountAdapter";
+import {
+  JARVIS_SESSION_COOKIE,
+  SESSION_TTL_MS,
+  buildExpiredSessionCookie,
+  buildSessionCookie,
+  createSessionToken,
+  hashPassword,
+  hashSessionToken,
+  parseCookies,
+  verifyPassword,
+  assertUsablePassword,
+} from "./src/server/auth";
 
 dotenv.config();
 
@@ -77,6 +89,82 @@ app.use("/api", (req: Request, res: Response, next) => {
 
   next();
 });
+
+
+
+interface AuthenticatedRequest extends Request {
+  jarvisUser?: import("./src/platform/platformRepository").AuthUser;
+  jarvisSessionId?: string;
+}
+
+const authRateLimitMap = new Map<string, { count: number; resetAt: number }>();
+const AUTH_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
+const AUTH_MAX_ATTEMPTS = 12;
+
+function authRateLimitKey(req: Request, email?: string): string {
+  const ip = req.ip || req.socket.remoteAddress || "client-local";
+  return ip + ":" + (email || "").trim().toLowerCase();
+}
+
+function consumeAuthAttempt(req: Request, email?: string): boolean {
+  const key = authRateLimitKey(req, email);
+  const now = Date.now();
+  const bucket = authRateLimitMap.get(key);
+  if (!bucket || now >= bucket.resetAt) {
+    authRateLimitMap.set(key, { count: 1, resetAt: now + AUTH_RATE_LIMIT_WINDOW_MS });
+    return true;
+  }
+  if (bucket.count >= AUTH_MAX_ATTEMPTS) return false;
+  bucket.count += 1;
+  return true;
+}
+
+function clearAuthRateLimit(email: string, req: Request): void {
+  authRateLimitMap.delete(authRateLimitKey(req, email));
+}
+
+function secureCookies(req: Request): boolean {
+  if (process.env.JARVIS_SECURE_COOKIES === "true") return true;
+  if (process.env.JARVIS_SECURE_COOKIES === "false") return false;
+  return process.env.NODE_ENV === "production";
+}
+
+function requireSameOrigin(req: Request, res: Response, next: () => void) {
+  const origin = req.get("Origin");
+  if (!origin) return next();
+  try {
+    const originUrl = new URL(origin);
+    const expectedHost = req.get("Host");
+    if (!expectedHost || originUrl.host !== expectedHost) {
+      return res.status(403).json({ error: "Cross-origin state-changing request rejected." });
+    }
+  } catch {
+    return res.status(403).json({ error: "Invalid request origin." });
+  }
+  next();
+}
+
+async function requireSession(req: AuthenticatedRequest, res: Response, next: () => void) {
+  if (!platformDatabase.isReady()) {
+    return res.status(503).json({ error: "Authenticated account services require PostgreSQL." });
+  }
+
+  const token = parseCookies(req.headers.cookie)[JARVIS_SESSION_COOKIE];
+  if (!token) {
+    return res.status(401).json({ error: "Authentication required." });
+  }
+
+  const session = await platformRepository.getAuthSession(hashSessionToken(token));
+  if (!session) {
+    res.setHeader("Set-Cookie", buildExpiredSessionCookie(secureCookies(req)));
+    return res.status(401).json({ error: "Authentication required." });
+  }
+
+  req.jarvisUser = session.user;
+  req.jarvisSessionId = session.sessionId;
+  void platformRepository.touchAuthSession(session.sessionId).catch(() => undefined);
+  next();
+}
 
 // Initialize Gemini AI Client lazily and safely
 const getAIClient = () => {
@@ -381,6 +469,185 @@ function computeQuantitativeMarketIntelligence(asset: string, marketSnapshot: an
     botActionPlan: "Do not trade from AI sentiment alone. Require deterministic market data, a validated strategy signal, and the risk engine.",
   };
 }
+
+
+// Authentication and server-owned identity layer.
+// Market data remains publicly readable; account, session and exchange actions require this layer.
+app.get("/api/auth/status", async (req: Request, res: Response) => {
+  try {
+    const enabled = await platformRepository.isAuthenticationConfigured();
+    if (!enabled) {
+      return res.json({ enabled: false, authenticated: false, user: null });
+    }
+
+    const token = parseCookies(req.headers.cookie)[JARVIS_SESSION_COOKIE];
+    if (!token) {
+      return res.json({ enabled: true, authenticated: false, user: null });
+    }
+
+    const session = await platformRepository.getAuthSession(hashSessionToken(token));
+    if (!session) {
+      return res.json({ enabled: true, authenticated: false, user: null });
+    }
+
+    void platformRepository.touchAuthSession(session.sessionId).catch(() => undefined);
+    return res.json({
+      enabled: true,
+      authenticated: true,
+      user: session.user,
+      expiresAt: session.expiresAt,
+    });
+  } catch (error: any) {
+    return res.status(503).json({
+      enabled: false,
+      authenticated: false,
+      user: null,
+      error: error?.message || "Authentication service unavailable.",
+    });
+  }
+});
+
+app.post("/api/auth/login", requireSameOrigin, async (req: Request, res: Response) => {
+  const email = typeof req.body?.email === "string" ? req.body.email.trim().toLowerCase() : "";
+  const password = typeof req.body?.password === "string" ? req.body.password : "";
+
+  if (!email || email.length > 320 || password.length === 0 || password.length > 256) {
+    return res.status(400).json({ error: "Invalid credentials." });
+  }
+
+  if (!consumeAuthAttempt(req, email)) {
+    return res.status(429).json({
+      error: "Too many authentication attempts. Try again later.",
+    });
+  }
+
+  try {
+    const user = await platformRepository.getAuthUserByEmail(email);
+    if (!user || user.status !== "ACTIVE" || (user.lockedUntil !== null && user.lockedUntil > Date.now())) {
+      return res.status(401).json({ error: "Invalid email or password." });
+    }
+
+    if (!user.passwordHash || !verifyPassword(password, user.passwordHash)) {
+      const lock = await platformRepository.recordFailedLogin(user.id);
+      if (lock.lockedUntil && lock.lockedUntil > Date.now()) {
+        return res.status(429).json({
+          error: "Authentication temporarily locked after repeated failures.",
+        });
+      }
+      return res.status(401).json({ error: "Invalid email or password." });
+    }
+
+    const token = createSessionToken();
+    const expiresAt = Date.now() + SESSION_TTL_MS;
+    await platformRepository.recordSuccessfulLogin(user.id);
+    await platformRepository.createAuthSession({
+      userId: user.id,
+      tokenHash: hashSessionToken(token),
+      expiresAt,
+      ipAddress: req.ip,
+      userAgent: req.get("User-Agent") || undefined,
+    });
+    clearAuthRateLimit(email, req);
+
+    await platformRepository.recordAuditEvent({
+      userId: user.id,
+      eventType: "AUTH_LOGIN",
+      payload: { method: "password_session" },
+    }).catch(() => undefined);
+
+    res.setHeader("Set-Cookie", buildSessionCookie(token, secureCookies(req)));
+    return res.json({
+      authenticated: true,
+      user: {
+        id: user.id,
+        email: user.email,
+        displayName: user.displayName,
+        status: user.status,
+      },
+      expiresAt,
+    });
+  } catch (error: any) {
+    return res.status(503).json({ error: error?.message || "Authentication service unavailable." });
+  }
+});
+
+app.post("/api/auth/logout", requireSameOrigin, requireSession, async (req: AuthenticatedRequest, res: Response) => {
+  const token = parseCookies(req.headers.cookie)[JARVIS_SESSION_COOKIE];
+  if (token) {
+    await platformRepository.revokeAuthSession(hashSessionToken(token));
+  }
+  if (req.jarvisUser) {
+    await platformRepository.recordAuditEvent({
+      userId: req.jarvisUser.id,
+      eventType: "AUTH_LOGOUT",
+      payload: { method: "password_session" },
+    }).catch(() => undefined);
+  }
+  res.setHeader("Set-Cookie", buildExpiredSessionCookie(secureCookies(req)));
+  return res.json({ authenticated: false });
+});
+
+app.get("/api/me", requireSession, (req: AuthenticatedRequest, res: Response) => {
+  return res.json({ user: req.jarvisUser });
+});
+
+app.get("/api/account/overview", requireSession, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const overview = await platformRepository.getAccountOverview(req.jarvisUser!.id);
+    return res.json({ success: true, ...overview });
+  } catch (error: any) {
+    return res.status(503).json({
+      success: false,
+      error: error?.message || "Connected account data is unavailable.",
+    });
+  }
+});
+
+app.post("/api/account/binance-testnet/sync", requireSameOrigin, requireSession, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!binanceSpotTestnetAccount.isConfigured()) {
+      return res.status(503).json({
+        success: false,
+        error: "Binance Spot testnet credentials are not configured on the server.",
+      });
+    }
+
+    const snapshot = await binanceSpotTestnetAccount.syncReadOnlyAccount();
+    const connection = await platformRepository.syncBinanceReadOnlyAccount(req.jarvisUser!.id, {
+      accountId: binanceSpotTestnetAccount.getAccountId(),
+      permissions: ["READ"],
+      balances: snapshot.balances,
+      openOrders: snapshot.openOrders,
+    });
+
+    await platformRepository.recordAuditEvent({
+      userId: req.jarvisUser!.id,
+      accountId: connection.id,
+      eventType: "ACCOUNT_SYNC",
+      payload: {
+        provider: binanceSpotTestnetAccount.provider,
+        balances: snapshot.balances.length,
+        openOrders: snapshot.openOrders.length,
+        readOnly: true,
+      },
+    }).catch(() => undefined);
+
+    const overview = await platformRepository.getAccountOverview(req.jarvisUser!.id);
+    return res.json({
+      success: true,
+      connection,
+      balances: overview.balances,
+      openOrders: overview.openOrders,
+      health: await binanceSpotTestnetAccount.getHealth(),
+    });
+  } catch (error: any) {
+    return res.status(503).json({
+      success: false,
+      error: error?.message || "Binance Spot testnet account sync failed.",
+      health: await binanceSpotTestnetAccount.getHealth(),
+    });
+  }
+});
 
 // Endpoint: AI Copilot — research and paper-terminal assistant.
 // This endpoint is advisory only: it cannot place orders or mutate the trading engine.
@@ -881,6 +1148,29 @@ async function startServer() {
   // initialization and migrations happen before the instrument catalog refresh
   // so the first authoritative catalog can be durably persisted.
   await platformDatabase.start();
+
+  if (platformDatabase.isReady() && process.env.JARVIS_ADMIN_EMAIL && process.env.JARVIS_ADMIN_PASSWORD) {
+    try {
+      assertUsablePassword(process.env.JARVIS_ADMIN_PASSWORD);
+      await platformRepository.bootstrapAdminUser({
+        email: process.env.JARVIS_ADMIN_EMAIL,
+        displayName: process.env.JARVIS_ADMIN_DISPLAY_NAME || "Jarvis Operator",
+        passwordHash: hashPassword(process.env.JARVIS_ADMIN_PASSWORD),
+        resetExistingPassword: process.env.JARVIS_ADMIN_RESET_PASSWORD === "true",
+      });
+    } catch (error: any) {
+      console.error("Jarvis admin bootstrap failed:", error?.message || error);
+      if (process.env.JARVIS_AUTH_REQUIRED === "true") throw error;
+    }
+  }
+
+  if (process.env.JARVIS_AUTH_REQUIRED === "true") {
+    const configured = platformDatabase.isReady() && await platformRepository.isAuthenticationConfigured();
+    if (!configured) {
+      throw new Error("JARVIS_AUTH_REQUIRED=true but no authenticated Jarvis user is configured.");
+    }
+  }
+
   await binanceInstrumentCatalog.start();
 
   // Live API WebSocket Voice Gateway
