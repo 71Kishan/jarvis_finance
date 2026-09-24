@@ -17,6 +17,7 @@ import { StrategyOptimizer } from "./src/engine/optimizer";
 import { attachIndicators } from "./src/engine/indicators";
 import { evaluateStrategyValidation } from "./src/engine/strategyValidation";
 import { evaluateForwardValidation } from "./src/engine/forwardValidation";
+import { evaluateOperationalHealth } from "./src/server/operationalHealth";
 import { PlatformDatabase } from "./src/server/platformDatabase";
 import { PlatformRepository } from "./src/platform/platformRepository";
 import { BinanceSpotAccountAdapter } from "./src/platform/binanceSpotAccountAdapter";
@@ -385,7 +386,30 @@ app.get("/api/health", (_req: Request, res: Response) => {
       strategyId: autonomousShadowRuntime.getStatus().strategy.id,
       strategyVersion: autonomousShadowRuntime.getStatus().strategy.version,
       lastProcessedCandleAt: autonomousShadowRuntime.getStatus().lastProcessedCandleAt,
+      lastPollAt: autonomousShadowRuntime.getStatus().lastPollAt,
     },
+    operational: evaluateOperationalHealth({
+      database: platformDatabase.getHealth(),
+      market: {
+        state: market.state,
+        connected: market.connected,
+        lastMessageAt: market.lastMessageAt,
+      },
+      catalog: binanceInstrumentCatalog.getHealth(),
+      testnetConfigured: binanceSpotTestnetAccount.isConfigured(),
+      userDataStream: binanceSpotUserDataStream.getHealth(),
+      reconciliation: sandboxReconciliationHealth,
+      paper: {
+        status: autonomousPaperRuntime.getStatus().status,
+        lastPollAt: autonomousPaperRuntime.getStatus().lastPollAt,
+        lastProcessedCandleAt: autonomousPaperRuntime.getStatus().lastProcessedCandleAt,
+      },
+      shadow: {
+        status: autonomousShadowRuntime.getStatus().status,
+        lastPollAt: autonomousShadowRuntime.getStatus().lastPollAt,
+        lastProcessedCandleAt: autonomousShadowRuntime.getStatus().lastProcessedCandleAt,
+      },
+    }),
     timestamp: Date.now(),
   });
 });
