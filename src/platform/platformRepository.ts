@@ -1,5 +1,6 @@
 import type { PoolClient } from "pg";
-import type { AccountConnection, BrokerOrder, Fill, Instrument, OrderIntent, OrderStatus, Trade, TradingPermission } from "./types";
+import type { AccountConnection, BrokerOrder, Fill, Instrument, OrderIntent, OrderStatus, TradingPermission } from "./types";
+import type { Trade } from "../types/trading";
 import { PlatformDatabase } from "../server/platformDatabase";
 import { canTransitionOrderStatus } from "./orderStateMachine";
 
