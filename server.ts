@@ -2,6 +2,7 @@ import express, { Request, Response } from "express";
 import http from "http";
 import path from "path";
 import { createHash, timingSafeEqual } from "crypto";
+import { validateSpotOrder } from "./src/platform/orderValidation";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, LiveServerMessage, Modality } from "@google/genai";
 import { WebSocketServer, WebSocket } from "ws";
@@ -907,6 +908,57 @@ app.post("/api/account/binance-testnet/orders", requireSameOrigin, requireSessio
     }
     if (!instrument.tradable || instrument.status !== "ACTIVE") {
       return res.status(409).json({ success: false, error: "Instrument is not currently tradable according to the server catalog." });
+    }
+
+    await binanceMarketData.ensureSymbol(instrument.symbol, instrument.providerSymbol);
+    const trustedTicker = binanceMarketData.getTicker(instrument.symbol);
+    const accountOverview = await platformRepository.getAccountOverview(req.jarvisUser!.id);
+    const riskGate = validateSpotOrder(
+      intent,
+      {
+        instrumentId: instrument.instrumentId,
+        symbol: instrument.providerSymbol,
+        displaySymbol: instrument.providerSymbol,
+        name: instrument.providerSymbol,
+        assetClass: "CRYPTO",
+        venue: instrument.venue,
+        venueKind: "EXCHANGE",
+        market: "SPOT",
+        baseAsset: instrument.providerSymbol.includes("") ? instrument.providerSymbol.replace(/USDT$|USDC$|BTC$|ETH$|BNB$/, "") : undefined,
+        quoteAsset: undefined,
+        provider: instrument.provider,
+        providerSymbol: instrument.providerSymbol,
+        status: instrument.status,
+        tradable: instrument.tradable,
+        tickSize: undefined,
+        lotSize: undefined,
+        minQuantity: undefined,
+        maxQuantity: undefined,
+        minNotional: undefined,
+        updatedAt: Date.now(),
+      },
+      accountOverview.balances.map((balance) => ({
+        accountId: balance.accountId,
+        asset: balance.asset,
+        free: balance.free,
+        locked: balance.locked,
+        total: balance.total,
+        updatedAt: balance.updatedAt,
+      })),
+      trustedTicker ? {
+        bid: String(trustedTicker.bid),
+        ask: String(trustedTicker.ask),
+        updatedAt: trustedTicker.lastUpdated,
+      } : undefined,
+    );
+    if (!riskGate.allowed) {
+      return res.status(422).json({
+        success: false,
+        error: "Server-side order validation rejected the sandbox request.",
+        reasons: riskGate.reasons,
+        referencePrice: riskGate.referencePrice,
+        estimatedNotional: riskGate.estimatedNotional,
+      });
     }
 
     let reservation: Awaited<ReturnType<typeof platformRepository.createPendingOrder>>;
