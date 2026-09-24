@@ -92,6 +92,7 @@ export class BinanceMarketDataService {
     if (!mapped) return null;
 
     const candles = (this.candles.get(symbol) || []).slice(-Math.max(1, Math.min(limit, MAX_CANDLES_PER_SYMBOL)));
+    const formingCandle = this.formingCandles.get(symbol) || null;
     const stored = this.tickers.get(symbol);
 
     if (!candles.length || !stored) return null;
