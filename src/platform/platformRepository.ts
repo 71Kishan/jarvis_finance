@@ -1188,6 +1188,8 @@ export class PlatformRepository implements InstrumentPersistence {
       closed_trades: string;
       winning_trades: string;
       losing_trades: string;
+      gross_wins: string | null;
+      gross_losses: string | null;
       total_pnl: string | null;
       total_fees: string | null;
     }>(
@@ -1196,6 +1198,8 @@ export class PlatformRepository implements InstrumentPersistence {
         "  COUNT(*) FILTER (WHERE status <> 'OPEN')::text AS closed_trades,",
         "  COUNT(*) FILTER (WHERE status <> 'OPEN' AND pnl > 0)::text AS winning_trades,",
         "  COUNT(*) FILTER (WHERE status <> 'OPEN' AND pnl < 0)::text AS losing_trades,",
+        "  COALESCE(SUM(pnl) FILTER (WHERE status <> 'OPEN' AND pnl > 0), 0)::text AS gross_wins,",
+        "  COALESCE(SUM(CASE WHEN status <> 'OPEN' AND pnl < 0 THEN ABS(pnl) ELSE 0 END), 0)::text AS gross_losses,",
         "  COALESCE(SUM(pnl) FILTER (WHERE status <> 'OPEN'), 0)::text AS total_pnl,",
         "  COALESCE(SUM(fees_usd) FILTER (WHERE status <> 'OPEN'), 0)::text AS total_fees",
         "FROM shadow_trades",
@@ -1216,6 +1220,14 @@ export class PlatformRepository implements InstrumentPersistence {
         : 0;
     const winRatePercent =
       closedTrades > 0 ? ((winningTrades / closedTrades) * 100).toFixed(2) : "0";
+    const grossWins = trades?.gross_wins || "0";
+    const grossLosses = trades?.gross_losses || "0";
+    const profitFactor =
+      Number(grossLosses) > 0 ? (Number(grossWins) / Number(grossLosses)).toFixed(4) : "0";
+    const expectancyPerTrade =
+      closedTrades > 0
+        ? (Number(trades?.total_pnl || "0") / closedTrades).toFixed(8)
+        : "0";
 
     return {
       runtimeId: runtime.id,
@@ -1233,6 +1245,8 @@ export class PlatformRepository implements InstrumentPersistence {
       winningTrades,
       losingTrades,
       winRatePercent,
+      profitFactor,
+      expectancyPerTrade,
       totalPnl: trades?.total_pnl || "0",
       totalFees: trades?.total_fees || "0",
     };
