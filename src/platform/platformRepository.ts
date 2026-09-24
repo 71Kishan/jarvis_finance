@@ -151,6 +151,10 @@ export function mapAccountConnectionRow(row: AccountConnectionRow): AccountConne
 export class PlatformRepository implements InstrumentPersistence {
   constructor(private readonly database: PlatformDatabase) {}
 
+  public isPersistenceReady(): boolean {
+    return this.database.isReady();
+  }
+
   public async syncInstruments(instruments: Instrument[]): Promise<void> {
     if (!instruments.length || !this.database.isConfigured()) return;
     if (!this.database.isReady()) {
