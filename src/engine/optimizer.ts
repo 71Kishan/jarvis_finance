@@ -311,7 +311,6 @@ export class StrategyOptimizer {
       test: BacktestResult;
     }> = [];
 
-    const actualTestReturns: number[] = [];
     const selectionCounts = new Map<string, number>();
 
     for (let start = 0; start + minimumForWalkForward <= candles.length; start += testBars) {
@@ -366,8 +365,6 @@ export class StrategyOptimizer {
         (selectionCounts.get(selected.strategy.id) || 0) + 1,
       );
 
-      const normalizedOosReturn = selected.test.totalPnl / 10_000;
-      actualTestReturns.push(normalizedOosReturn);
     }
 
     const mostSelected = [...selectionCounts.entries()]
@@ -410,8 +407,8 @@ export class StrategyOptimizer {
       expectancyPerTrade: aggregateTestTrades ? Number(((aggregatePnlPercent / 100 * 10_000) / aggregateTestTrades).toFixed(4)) : 0,
       avgWin: 0,
       avgLoss: 0,
-      totalFees: Number(selectedFolds.reduce((sum, fold) => sum + fold.test.totalFees, 0).toFixed(2)),
-      totalSlippage: Number(selectedFolds.reduce((sum, fold) => sum + fold.test.totalSlippage, 0).toFixed(2)),
+      totalFees: Number(selectedFolds.reduce((sum, fold) => sum + (fold.test.totalFees ?? 0), 0).toFixed(2)),
+      totalSlippage: Number(selectedFolds.reduce((sum, fold) => sum + (fold.test.totalSlippage ?? 0), 0).toFixed(2)),
       verdict: aggregateTestTrades >= 30 && oosPositiveFolds / Math.max(1, selectedFolds.length) >= 0.5
         ? "SURVIVED_AND_PROFITABLE"
         : worstOosDrawdown >= 10
@@ -461,10 +458,18 @@ export class StrategyOptimizer {
           winRate: fold.test.winRate,
         },
       })),
-      walkForwardReliable:
-        folds.length >= 3 &&
-        selectedFolds.length >= 3 &&
-        selectedFolds.every((fold) => fold.test.sampleDays >= 0),
+      walkForwardReliable: (() => {
+        if (folds.length < 3 || selectedFolds.length < 3) return false;
+        const firstOosStart = selectedFolds[0].validationEndBar;
+        const lastOosEnd = selectedFolds[selectedFolds.length - 1].testEnd;
+        const oosStartTimestamp = candles[firstOosStart]?.timestamp;
+        const oosEndTimestamp = candles[Math.min(candles.length - 1, lastOosEnd - 1)]?.timestamp;
+        const oosCalendarDays =
+          oosStartTimestamp !== undefined && oosEndTimestamp !== undefined
+            ? (oosEndTimestamp - oosStartTimestamp) / 86_400_000
+            : 0;
+        return oosCalendarDays >= 30;
+      })(),
       walkForwardSummary: {
         folds: folds.length,
         selectedFolds: selectedFolds.length,
