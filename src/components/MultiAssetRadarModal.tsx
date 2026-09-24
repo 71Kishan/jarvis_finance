@@ -184,7 +184,7 @@ export const MultiAssetRadarModal: React.FC<MultiAssetRadarModalProps> = ({
               id="switch-to-top-opportunity-btn"
               type="button"
               onClick={() => {
-                onSelectAndTradeAsset(topOpportunity.symbol as AssetSymbol, false);
+                onSelectAndTradeAsset(topOpportunity.symbol, false);
                 onClose();
               }}
               className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-lg flex items-center gap-1.5 transition-colors whitespace-nowrap shadow-md"
@@ -304,7 +304,7 @@ export const MultiAssetRadarModal: React.FC<MultiAssetRadarModalProps> = ({
                       id={`trade-asset-${op.symbol.replace(/[^a-zA-Z0-9]/g, "")}`}
                       type="button"
                       onClick={() => {
-                        onSelectAndTradeAsset(op.symbol as AssetSymbol, false);
+                        onSelectAndTradeAsset(op.symbol, false);
                         onClose();
                       }}
                       className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors ${
