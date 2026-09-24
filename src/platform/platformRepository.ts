@@ -682,19 +682,16 @@ export class PlatformRepository implements InstrumentPersistence {
     return result.rows.map(mapAccountConnectionRow);
   }
 
-  public async getExecutionInstrument(instrumentId: string): Promise<ExecutionInstrument | null> {
+  public async getExecutionInstrument(instrumentId: string): Promise<Instrument | null> {
     if (!this.database.isReady()) return null;
 
-    const result = await this.database.query<{
-      instrument_id: string;
-      provider: string;
-      venue: string;
-      provider_symbol: string;
-      tradable: boolean;
-      status: "ACTIVE" | "SUSPENDED" | "DELISTED";
-    }>(
+    const result = await this.database.query<any>(
       [
-        "SELECT instrument_id, provider, venue, provider_symbol, tradable, status",
+        "SELECT instrument_id, symbol, display_symbol, name, asset_class, venue, venue_kind, market,",
+        "       base_asset, quote_asset, currency, provider, provider_symbol, status, tradable,",
+        "       shortable, fractionable, tick_size::text, lot_size::text, min_quantity::text,",
+        "       max_quantity::text, min_notional::text, price_precision, quantity_precision,",
+        "       contract_multiplier::text, listing_time, delisting_time, session, updated_at",
         "FROM instruments WHERE instrument_id = $1 LIMIT 1",
       ].join("\n"),
       [instrumentId],
@@ -703,11 +700,34 @@ export class PlatformRepository implements InstrumentPersistence {
     if (!row) return null;
     return {
       instrumentId: row.instrument_id,
-      provider: row.provider,
+      symbol: row.symbol,
+      displaySymbol: row.display_symbol,
+      name: row.name,
+      assetClass: row.asset_class,
       venue: row.venue,
+      venueKind: row.venue_kind,
+      market: row.market,
+      baseAsset: row.base_asset ?? undefined,
+      quoteAsset: row.quote_asset ?? undefined,
+      currency: row.currency ?? undefined,
+      provider: row.provider,
       providerSymbol: row.provider_symbol,
-      tradable: row.tradable,
       status: row.status,
+      tradable: Boolean(row.tradable),
+      shortable: row.shortable ?? undefined,
+      fractionable: row.fractionable ?? undefined,
+      tickSize: row.tick_size ?? undefined,
+      lotSize: row.lot_size ?? undefined,
+      minQuantity: row.min_quantity ?? undefined,
+      maxQuantity: row.max_quantity ?? undefined,
+      minNotional: row.min_notional ?? undefined,
+      pricePrecision: row.price_precision ?? undefined,
+      quantityPrecision: row.quantity_precision ?? undefined,
+      contractMultiplier: row.contract_multiplier ?? undefined,
+      listingTime: row.listing_time ? new Date(row.listing_time).getTime() : undefined,
+      delistingTime: row.delisting_time ? new Date(row.delisting_time).getTime() : undefined,
+      session: row.session ?? undefined,
+      updatedAt: row.updated_at ? new Date(row.updated_at).getTime() : Date.now(),
     };
   }
 
