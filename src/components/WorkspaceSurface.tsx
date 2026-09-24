@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from "react";
 import { Activity, Bot, BookOpen, Database, Link2, ShieldCheck, Wallet, Wrench } from "lucide-react";
-import type { Instrument } from "../platform/types";
 import { MarketsWorkspace } from "./MarketsWorkspace";
 import type { WorkspaceView } from "../platform/workspace";
 
@@ -29,42 +28,6 @@ export const WorkspaceSurface: React.FC<WorkspaceSurfaceProps> = ({
   onOpenResearch,
   onOpenSettings,
 }) => {
-  const [query, setQuery] = useState("");
-  const [instruments, setInstruments] = useState<Instrument[]>([]);
-  const [catalogState, setCatalogState] = useState("LOADING");
-  const [runtime, setRuntime] = useState<RuntimeStatus | null>(null);
-  const [platformHealth, setPlatformHealth] = useState<any>(null);
-
-  useEffect(() => {
-    if (view !== "MARKETS") return;
-    let cancelled = false;
-    const timer = setTimeout(async () => {
-      setCatalogState("LOADING");
-      try {
-        const response = await fetch(
-          "/api/market/catalog?q=" + encodeURIComponent(query) + "&tradableOnly=true&limit=100",
-          { cache: "no-store" },
-        );
-        if (!response.ok) throw new Error("HTTP " + response.status);
-        const payload = await response.json();
-        if (!cancelled) {
-          setInstruments(Array.isArray(payload?.instruments) ? payload.instruments : []);
-          setCatalogState(payload?.health?.state || "READY");
-        }
-      } catch {
-        if (!cancelled) {
-          setInstruments([]);
-          setCatalogState("UNAVAILABLE");
-        }
-      }
-    }, query ? 160 : 0);
-
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, [query, view]);
-
   useEffect(() => {
     if (view !== "PORTFOLIO") return;
     let cancelled = false;
