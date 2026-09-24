@@ -185,6 +185,17 @@ const FINANCIAL_DATASETS_BASE_URL = process.env.FINANCIAL_DATASETS_BASE_URL || "
 const FINANCIAL_DATASETS_TIMEOUT_MS = 8000;
 const providerCache = new Map<string, { expiresAt: number; value: any }>();
 
+interface ReconciliationHealth {
+  lastRunAt?: number;
+  lastSuccessAt?: number;
+  lastErrorAt?: number;
+  lastError?: string;
+  ordersChecked: number;
+}
+const sandboxReconciliationHealth: ReconciliationHealth = { ordersChecked: 0 };
+let sandboxReconciliationTimer: ReturnType<typeof setInterval> | undefined;
+let sandboxReconciliationInFlight = false;
+
 function fdsConfigured(): boolean {
   return Boolean(process.env.FINANCIAL_DATASETS_API_KEY);
 }
@@ -352,6 +363,7 @@ app.get("/api/health", (_req: Request, res: Response) => {
       orderExecutionEnabled: binanceSpotTestnetAccount.isOrderExecutionEnabled(),
     },
     binanceSpotUserDataStream: binanceSpotUserDataStream.getHealth(),
+    sandboxReconciliation: sandboxReconciliationHealth,
     autonomousPaper: {
       status: autonomousPaperRuntime.getStatus().status,
       symbol: autonomousPaperRuntime.getStatus().symbol,
@@ -1612,6 +1624,72 @@ async function startServer() {
     binanceSpotUserDataStream.start();
   }
 
+  const reconcileSandboxOrders = async () => {
+    if (
+      sandboxReconciliationInFlight ||
+      !platformDatabase.isReady() ||
+      !binanceSpotTestnetAccount.isConfigured() ||
+      !process.env.JARVIS_ADMIN_EMAIL
+    ) {
+      return;
+    }
+
+    sandboxReconciliationInFlight = true;
+    sandboxReconciliationHealth.lastRunAt = Date.now();
+
+    try {
+      const operator = await platformRepository.getAuthUserByEmail(process.env.JARVIS_ADMIN_EMAIL);
+      if (!operator) return;
+
+      const orders = await platformRepository.listActiveOrdersForUser(operator.id);
+      sandboxReconciliationHealth.ordersChecked = orders.length;
+
+      for (const order of orders) {
+        try {
+          const providerOrder = await binanceSpotTestnetAccount.getOrderByClientOrderId?.(
+            order.accountId,
+            order.clientOrderId,
+            order.instrumentId,
+          );
+
+          if (providerOrder) {
+            await platformRepository.updateOrderFromProvider(
+              operator.id,
+              order.clientOrderId,
+              providerOrder,
+            );
+          } else if (order.status !== "UNKNOWN_RECONCILIATION" && order.status !== "PENDING_SUBMIT") {
+            await platformRepository.markOrderStatus(
+              operator.id,
+              order.clientOrderId,
+              "UNKNOWN_RECONCILIATION",
+              "Periodic provider reconciliation found no matching order; Jarvis will not assume cancellation.",
+            );
+          }
+        } catch (error: any) {
+          sandboxReconciliationHealth.lastErrorAt = Date.now();
+          sandboxReconciliationHealth.lastError = error?.message || "Sandbox provider reconciliation failed.";
+        }
+      }
+
+      sandboxReconciliationHealth.lastSuccessAt = Date.now();
+      sandboxReconciliationHealth.lastError = undefined;
+    } catch (error: any) {
+      sandboxReconciliationHealth.lastErrorAt = Date.now();
+      sandboxReconciliationHealth.lastError = error?.message || "Sandbox reconciliation loop failed.";
+    } finally {
+      sandboxReconciliationInFlight = false;
+    }
+  };
+
+  if (platformDatabase.isReady() && binanceSpotTestnetAccount.isConfigured()) {
+    sandboxReconciliationTimer = setInterval(() => {
+      void reconcileSandboxOrders();
+    }, Number(process.env.JARVIS_BINANCE_RECONCILIATION_POLL_MS) || 15_000);
+
+    void reconcileSandboxOrders();
+  }
+
   // Live API WebSocket Voice Gateway
   const wss = new WebSocketServer({ server: httpServer, path: "/api/live-voice" });
   wss.on("connection", async (clientWs: WebSocket) => {
@@ -1724,6 +1802,8 @@ async function startServer() {
     await platformDatabase.stop().catch((error: any) => {
       console.error("PostgreSQL shutdown error:", error?.message || error);
     });
+    if (sandboxReconciliationTimer) clearInterval(sandboxReconciliationTimer);
+    sandboxReconciliationTimer = undefined;
     binanceSpotUserDataStream.stop();
     binanceInstrumentCatalog.stop();
     binanceMarketData.stop();
