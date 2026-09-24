@@ -12,6 +12,7 @@ import { AutonomousPaperRuntime } from "./src/server/paperRuntime";
 import { PlatformDatabase } from "./src/server/platformDatabase";
 import { PlatformRepository } from "./src/platform/platformRepository";
 import { BinanceSpotAccountAdapter } from "./src/platform/binanceSpotAccountAdapter";
+import { BinanceSpotUserDataStream } from "./src/server/binanceSpotUserDataStream";
 import {
   JARVIS_SESSION_COOKIE,
   SESSION_TTL_MS,
@@ -348,7 +349,9 @@ app.get("/api/health", (_req: Request, res: Response) => {
     binanceSpotTestnetAccount: {
       ...awaitHealth(binanceSpotTestnetAccount),
       accountId: binanceSpotTestnetAccount.getAccountId(),
+      orderExecutionEnabled: binanceSpotTestnetAccount.isOrderExecutionEnabled(),
     },
+    binanceSpotUserDataStream: binanceSpotUserDataStream.getHealth(),
     autonomousPaper: {
       status: autonomousPaperRuntime.getStatus().status,
       symbol: autonomousPaperRuntime.getStatus().symbol,
@@ -435,7 +438,46 @@ const binanceInstrumentCatalog = new BinanceInstrumentCatalog(
   platformDatabase.isConfigured()
     ? { persist: (instruments) => platformRepository.syncInstruments(instruments) }
     : undefined,
-);
+);const binanceSpotUserDataStream = new BinanceSpotUserDataStream({
+  accountId: binanceSpotTestnetAccount.getAccountId(),
+  onOrderUpdate: async (order) => {
+    const operatorEmail = process.env.JARVIS_ADMIN_EMAIL;
+    if (!operatorEmail || !platformDatabase.isReady()) return;
+
+    const operator = await platformRepository.getAuthUserByEmail(operatorEmail);
+    if (!operator) return;
+
+    const existing = await platformRepository.getUserOrder(operator.id, order.clientOrderId);
+    if (!existing) return;
+
+    await platformRepository.updateOrderFromProvider(operator.id, order.clientOrderId, order);
+    await platformRepository.recordAuditEvent({
+      userId: operator.id,
+      accountId: existing.accountId,
+      eventType: "ORDER_EVENT_RECONCILED",
+      payload: {
+        provider: "BINANCE_SPOT_TESTNET",
+        clientOrderId: order.clientOrderId,
+        externalOrderId: order.externalOrderId,
+        status: order.status,
+        fillCount: order.fills?.length || 0,
+      },
+    }).catch(() => undefined);
+  },
+  onBalanceUpdate: async (balances) => {
+    const operatorEmail = process.env.JARVIS_ADMIN_EMAIL;
+    if (!operatorEmail || !platformDatabase.isReady()) return;
+    const operator = await platformRepository.getAuthUserByEmail(operatorEmail);
+    if (!operator) return;
+
+    await platformRepository.applyBinanceBalanceEvent(
+      operator.id,
+      binanceSpotTestnetAccount.getAccountId(),
+      balances,
+    );
+  },
+});
+
 const autonomousPaperRuntime = new AutonomousPaperRuntime(binanceMarketData, {
   symbol: process.env.JARVIS_PAPER_SYMBOL || "BTC/USD",
   initialCapital: Number(process.env.JARVIS_PAPER_INITIAL_CAPITAL) || 10_000,
@@ -1563,6 +1605,13 @@ async function startServer() {
 
   await binanceInstrumentCatalog.start();
 
+  if (
+    process.env.JARVIS_BINANCE_USER_STREAM_AUTOSTART !== "false" &&
+    binanceSpotTestnetAccount.isConfigured()
+  ) {
+    binanceSpotUserDataStream.start();
+  }
+
   // Live API WebSocket Voice Gateway
   const wss = new WebSocketServer({ server: httpServer, path: "/api/live-voice" });
   wss.on("connection", async (clientWs: WebSocket) => {
@@ -1675,6 +1724,7 @@ async function startServer() {
     await platformDatabase.stop().catch((error: any) => {
       console.error("PostgreSQL shutdown error:", error?.message || error);
     });
+    binanceSpotUserDataStream.stop();
     binanceInstrumentCatalog.stop();
     binanceMarketData.stop();
     autonomousPaperRuntime.stop("Server shutdown.");
