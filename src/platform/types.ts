@@ -97,7 +97,7 @@ export interface PortfolioPosition {
 }
 
 export type OrderSide = "BUY" | "SELL";
-export type OrderType = "MARKET" | "LIMIT" | "STOP" | "STOP_LIMIT" | "TAKE_PROFIT" | "TAKE_PROFIT_LIMIT";
+export type OrderType = "MARKET" | "LIMIT" | "LIMIT_MAKER" | "STOP" | "STOP_LIMIT" | "TAKE_PROFIT" | "TAKE_PROFIT_LIMIT";
 export type TimeInForce = "DAY" | "GTC" | "IOC" | "FOK" | "GTX";
 
 export type OrderStatus =
