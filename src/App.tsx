@@ -21,6 +21,7 @@ import { AiCopilotModal } from "./components/AiCopilotModal";
 import { ProfitVaultModal } from "./components/ProfitVaultModal";
 import { MainTerminal } from "./components/MainTerminal";
 import { WorkspaceSurface } from "./components/WorkspaceSurface";
+import { LoginScreen, type AuthenticatedUser } from "./components/LoginScreen";
 import type { WorkspaceView } from "./platform/workspace";
 import { AssetSymbol, MarketSimulator, SUPPORTED_ASSETS } from "./engine/marketSimulator";
 import { DEFAULT_STRATEGY, TradingEngine } from "./engine/tradingEngine";
@@ -43,7 +44,7 @@ import {
   EquityCurvePoint,
 } from "./types/trading";
 
-export default function App() {
+function JarvisApp({ onLogout }: { onLogout: () => void }) {
   const [currentAsset, setCurrentAsset] = useState<string>("BTC/USD");
   const [currentView, setCurrentView] = useState<WorkspaceView>("TERMINAL");
   const [marketSource, setMarketSource] = useState<MarketDataSource>("LIVE_MARKET_DATA");
@@ -604,6 +605,7 @@ export default function App() {
           onOpenRadar={() => setIsRadarOpen(true)}
           onOpenResearch={() => setIsStudyModalOpen(true)}
           onOpenSettings={() => setIsRiskSettingsOpen(true)}
+          onLogout={onLogout}
         />
       )}
 
@@ -748,4 +750,99 @@ export default function App() {
       )}
     </div>
   );
+}
+
+ 
+interface AppAuthState {
+  enabled: boolean;
+  authenticated: boolean;
+  user: AuthenticatedUser | null;
+}
+
+export default function App() {
+  const [authState, setAuthState] = useState<AppAuthState | null>(null);
+  const [authError, setAuthError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const load = async () => {
+      try {
+        const response = await fetch("/api/auth/status", {
+          cache: "no-store",
+          credentials: "same-origin",
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(payload?.error || `Authentication service returned HTTP ${response.status}.`);
+        }
+        if (!cancelled) {
+          setAuthState({
+            enabled: payload?.enabled === true,
+            authenticated: payload?.authenticated === true,
+            user: payload?.user ?? null,
+          });
+        }
+      } catch (error: any) {
+        if (!cancelled) setAuthError(error?.message || "Authentication service unavailable.");
+      }
+    };
+
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleAuthenticated = (user: AuthenticatedUser) => {
+    setAuthError(null);
+    setAuthState({ enabled: true, authenticated: true, user });
+  };
+
+  const handleLogout = async () => {
+    try {
+      await fetch("/api/auth/logout", {
+        method: "POST",
+        credentials: "same-origin",
+      });
+    } finally {
+      setAuthState({ enabled: true, authenticated: false, user: null });
+    }
+  };
+
+  if (authError) {
+    return (
+      <div className="min-h-screen bg-neutral-950 text-neutral-100 flex items-center justify-center px-4">
+        <div className="max-w-lg rounded-2xl border border-red-900/60 bg-neutral-900 p-6">
+          <div className="text-[10px] font-mono uppercase tracking-[0.18em] text-red-400">AUTHENTICATION UNAVAILABLE</div>
+          <h1 className="text-xl font-semibold mt-2">Jarvis cannot verify the server identity layer</h1>
+          <p className="text-sm text-neutral-400 mt-2 leading-relaxed">
+            The application is refusing to assume an authenticated state because the identity service did not answer successfully.
+          </p>
+          <div className="mt-4 text-xs font-mono text-red-300 break-words">{authError}</div>
+          <button
+            type="button"
+            className="mt-5 rounded-lg border border-neutral-700 bg-neutral-950 px-3 py-2 text-xs font-mono text-neutral-200"
+            onClick={() => window.location.reload()}
+          >
+            RETRY
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!authState) {
+    return (
+      <div className="min-h-screen bg-neutral-950 text-neutral-100 flex items-center justify-center">
+        <div className="text-xs font-mono uppercase tracking-[0.18em] text-neutral-500">Verifying Jarvis session…</div>
+      </div>
+    );
+  }
+
+  if (authState.enabled && !authState.authenticated) {
+    return <LoginScreen onAuthenticated={handleAuthenticated} />;
+  }
+
+  return <JarvisApp onLogout={handleLogout} />;
 }
