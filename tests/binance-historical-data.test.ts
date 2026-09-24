@@ -15,8 +15,15 @@ describe("Binance historical research data", () => {
       const page = endTime
         ? [[4, "103", "105", "102", "104", "10", 4_999]]
         : [
-            [5, "104", "106", "103", "105", "11", 5_999],
-            [6, "105", "107", "104", "106", "12", Date.now() + 60_000],
+            ...Array.from({ length: 120 }, (_, index) => [
+              index + 5,
+              "104",
+              "106",
+              "103",
+              "105",
+              "11",
+              index === 119 ? Date.now() + 60_000 : index + 5_999,
+            ]),
           ];
 
       return new Response(JSON.stringify(page), {
@@ -31,7 +38,7 @@ describe("Binance historical research data", () => {
 
       expect(calls.length).toBe(2);
       expect(candles.map((candle) => candle.timestamp)).toEqual([4, 5]);
-      expect(candles.every((candle) => candle.close !== 106)).toBe(true);
+      expect(candles.every((candle) => candle.close === 105)).toBe(true);
     } finally {
       globalThis.fetch = originalFetch;
     }
