@@ -414,6 +414,40 @@ app.get("/api/health", (_req: Request, res: Response) => {
   });
 });
 
+app.get("/api/readiness", (_req: Request, res: Response) => {
+  const market = binanceMarketData.getHealth();
+  const database = platformDatabase.getHealth();
+  const catalog = binanceInstrumentCatalog.getHealth();
+  const testnetConfigured = binanceSpotTestnetAccount.isConfigured();
+  const infrastructureChecks = [
+    database.configured ? database.state === "READY" : true,
+    market.state === "READY" && market.connected && market.lastMessageAt !== undefined,
+    catalog.state === "READY",
+    !testnetConfigured || (
+      binanceSpotUserDataStream.getHealth().connected &&
+      binanceSpotUserDataStream.getHealth().subscribed
+    ),
+    !testnetConfigured || (
+      !sandboxReconciliationHealth.lastError &&
+      sandboxReconciliationHealth.lastSuccessAt !== undefined
+    ),
+  ];
+  const ready = infrastructureChecks.every(Boolean);
+
+  return res.status(ready ? 200 : 503).json({
+    status: ready ? "ready" : "not_ready",
+    checks: {
+      database: database.state,
+      marketData: market.state,
+      instrumentCatalog: catalog.state,
+      accountStream: testnetConfigured ? binanceSpotUserDataStream.getHealth() : "DISABLED",
+      reconciliation: testnetConfigured ? sandboxReconciliationHealth : "DISABLED",
+    },
+    note: "Readiness covers infrastructure only. Strategy validation and shadow evidence remain separate safety gates.",
+    timestamp: Date.now(),
+  });
+});
+
 // Helper: Local Quantitative Reasoning & Strategy Research Engine
 // Ensures local fallback analysis even if Gemini API key is absent, expired, or rate-limited
 function computeQuantitativeStudy(data: any) {
