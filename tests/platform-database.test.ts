@@ -53,7 +53,7 @@ describe("Binance Spot testnet adapter", () => {
 
     expect(signature).toMatch(/^[a-f0-9]{64}$/);
     expect(signature).toBe(
-      "5ea5c0f28f3b1b8e1f1bd0f7d0c7d2c7cfd8f4c0d04d1f53e4c78e7189b0b2a1",
+      "363315904e8e7c5d386769030aed1098dbf2f3340bdccd18d069ef75d8420964",
     );
   });
 });
