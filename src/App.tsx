@@ -19,7 +19,7 @@ import { TradeVerificationToast } from "./components/TradeVerificationToast";
 import { AnalyticsCharts } from "./components/AnalyticsCharts";
 import { AiCopilotModal } from "./components/AiCopilotModal";
 import { ProfitVaultModal } from "./components/ProfitVaultModal";
-import { AssetSymbol, MarketSimulator } from "./engine/marketSimulator";
+import { AssetSymbol, MarketSimulator, SUPPORTED_ASSETS } from "./engine/marketSimulator";
 import { DEFAULT_STRATEGY, TradingEngine } from "./engine/tradingEngine";
 import { strategyVaultInstance } from "./engine/strategyVault";
 import { cryptoSecurityService } from "./utils/cryptoSecurity";
