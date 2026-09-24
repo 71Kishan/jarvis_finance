@@ -1038,10 +1038,7 @@ app.post("/api/research/strategy-deploy", requireSameOrigin, requireSession, asy
 
     const deployment = await platformRepository.deployShadowStrategy({
       userId: req.jarvisUser!.id,
-      strategyId: "",
       validationRunId,
-      strategyVersion: 0,
-      strategy: {},
       reason,
     });
 
