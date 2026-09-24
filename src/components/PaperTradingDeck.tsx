@@ -28,7 +28,7 @@ import {
 } from "lucide-react";
 
 interface PaperTradingDeckProps {
-  currentPrice: number;
+  currentPrice: number | null;
   asset: string;
   botState: BotState;
   vitality: BotVitality;
@@ -88,13 +88,13 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
   const positionSizeUsd = amountUsd;
   const calculatedStopPrice =
     orderType === "LONG"
-      ? currentPrice * (1 - stopLossPercent / 100)
-      : currentPrice * (1 + stopLossPercent / 100);
+      ? Number(currentPrice) * (1 - stopLossPercent / 100)
+      : Number(currentPrice) * (1 + stopLossPercent / 100);
 
   const calculatedTargetPrice =
     orderType === "LONG"
-      ? currentPrice * (1 + takeProfitPercent / 100)
-      : currentPrice * (1 - takeProfitPercent / 100);
+      ? Number(currentPrice) * (1 + takeProfitPercent / 100)
+      : Number(currentPrice) * (1 - takeProfitPercent / 100);
 
   const riskRewardRatio = (takeProfitPercent / (stopLossPercent || 0.1)).toFixed(1);
 
