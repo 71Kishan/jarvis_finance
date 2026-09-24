@@ -50,6 +50,22 @@ export function multiplyDecimals(left: string, right: string): string {
   return normalizeDecimal(digits.slice(0, point) + "." + digits.slice(point));
 }
 
+export function subtractDecimals(left: string, right: string): string {
+  const a = parts(left);
+  const b = parts(right);
+  const scale = Math.max(a.scale, b.scale);
+  const leftUnits = a.units * 10n ** BigInt(scale - a.scale);
+  const rightUnits = b.units * 10n ** BigInt(scale - b.scale);
+  if (leftUnits < rightUnits) {
+    throw new Error("Decimal subtraction would produce a negative value.");
+  }
+  const units = leftUnits - rightUnits;
+  const digits = units.toString().padStart(scale + 1, "0");
+  if (scale === 0) return digits;
+  const point = digits.length - scale;
+  return normalizeDecimal(digits.slice(0, point) + "." + digits.slice(point));
+}
+
 export function isMultipleOfStep(value: string, step: string): boolean {
   const a = parts(value);
   const b = parts(step);
