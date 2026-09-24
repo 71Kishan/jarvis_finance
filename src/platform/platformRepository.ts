@@ -1510,6 +1510,15 @@ export class PlatformRepository implements InstrumentPersistence {
   }
 
   public async markOrderStatus(userId: string, clientOrderId: string, status: OrderStatus, message?: string): Promise<PersistedOrder> {
+    const current = await this.getUserOrder(userId, clientOrderId);
+    if (!current) throw new Error("Persisted sandbox order was not found.");
+
+    if (!canTransitionOrderStatus(current.status as OrderStatus, status)) {
+      throw new Error(
+        `Invalid order state transition: ${current.status} -> ${status}.`,
+      );
+    }
+
     const result = await this.database.query<any>(
       [
         "UPDATE orders o SET status = $2, updated_at = now(), last_provider_event_at = now()",
