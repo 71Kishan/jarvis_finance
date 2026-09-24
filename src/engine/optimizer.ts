@@ -385,6 +385,16 @@ export class StrategyOptimizer {
     const worstOosDrawdown = selectedFolds.length
       ? Math.max(...selectedFolds.map((fold) => fold.test.maxDrawdown))
       : 0;
+    const firstOosStart = selectedFolds[0]?.validationEnd;
+    const lastOosEnd = selectedFolds[selectedFolds.length - 1]?.testEnd;
+    const oosStartTimestamp =
+      firstOosStart !== undefined ? candles[firstOosStart]?.timestamp : undefined;
+    const oosEndTimestamp =
+      lastOosEnd !== undefined ? candles[Math.min(candles.length - 1, lastOosEnd - 1)]?.timestamp : undefined;
+    const oosCalendarDays =
+      oosStartTimestamp !== undefined && oosEndTimestamp !== undefined
+        ? Math.max(0, (oosEndTimestamp - oosStartTimestamp) / 86_400_000)
+        : 0;
 
     const aggregateTestTrades = selectedFolds.reduce((sum, fold) => sum + fold.test.totalTrades, 0);
     const aggregateWins = selectedFolds.reduce(
@@ -458,18 +468,10 @@ export class StrategyOptimizer {
           winRate: fold.test.winRate,
         },
       })),
-      walkForwardReliable: (() => {
-        if (folds.length < 3 || selectedFolds.length < 3) return false;
-        const firstOosStart = selectedFolds[0].validationEnd;
-        const lastOosEnd = selectedFolds[selectedFolds.length - 1].testEnd;
-        const oosStartTimestamp = candles[firstOosStart]?.timestamp;
-        const oosEndTimestamp = candles[Math.min(candles.length - 1, lastOosEnd - 1)]?.timestamp;
-        const oosCalendarDays =
-          oosStartTimestamp !== undefined && oosEndTimestamp !== undefined
-            ? (oosEndTimestamp - oosStartTimestamp) / 86_400_000
-            : 0;
-        return oosCalendarDays >= 30;
-      })(),
+      walkForwardReliable:
+        folds.length >= 3 &&
+        selectedFolds.length >= 3 &&
+        oosCalendarDays >= 30,
       walkForwardSummary: {
         folds: folds.length,
         selectedFolds: selectedFolds.length,
@@ -479,6 +481,7 @@ export class StrategyOptimizer {
         meanOosReturnPercent: Number((oosMeanReturn * 100).toFixed(3)),
         medianOosReturnPercent: Number((oosMedianReturn * 100).toFixed(3)),
         worstOosDrawdownPercent: Number(worstOosDrawdown.toFixed(2)),
+        oosCalendarDays: Number(oosCalendarDays.toFixed(2)),
         selectionCounts: Object.fromEntries(selectionCounts),
       },
       optimizationInsights: [
