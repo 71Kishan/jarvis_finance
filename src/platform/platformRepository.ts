@@ -793,6 +793,7 @@ export class PlatformRepository implements InstrumentPersistence {
       policy: Record<string, unknown>;
       metrics: Record<string, unknown>;
       source: StrategyValidationRecord["source"];
+      strategy: Record<string, unknown> | null;
       created_at: Date;
     }>(
       [
@@ -866,7 +867,7 @@ export class PlatformRepository implements InstrumentPersistence {
     }>(
       [
         "SELECT id, user_id, strategy_id, strategy_version, strategy_name, status, evaluated_at,",
-        "       evidence_hash, policy, metrics, source, created_at",
+        "       evidence_hash, policy, metrics, source, strategy, created_at",
         "FROM strategy_validation_runs",
         "WHERE user_id = $1 AND strategy_id = $2",
         "ORDER BY strategy_version DESC, evaluated_at DESC",
@@ -889,6 +890,7 @@ export class PlatformRepository implements InstrumentPersistence {
       policy: row.policy,
       metrics: row.metrics,
       source: row.source,
+      strategy: row.strategy || undefined,
       createdAt: row.created_at.getTime(),
     };
   }
