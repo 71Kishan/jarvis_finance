@@ -184,6 +184,7 @@ export const WorkspaceSurface: React.FC<WorkspaceSurfaceProps> = ({
         connections: current?.connections?.map((row) => row.id === payload.connection.id ? payload.connection : row) || [payload.connection],
         balances: current?.balances || [],
         openOrders: current?.openOrders || [],
+        fills: current?.fills || [],
       }));
       setAccountMessage("Testnet trading gate enabled for this connected account. Real-money execution remains unavailable.");
     } catch (error: any) {
