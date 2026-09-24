@@ -77,7 +77,7 @@ export class AutonomousShadowRuntime {
   public async start(operatorUserId?: string): Promise<void> {
     if (this.timer) return;
 
-    if (!this.repository["database"]?.isReady?.()) {
+    if (!this.repository.isPersistenceReady()) {
       this.status = "ERROR";
       this.message = "Shadow runtime requires ready PostgreSQL persistence.";
       return;
