@@ -9,8 +9,9 @@ import type { Instrument } from "../platform/types";
 interface MainTerminalProps {
   asset: string;
   candles: Candle[];
+  formingCandle?: Candle | null;
   ticker: LiveExchangeTicker | null;
-  currentPrice: number;
+  currentPrice: number | null;
   regime: "BULL_EXPANSION" | "BEAR_TREND" | "CHOPPY_RANGE" | "VOLATILITY_SPIKE";
   onSelectAsset: (asset: string) => void;
   onOpenPortfolio: () => void;
@@ -24,6 +25,7 @@ const fmt = (value: number | null | undefined, digits = 2) =>
 export const MainTerminal: React.FC<MainTerminalProps> = ({
   asset,
   candles,
+  formingCandle,
   ticker,
   currentPrice,
   regime,
@@ -80,6 +82,7 @@ export const MainTerminal: React.FC<MainTerminalProps> = ({
 
           <MarketChart
             candles={candles}
+            formingCandle={formingCandle}
             activeTrade={null}
             tradeHistory={[]}
             assetSymbol={asset}
