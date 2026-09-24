@@ -152,17 +152,21 @@ export const WorkspaceSurface: React.FC<WorkspaceSurfaceProps> = ({
             No cash, wallet balance or position is invented while no provider account is linked.
           </p>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-6">
-            {[
-              ["Connected Accounts", "0", Link2],
-              ["Wallet Balances", "Unavailable", Wallet],
-              ["Open Positions", "Unavailable", Activity],
-            ].map(([label, value, Icon]) => (
-              <div key={String(label)} className="rounded-lg bg-neutral-950 border border-neutral-800 p-4">
-                <Icon className="w-4 h-4 text-neutral-500" />
-                <div className="text-[10px] text-neutral-600 font-mono uppercase mt-3">{label}</div>
-                <div className="text-lg font-mono font-semibold text-neutral-200 mt-1">{value}</div>
-              </div>
-            ))}
+            <div className="rounded-lg bg-neutral-950 border border-neutral-800 p-4">
+              <Link2 className="w-4 h-4 text-neutral-500" />
+              <div className="text-[10px] text-neutral-600 font-mono uppercase mt-3">Connected Accounts</div>
+              <div className="text-lg font-mono font-semibold text-neutral-200 mt-1">0</div>
+            </div>
+            <div className="rounded-lg bg-neutral-950 border border-neutral-800 p-4">
+              <Wallet className="w-4 h-4 text-neutral-500" />
+              <div className="text-[10px] text-neutral-600 font-mono uppercase mt-3">Wallet Balances</div>
+              <div className="text-lg font-mono font-semibold text-neutral-200 mt-1">Unavailable</div>
+            </div>
+            <div className="rounded-lg bg-neutral-950 border border-neutral-800 p-4">
+              <Activity className="w-4 h-4 text-neutral-500" />
+              <div className="text-[10px] text-neutral-600 font-mono uppercase mt-3">Open Positions</div>
+              <div className="text-lg font-mono font-semibold text-neutral-200 mt-1">Unavailable</div>
+            </div>
           </div>
           <button type="button" onClick={onOpenSettings} className="mt-5 px-3 py-2 rounded-lg bg-neutral-950 hover:bg-neutral-800 border border-neutral-700 text-xs font-mono text-neutral-200">
             Account & security settings
