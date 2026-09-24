@@ -40,3 +40,20 @@ describe("platform persistence primitives", () => {
     });
   });
 });
+
+
+describe("Binance Spot testnet adapter", () => {
+  test("signs percent-encoded parameters using HMAC SHA-256", async () => {
+    const { buildBinanceSignature } = await import("../src/platform/binanceSpotAccountAdapter");
+    const signature = buildBinanceSignature("secret", [
+      ["symbol", "BTCUSDT"],
+      ["note", "hello world"],
+      ["timestamp", "1700000000000"],
+    ]);
+
+    expect(signature).toMatch(/^[a-f0-9]{64}$/);
+    expect(signature).toBe(
+      "5ea5c0f28f3b1b8e1f1bd0f7d0c7d2c7cfd8f4c0d04d1f53e4c78e7189b0b2a1",
+    );
+  });
+});
