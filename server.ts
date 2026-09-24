@@ -665,6 +665,24 @@ function sandboxClientOrderId(userId: string, accountId: string, idempotencyKey:
     .slice(0, 24);
 }
 
+function sandboxRequestFingerprint(body: any): string {
+  const canonical = JSON.stringify({
+    accountId: typeof body?.accountId === "string" ? body.accountId.trim() : "",
+    instrumentId: typeof body?.instrumentId === "string" ? body.instrumentId.trim().toUpperCase() : "",
+    side: body?.side === "BUY" || body?.side === "SELL" ? body.side : "",
+    type: typeof body?.type === "string" ? body.type.trim().toUpperCase() : "",
+    quantity: typeof body?.quantity === "string" ? body.quantity : "",
+    limitPrice: typeof body?.limitPrice === "string" ? body.limitPrice : undefined,
+    stopPrice: typeof body?.stopPrice === "string" ? body.stopPrice : undefined,
+    timeInForce: typeof body?.timeInForce === "string" ? body.timeInForce.toUpperCase() : undefined,
+    reduceOnly: body?.reduceOnly === true,
+    strategyId: typeof body?.strategyId === "string" ? body.strategyId.slice(0, 160) : undefined,
+    strategyVersion: Number.isInteger(body?.strategyVersion) ? body.strategyVersion : undefined,
+    reason: typeof body?.reason === "string" ? body.reason.slice(0, 500) : undefined,
+  });
+  return createHash("sha256").update(canonical, "utf8").digest("hex");
+}
+
 function isDecimalString(value: unknown, positive = false): value is string {
   if (typeof value !== "string" || !/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(value)) return false;
   const numeric = Number(value);
@@ -750,10 +768,10 @@ app.post("/api/account/binance-testnet/enable-sandbox-trading", requireSameOrigi
       });
     }
 
-    const account = await platformRepository.getUserAccountConnection(
-      req.jarvisUser!.id,
-      binanceSpotTestnetAccount.getAccountId(),
-    );
+    const accountId = typeof req.body?.accountId === "string" ? req.body.accountId.trim() : "";
+    if (!accountId) return res.status(400).json({ success: false, error: "accountId is required." });
+
+    const account = await platformRepository.getUserAccountConnection(req.jarvisUser!.id, accountId);
     if (!account || account.provider !== "BINANCE_SPOT_TESTNET") {
       return res.status(404).json({ success: false, error: "Binance Spot Testnet account is not connected. Sync it first." });
     }
@@ -803,6 +821,7 @@ app.post("/api/account/binance-testnet/orders", requireSameOrigin, requireSessio
       });
     }
 
+    const requestFingerprint = sandboxRequestFingerprint(req.body);
     const existing = await platformRepository.getOrderByIdempotencyKey(
       req.jarvisUser!.id,
       accountId,
@@ -810,6 +829,12 @@ app.post("/api/account/binance-testnet/orders", requireSameOrigin, requireSessio
     );
 
     if (existing) {
+      if (existing.idempotencyFingerprint && existing.idempotencyFingerprint !== requestFingerprint) {
+        return res.status(409).json({
+          success: false,
+          error: "Idempotency-Key was already used for a different order intent.",
+        });
+      }
       const reconciled = await reconcileSandboxOrder(existing, req.jarvisUser!.id);
       return res.status(200).json({
         success: true,
@@ -836,6 +861,7 @@ app.post("/api/account/binance-testnet/orders", requireSameOrigin, requireSessio
         req.jarvisUser!.id,
         accountId,
         idempotencyKey,
+        requestFingerprint,
         intent,
       );
     } catch (error: any) {
@@ -846,6 +872,12 @@ app.post("/api/account/binance-testnet/orders", requireSameOrigin, requireSessio
           idempotencyKey,
         );
         if (raced) {
+          if (raced.idempotencyFingerprint && raced.idempotencyFingerprint !== requestFingerprint) {
+            return res.status(409).json({
+              success: false,
+              error: "Idempotency-Key was already used for a different order intent.",
+            });
+          }
           const reconciled = await reconcileSandboxOrder(raced, req.jarvisUser!.id);
           return res.status(200).json({
             success: true,
