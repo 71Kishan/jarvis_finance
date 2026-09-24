@@ -11,3 +11,6 @@ coverage/
 data/paper-runtime.json
 data/paper-runtime.json.tmp-*
 data/paper-runtime.json.corrupt-*
+
+# Database backups contain account state; keep them outside git.
+backups/
