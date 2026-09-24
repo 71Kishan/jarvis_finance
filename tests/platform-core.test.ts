@@ -58,3 +58,48 @@ describe("platform instrument registry", () => {
     expect(registry.list({ tradableOnly: true })).toHaveLength(0);
   });
 });
+
+
+describe("binance display-bar contract", () => {
+  test("closed candle domain remains separate from the live forming bar", async () => {
+    const { BinanceMarketDataService } = await import("../src/server/binanceMarketData");
+    const gateway = new BinanceMarketDataService({ "BTC/USD": "BTCUSDT" });
+    const anyGateway = gateway as any;
+
+    anyGateway.handleKline({
+      e: "kline",
+      k: {
+        s: "BTCUSDT",
+        x: false,
+        t: 1_760_000_000_000,
+        T: 1_760_000_059_999,
+        o: "100",
+        h: "101",
+        l: "99",
+        c: "100.5",
+        v: "12",
+      },
+    });
+
+    expect(anyGateway.candles.get("BTC/USD") ?? []).toHaveLength(0);
+    expect(anyGateway.formingCandles.get("BTC/USD")?.close).toBe(100.5);
+
+    anyGateway.handleKline({
+      e: "kline",
+      k: {
+        s: "BTCUSDT",
+        x: true,
+        t: 1_760_000_000_000,
+        T: 1_760_000_059_999,
+        o: "100",
+        h: "101.5",
+        l: "99",
+        c: "101",
+        v: "15",
+      },
+    });
+
+    expect(anyGateway.candles.get("BTC/USD")).toHaveLength(1);
+    expect(anyGateway.formingCandles.get("BTC/USD")).toBeUndefined();
+  });
+});
