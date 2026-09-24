@@ -10,6 +10,7 @@ import dotenv from "dotenv";
 import { BinanceMarketDataService } from "./src/server/binanceMarketData";
 import { BinanceInstrumentCatalog } from "./src/server/binanceInstrumentCatalog";
 import { AutonomousPaperRuntime } from "./src/server/paperRuntime";
+import { AutonomousShadowRuntime } from "./src/server/shadowRuntime";
 import { PlatformDatabase } from "./src/server/platformDatabase";
 import { PlatformRepository } from "./src/platform/platformRepository";
 import { BinanceSpotAccountAdapter } from "./src/platform/binanceSpotAccountAdapter";
@@ -372,6 +373,11 @@ app.get("/api/health", (_req: Request, res: Response) => {
       symbol: autonomousPaperRuntime.getStatus().symbol,
       lastProcessedCandleAt: autonomousPaperRuntime.getStatus().lastProcessedCandleAt,
     },
+    autonomousShadow: {
+      status: autonomousShadowRuntime.getStatus().status,
+      symbol: autonomousShadowRuntime.getStatus().symbol,
+      lastProcessedCandleAt: autonomousShadowRuntime.getStatus().lastProcessedCandleAt,
+    },
     timestamp: Date.now(),
   });
 });
@@ -498,12 +504,22 @@ const autonomousPaperRuntime = new AutonomousPaperRuntime(binanceMarketData, {
   initialCapital: Number(process.env.JARVIS_PAPER_INITIAL_CAPITAL) || 10_000,
   pollIntervalMs: Number(process.env.JARVIS_PAPER_POLL_MS) || 1000,
 });
+
+const autonomousShadowRuntime = new AutonomousShadowRuntime(
+  binanceMarketData,
+  platformRepository,
+  {
+    symbol: process.env.JARVIS_SHADOW_SYMBOL || "BTC/USD",
+    researchCapital: Number(process.env.JARVIS_SHADOW_INITIAL_CAPITAL) || 10_000,
+    pollIntervalMs: Number(process.env.JARVIS_SHADOW_POLL_MS) || 1000,
+  },
+);
+
 void binanceMarketData.start();
 
 if (process.env.JARVIS_PAPER_AUTOSTART === "true") {
   autonomousPaperRuntime.start();
 }
-
 
 function computeQuantitativeMarketIntelligence(asset: string, marketSnapshot: any = null) {
   const cleanAsset = asset || "Unknown asset";
@@ -1724,6 +1740,23 @@ app.post("/api/runtime/paper/start", requireControlToken, (_req: Request, res: R
 app.post("/api/runtime/paper/stop", requireControlToken, (_req: Request, res: Response) => {
   autonomousPaperRuntime.stop("Paper runtime stopped by operator.");
   res.json(autonomousPaperRuntime.getStatus());
+});
+
+// Server-owned shadow forward-validation controls.
+// Shadow uses live trusted market data and the deterministic paper risk/execution model,
+// but never sends orders to a venue.
+app.get("/api/runtime/shadow/status", requireControlToken, (_req: Request, res: Response) => {
+  res.json(autonomousShadowRuntime.getStatus());
+});
+
+app.post("/api/runtime/shadow/start", requireControlToken, async (_req: Request, res: Response) => {
+  await autonomousShadowRuntime.start();
+  res.json(autonomousShadowRuntime.getStatus());
+});
+
+app.post("/api/runtime/shadow/stop", requireControlToken, async (_req: Request, res: Response) => {
+  await autonomousShadowRuntime.stop("Shadow runtime stopped by operator.");
+  res.json(autonomousShadowRuntime.getStatus());
 });
 
 // Read-only Binance Spot testnet account inspection.
