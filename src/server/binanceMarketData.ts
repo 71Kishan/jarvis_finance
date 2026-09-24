@@ -361,3 +361,89 @@ export class BinanceMarketDataService {
       high24h: Number.isFinite(patch.high24h) ? Number(patch.high24h) : Number(current?.high24h) || price,
       low24h: Number.isFinite(patch.low24h) ? Number(patch.low24h) : Number(current?.low24h) || price,
       volume24h: Number.isFinite(patch.volume24h) ? Number(patch.volume24h) : Number(current?.volume24h) || 0,
+      change24hPercent: Number.isFinite(patch.change24hPercent)
+        ? Number(patch.change24hPercent)
+        : Number(current?.change24hPercent) || 0,
+      lastUpdated: now,
+      source: "BINANCE",
+      quoteQuality: "BID_ASK",
+    };
+
+    this.tickers.set(symbol, { ticker, lastQuoteAt: now });
+  }
+
+  private async bootstrapCandles(): Promise<void> {
+    await Promise.all(
+      Object.entries(this.symbolMap).map(async ([symbol, exchangeSymbol]) => {
+        await this.bootstrapSymbol(symbol, exchangeSymbol);
+      }),
+    );
+  }
+
+  private async bootstrapSymbol(symbol: string, exchangeSymbol: string): Promise<void> {
+    try {
+      const endpoint = REST_BASE_URL + "/api/v3/klines?symbol=" + encodeURIComponent(exchangeSymbol) + "&interval=1m&limit=" + BOOTSTRAP_LIMIT;
+      const response = await fetch(endpoint, {
+        headers: { Accept: "application/json", "User-Agent": "JarvisFinance/1.0" },
+      });
+      if (!response.ok) throw new Error("HTTP " + response.status);
+      const rows: any = await response.json();
+      if (!Array.isArray(rows)) throw new Error("Invalid kline response.");
+
+      const now = Date.now();
+      const completed = rows
+        .filter((row: any[]) => Array.isArray(row) && Number(row[6]) <= now)
+        .map((row: any[]) => ({
+          timestamp: Number(row[0]),
+          open: Number(row[1]),
+          high: Number(row[2]),
+          low: Number(row[3]),
+          close: Number(row[4]),
+          volume: Number(row[5]),
+        }))
+        .filter((row: Candle) =>
+          [row.timestamp, row.open, row.high, row.low, row.close, row.volume].every(Number.isFinite),
+        );
+
+      if (completed.length) {
+        this.candles.set(symbol, completed.slice(-MAX_CANDLES_PER_SYMBOL));
+        this.lastClosedCandleAt = Math.max(
+          this.lastClosedCandleAt || 0,
+          completed[completed.length - 1].timestamp + 59_999,
+        );
+      }
+    } catch (error: any) {
+      console.warn("Binance candle bootstrap failed for " + symbol + ":", error?.message || error);
+    }
+  }
+
+  private subscribeStreams(streams: string[]): void {
+    const socket = this.socket;
+    if (!socket || socket.readyState !== WebSocket.OPEN || this.stopped) return;
+
+    const unique = Array.from(new Set(streams)).filter((stream) => stream && !this.subscribedStreams.has(stream));
+    if (!unique.length) return;
+
+    if (this.subscribedStreams.size + unique.length > BinanceMarketDataService.MAX_STREAMS_PER_CONNECTION) {
+      console.warn("Binance stream subscription limit reached; detailed market data was not subscribed.");
+      return;
+    }
+
+    for (let i = 0; i < unique.length; i += 200) {
+      const batch = unique.slice(i, i + 200);
+      batch.forEach((stream) => this.subscribedStreams.add(stream));
+      socket.send(JSON.stringify({
+        method: "SUBSCRIBE",
+        params: batch,
+        id: ++this.subscriptionRequestId,
+      }));
+    }
+  }
+
+  private toAppSymbol(exchangeSymbol: string): string | null {
+    for (const [symbol, mapped] of Object.entries(this.symbolMap)) {
+      if (mapped === exchangeSymbol) return symbol;
+    }
+    return null;
+  }
+}
