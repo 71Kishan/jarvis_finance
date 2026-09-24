@@ -1,5 +1,5 @@
 import type { PoolClient } from "pg";
-import type { AccountConnection, BrokerOrder, Fill, Instrument, OrderIntent, OrderStatus, TradingPermission } from "./types";
+import type { AccountConnection, BrokerOrder, Fill, Instrument, OrderIntent, OrderStatus, Trade, TradingPermission } from "./types";
 import { PlatformDatabase } from "../server/platformDatabase";
 import { canTransitionOrderStatus } from "./orderStateMachine";
 
@@ -123,6 +123,26 @@ export interface ShadowRuntimeRecord {
   lastProcessedCandleAt?: number;
   startedAt?: number;
   updatedAt: number;
+}
+
+export interface ShadowEvidenceSummary {
+  runtimeId: string;
+  strategyId: string;
+  strategyVersion: number;
+  symbol: string;
+  status: ShadowRuntimeRecord["status"];
+  firstObservationAt: number | null;
+  lastObservationAt: number | null;
+  observationCount: number;
+  forwardCalendarDays: number;
+  maxDrawdownPercent: string;
+  latestEquity: string | null;
+  closedTrades: number;
+  winningTrades: number;
+  losingTrades: number;
+  winRatePercent: string;
+  totalPnl: string;
+  totalFees: string;
 }
 
 export interface StrategyValidationRecord {
@@ -1011,6 +1031,209 @@ export class PlatformRepository implements InstrumentPersistence {
       lastProcessedCandleAt: dateToMs(row.last_processed_candle_at),
       startedAt: dateToMs(row.started_at),
       updatedAt: row.updated_at.getTime(),
+    };
+  }
+
+  public async recordShadowObservation(input: {
+    runtimeId: string;
+    candleTimestamp: number;
+    closePrice: string;
+    equity: string;
+    cash: string;
+    drawdownPercent: string;
+    dailyDrawdownPercent: string;
+    botState: string;
+    eventType: "HEARTBEAT" | "SIGNAL" | "ENTRY" | "EXIT" | "HALT";
+    signal?: Record<string, unknown> | null;
+    activeTrade?: Record<string, unknown> | null;
+    tradeEvent?: Record<string, unknown> | null;
+  }): Promise<void> {
+    if (!this.database.isReady()) {
+      throw new Error("PostgreSQL is required for shadow evidence persistence.");
+    }
+
+    await this.database.query(
+      [
+        "INSERT INTO shadow_equity_snapshots(",
+        "  runtime_id, candle_timestamp, processed_at, close_price, equity, cash,",
+        "  drawdown_percent, daily_drawdown_percent, bot_state, event_type, signal,",
+        "  active_trade, trade_event",
+        ") VALUES ($1,to_timestamp($2 / 1000.0),now(),$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11::jsonb,$12::jsonb)",
+        "ON CONFLICT (runtime_id, candle_timestamp)",
+        "DO UPDATE SET",
+        "  processed_at = now(), close_price = EXCLUDED.close_price,",
+        "  equity = EXCLUDED.equity, cash = EXCLUDED.cash,",
+        "  drawdown_percent = EXCLUDED.drawdown_percent,",
+        "  daily_drawdown_percent = EXCLUDED.daily_drawdown_percent,",
+        "  bot_state = EXCLUDED.bot_state, event_type = EXCLUDED.event_type,",
+        "  signal = EXCLUDED.signal, active_trade = EXCLUDED.active_trade,",
+        "  trade_event = EXCLUDED.trade_event",
+      ].join("\n"),
+      [
+        input.runtimeId,
+        input.candleTimestamp,
+        input.closePrice,
+        input.equity,
+        input.cash,
+        input.drawdownPercent,
+        input.dailyDrawdownPercent,
+        input.botState,
+        input.eventType,
+        input.signal ? JSON.stringify(input.signal) : null,
+        input.activeTrade ? JSON.stringify(input.activeTrade) : null,
+        input.tradeEvent ? JSON.stringify(input.tradeEvent) : null,
+      ],
+    );
+  }
+
+  public async upsertShadowTrade(runtimeId: string, trade: Trade): Promise<void> {
+    if (!this.database.isReady()) {
+      throw new Error("PostgreSQL is required for shadow trade persistence.");
+    }
+
+    await this.database.query(
+      [
+        "INSERT INTO shadow_trades(",
+        "  runtime_id, trade_id, asset, trade_type, entry_price, exit_price, amount, size_usd,",
+        "  margin_usd, entry_time, exit_time, stop_loss, take_profit, highest_price, lowest_price,",
+        "  pnl, pnl_percent, fees_usd, slippage_usd, status, signal_score, confidence, rationale",
+        ") VALUES (",
+        "  $1,$2,$3,$4,$5,$6,$7,$8,$9,to_timestamp($10 / 1000.0),",
+        "  CASE WHEN $11::bigint > 0 THEN to_timestamp($11 / 1000.0) ELSE NULL END,",
+        "  $12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23",
+        ")",
+        "ON CONFLICT (runtime_id, trade_id)",
+        "DO UPDATE SET",
+        "  exit_price = EXCLUDED.exit_price, amount = EXCLUDED.amount, size_usd = EXCLUDED.size_usd,",
+        "  margin_usd = EXCLUDED.margin_usd, exit_time = EXCLUDED.exit_time,",
+        "  stop_loss = EXCLUDED.stop_loss, take_profit = EXCLUDED.take_profit,",
+        "  highest_price = EXCLUDED.highest_price, lowest_price = EXCLUDED.lowest_price,",
+        "  pnl = EXCLUDED.pnl, pnl_percent = EXCLUDED.pnl_percent, fees_usd = EXCLUDED.fees_usd,",
+        "  slippage_usd = EXCLUDED.slippage_usd, status = EXCLUDED.status,",
+        "  signal_score = EXCLUDED.signal_score, confidence = EXCLUDED.confidence,",
+        "  rationale = EXCLUDED.rationale, updated_at = now()",
+      ].join("\n"),
+      [
+        runtimeId,
+        trade.id,
+        trade.asset,
+        trade.type,
+        String(trade.entryPrice),
+        trade.exitPrice === undefined ? null : String(trade.exitPrice),
+        String(trade.amount),
+        String(trade.sizeUsd),
+        trade.marginUsd === undefined ? null : String(trade.marginUsd),
+        trade.entryTime,
+        trade.exitTime ?? 0,
+        String(trade.stopLoss),
+        String(trade.takeProfit),
+        trade.highestPrice === undefined ? null : String(trade.highestPrice),
+        trade.lowestPrice === undefined ? null : String(trade.lowestPrice),
+        String(trade.pnl),
+        String(trade.pnlPercent),
+        trade.feesUsd === undefined ? null : String(trade.feesUsd),
+        trade.slippageUsd === undefined ? null : String(trade.slippageUsd),
+        trade.status,
+        String(trade.signalScore),
+        String(trade.confidence),
+        trade.rationale,
+      ],
+    );
+  }
+
+  public async getShadowEvidenceSummary(
+    userId: string,
+    strategyId: string,
+    symbol: string,
+  ): Promise<ShadowEvidenceSummary | null> {
+    if (!this.database.isReady()) {
+      throw new Error("PostgreSQL is required for shadow evidence reads.");
+    }
+
+    const runtimeResult = await this.database.query<{
+      id: string;
+      strategy_id: string;
+      strategy_version: number;
+      symbol: string;
+      status: ShadowRuntimeRecord["status"];
+      first_observation_at: Date | null;
+      last_observation_at: Date | null;
+      observation_count: string;
+      max_drawdown_percent: string | null;
+      latest_equity: string | null;
+    }>(
+      [
+        "SELECT r.id, r.strategy_id, r.strategy_version, r.symbol, r.status,",
+        "       MIN(s.candle_timestamp) AS first_observation_at,",
+        "       MAX(s.candle_timestamp) AS last_observation_at,",
+        "       COUNT(s.id)::text AS observation_count,",
+        "       COALESCE(MAX(s.drawdown_percent), 0)::text AS max_drawdown_percent,",
+        "       (SELECT s2.equity::text FROM shadow_equity_snapshots s2",
+        "        WHERE s2.runtime_id = r.id ORDER BY s2.candle_timestamp DESC LIMIT 1) AS latest_equity",
+        "FROM shadow_runtime_states r",
+        "LEFT JOIN shadow_equity_snapshots s ON s.runtime_id = r.id",
+        "WHERE r.user_id = $1 AND r.strategy_id = $2 AND r.symbol = $3",
+        "GROUP BY r.id, r.strategy_id, r.strategy_version, r.symbol, r.status",
+        "ORDER BY r.updated_at DESC",
+        "LIMIT 1",
+      ].join("\n"),
+      [userId, strategyId, symbol],
+    );
+
+    const runtime = runtimeResult.rows[0];
+    if (!runtime) return null;
+
+    const tradeResult = await this.database.query<{
+      closed_trades: string;
+      winning_trades: string;
+      losing_trades: string;
+      total_pnl: string | null;
+      total_fees: string | null;
+    }>(
+      [
+        "SELECT",
+        "  COUNT(*) FILTER (WHERE status <> 'OPEN')::text AS closed_trades,",
+        "  COUNT(*) FILTER (WHERE status <> 'OPEN' AND pnl > 0)::text AS winning_trades,",
+        "  COUNT(*) FILTER (WHERE status <> 'OPEN' AND pnl < 0)::text AS losing_trades,",
+        "  COALESCE(SUM(pnl) FILTER (WHERE status <> 'OPEN'), 0)::text AS total_pnl,",
+        "  COALESCE(SUM(fees_usd) FILTER (WHERE status <> 'OPEN'), 0)::text AS total_fees",
+        "FROM shadow_trades",
+        "WHERE runtime_id = $1",
+      ].join("\n"),
+      [runtime.id],
+    );
+
+    const trades = tradeResult.rows[0];
+    const closedTrades = Number(trades?.closed_trades || 0);
+    const winningTrades = Number(trades?.winning_trades || 0);
+    const losingTrades = Number(trades?.losing_trades || 0);
+    const firstAt = runtime.first_observation_at?.getTime() ?? null;
+    const lastAt = runtime.last_observation_at?.getTime() ?? null;
+    const forwardCalendarDays =
+      firstAt !== null && lastAt !== null
+        ? Math.max(0, (lastAt - firstAt) / 86_400_000)
+        : 0;
+    const winRatePercent =
+      closedTrades > 0 ? ((winningTrades / closedTrades) * 100).toFixed(2) : "0";
+
+    return {
+      runtimeId: runtime.id,
+      strategyId: runtime.strategy_id,
+      strategyVersion: runtime.strategy_version,
+      symbol: runtime.symbol,
+      status: runtime.status,
+      firstObservationAt: firstAt,
+      lastObservationAt: lastAt,
+      observationCount: Number(runtime.observation_count || 0),
+      forwardCalendarDays: Number(forwardCalendarDays.toFixed(2)),
+      maxDrawdownPercent: runtime.max_drawdown_percent || "0",
+      latestEquity: runtime.latest_equity,
+      closedTrades,
+      winningTrades,
+      losingTrades,
+      winRatePercent,
+      totalPnl: trades?.total_pnl || "0",
+      totalFees: trades?.total_fees || "0",
     };
   }
 
