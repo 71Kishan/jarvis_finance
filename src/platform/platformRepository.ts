@@ -805,10 +805,7 @@ export class PlatformRepository implements InstrumentPersistence {
 
   public async deployShadowStrategy(input: {
     userId: string;
-    strategyId: string;
     validationRunId: string;
-    strategyVersion: number;
-    strategy: Record<string, unknown>;
     reason?: string;
   }): Promise<StrategyDeploymentRecord> {
     if (!this.database.isReady()) {
@@ -842,9 +839,6 @@ export class PlatformRepository implements InstrumentPersistence {
       if (run.source !== "SERVER_RECOMPUTED") {
         throw new Error("Only server-recomputed validation evidence may be deployed to shadow.");
       }
-      if (run.strategy_id !== input.strategyId || Number(run.strategy_version) !== input.strategyVersion) {
-        throw new Error("Deployment strategy does not match the validated strategy version.");
-      }
       if (!run.strategy) throw new Error("Validated strategy configuration is missing.");
 
       await client.query(
@@ -854,7 +848,7 @@ export class PlatformRepository implements InstrumentPersistence {
           "WHERE user_id = $1 AND environment = 'SHADOW' AND status = 'ACTIVE'",
         ].join("
 "),
-        [input.userId, input.strategyId, "Replaced by explicit shadow strategy deployment."],
+        [input.userId, "Replaced by explicit shadow strategy deployment."],
       );
 
       const result = await client.query<{
@@ -882,8 +876,8 @@ export class PlatformRepository implements InstrumentPersistence {
 "),
         [
           input.userId,
-          input.strategyId,
-          input.strategyVersion,
+          run.strategy_id,
+          Number(run.strategy_version),
           input.validationRunId,
           JSON.stringify(run.strategy),
           input.reason || null,
