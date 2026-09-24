@@ -32,6 +32,9 @@ interface RuntimeStatus {
   databaseState?: string;
   marketState?: string;
   catalogState?: string;
+  shadowStatus?: string;
+  shadowSymbol?: string;
+  shadowLastProcessedCandleAt?: number;
 }
 
 interface AccountConnectionView {
@@ -152,6 +155,9 @@ export const WorkspaceSurface: React.FC<WorkspaceSurfaceProps> = ({
         databaseState: payload?.database?.state,
         marketState: payload?.marketData?.state,
         catalogState: payload?.instrumentCatalog?.state,
+        shadowStatus: payload?.autonomousShadow?.status,
+        shadowSymbol: payload?.autonomousShadow?.symbol,
+        shadowLastProcessedCandleAt: payload?.autonomousShadow?.lastProcessedCandleAt,
       });
     } catch {
       setPlatformHealth(null);
@@ -668,11 +674,24 @@ export const WorkspaceSurface: React.FC<WorkspaceSurfaceProps> = ({
             Automated execution is a server-owned subsystem. Paper automation is available from Practice Lab;
             real-money execution remains disabled until the broker adapter, reconciliation and production gates are complete.
           </p>
-          <div className="mt-6 rounded-lg bg-neutral-950 border border-neutral-800 p-4 font-mono text-xs">
-            <div className="flex justify-between"><span className="text-neutral-500">Paper runtime</span><span className="text-neutral-200">{runtime?.status || "LOADING"}</span></div>
-            <div className="flex justify-between mt-2"><span className="text-neutral-500">Symbol</span><span className="text-neutral-200">{runtime?.symbol || "—"}</span></div>
-            <div className="flex justify-between mt-2"><span className="text-neutral-500">Last processed bar</span><span className="text-neutral-200">{formatTimestamp(runtime?.lastProcessedCandleAt)}</span></div>
-            <div className="flex justify-between mt-2"><span className="text-neutral-500">Market gateway</span><span className="text-neutral-200">{runtime?.marketState || "—"}</span></div>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mt-6">
+            <div className="rounded-lg bg-neutral-950 border border-neutral-800 p-4 font-mono text-xs">
+              <div className="text-[10px] uppercase tracking-[0.15em] text-neutral-600">Paper execution layer</div>
+              <div className="flex justify-between mt-3"><span className="text-neutral-500">Runtime</span><span className="text-neutral-200">{runtime?.status || "LOADING"}</span></div>
+              <div className="flex justify-between mt-2"><span className="text-neutral-500">Symbol</span><span className="text-neutral-200">{runtime?.symbol || "—"}</span></div>
+              <div className="flex justify-between mt-2"><span className="text-neutral-500">Last processed bar</span><span className="text-neutral-200">{formatTimestamp(runtime?.lastProcessedCandleAt)}</span></div>
+            </div>
+
+            <div className="rounded-lg bg-neutral-950 border border-neutral-800 p-4 font-mono text-xs">
+              <div className="text-[10px] uppercase tracking-[0.15em] text-neutral-600">Forward shadow layer</div>
+              <div className="flex justify-between mt-3"><span className="text-neutral-500">Runtime</span><span className="text-neutral-200">{runtime?.shadowStatus || "LOADING"}</span></div>
+              <div className="flex justify-between mt-2"><span className="text-neutral-500">Symbol</span><span className="text-neutral-200">{runtime?.shadowSymbol || "—"}</span></div>
+              <div className="flex justify-between mt-2"><span className="text-neutral-500">Last processed bar</span><span className="text-neutral-200">{formatTimestamp(runtime?.shadowLastProcessedCandleAt)}</span></div>
+            </div>
+          </div>
+
+          <div className="mt-3 rounded-lg bg-neutral-950 border border-neutral-800 p-4 font-mono text-xs">
+            <div className="flex justify-between"><span className="text-neutral-500">Market gateway</span><span className="text-neutral-200">{runtime?.marketState || "—"}</span></div>
             <div className="flex justify-between mt-2"><span className="text-neutral-500">Instrument catalog</span><span className="text-neutral-200">{runtime?.catalogState || "—"}</span></div>
             <div className="flex justify-between mt-2"><span className="text-neutral-500">PostgreSQL</span><span className="text-neutral-200">{runtime?.databaseState || "DISABLED"}</span></div>
             {runtime?.message && <div className="mt-3 text-neutral-500 leading-relaxed">{runtime.message}</div>}
