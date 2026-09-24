@@ -826,8 +826,7 @@ export class PlatformRepository implements InstrumentPersistence {
           "FROM strategy_validation_runs",
           "WHERE id = $1 AND user_id = $2",
           "LIMIT 1",
-        ].join("
-"),
+        ].join("\n"),
         [input.validationRunId, input.userId],
       );
 
@@ -846,8 +845,7 @@ export class PlatformRepository implements InstrumentPersistence {
           "UPDATE strategy_deployments",
           "SET status = 'PAUSED', deactivated_at = now(), updated_at = now(), reason = $3",
           "WHERE user_id = $1 AND environment = 'SHADOW' AND status = 'ACTIVE'",
-        ].join("
-"),
+        ].join("\n"),
         [input.userId, "Replaced by explicit shadow strategy deployment."],
       );
 
@@ -872,8 +870,7 @@ export class PlatformRepository implements InstrumentPersistence {
           ") VALUES ($1,$2,$3,'SHADOW','ACTIVE',$4,$5::jsonb,$6)",
           "RETURNING id, user_id, strategy_id, strategy_version, environment, status,",
           "          validation_run_id, strategy, activated_at, deactivated_at, reason, created_at, updated_at",
-        ].join("
-"),
+        ].join("\n"),
         [
           input.userId,
           run.strategy_id,
@@ -931,8 +928,7 @@ export class PlatformRepository implements InstrumentPersistence {
         "FROM strategy_deployments",
         "WHERE user_id = $1 AND environment = 'SHADOW' AND status = 'ACTIVE'",
         "LIMIT 1",
-      ].join("
-"),
+      ].join("\n"),
       [userId],
     );
 
