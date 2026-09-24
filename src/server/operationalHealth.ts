@@ -30,7 +30,7 @@ export interface OperationalHealthResult {
 };
 
 function age(now: number, timestamp?: number | null): number | null {
-  if (!timestamp || !Number.isFinite(timestamp)) return null;
+  if (timestamp === undefined || timestamp === null || !Number.isFinite(timestamp)) return null;
   return Math.max(0, now - timestamp);
 }
 
@@ -60,7 +60,7 @@ export function evaluateOperationalHealth(input: OperationalHealthInput): Operat
   }
 
   const marketAge = age(now, input.market.lastMessageAt);
-  const marketReady = input.market.state === "READY" && input.market.connected && (marketAge === null || marketAge <= 15_000);
+  const marketReady = input.market.state === "READY" && input.market.connected && marketAge !== null && marketAge <= 15_000;
   components.push({
     id: "MARKET_DATA",
     label: "Binance market gateway",
@@ -81,7 +81,7 @@ export function evaluateOperationalHealth(input: OperationalHealthInput): Operat
 
   if (input.testnetConfigured) {
     const streamAge = age(now, input.userDataStream.lastEventAt);
-    const userDataReady = input.userDataStream.connected && input.userDataStream.subscribed && (streamAge === null || streamAge <= 120_000);
+    const userDataReady = input.userDataStream.connected && input.userDataStream.subscribed && streamAge !== null && streamAge <= 120_000;
     components.push({
       id: "USER_DATA_STREAM",
       label: "Binance account stream",
@@ -94,7 +94,7 @@ export function evaluateOperationalHealth(input: OperationalHealthInput): Operat
     });
 
     const reconcileAge = age(now, input.reconciliation.lastSuccessAt);
-    const reconciliationReady = input.reconciliation.lastSuccessAt !== undefined && (reconcileAge === null || reconcileAge <= 120_000) && !input.reconciliation.lastError;
+    const reconciliationReady = input.reconciliation.lastSuccessAt !== undefined && reconcileAge !== null && reconcileAge <= 120_000 && !input.reconciliation.lastError;
     components.push({
       id: "RECONCILIATION",
       label: "Sandbox reconciliation",
