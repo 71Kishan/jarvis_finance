@@ -1,9 +1,6 @@
 import { randomUUID } from "crypto";
 import { WebSocket } from "ws";
-import {
-  buildBinanceSignature,
-  type BinanceSpotAccountAdapterOptions,
-} from "../platform/binanceSpotAccountAdapter";
+import { buildBinanceSignature } from "../platform/binanceSpotAccountAdapter";
 import type { BrokerOrder, Fill, OrderStatus, WalletBalance } from "../platform/types";
 
 const DEFAULT_TESTNET_WS_URL = "wss://ws-api.testnet.binance.vision/ws-api/v3";
