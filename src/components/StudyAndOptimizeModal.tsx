@@ -65,6 +65,8 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
       selectionCounts: Record<string, number>;
     };
     validation?: ReturnType<typeof evaluateStrategyValidation>;
+    validationRecordId?: string;
+    deploymentId?: string;
   } | null>(null);
 
   if (!isOpen) return null;
@@ -94,7 +96,10 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
           const serverOptimization = serverPayload.optimization;
           const serverValidation = serverOptimization.validation;
           strategyVaultInstance.recordValidationResult(serverOptimization.bestStrategy, serverValidation);
-          setOptimizationData(serverOptimization);
+          setOptimizationData({
+            ...serverOptimization,
+            validationRecordId: serverPayload.record?.id,
+          });
           setPersistenceMessage(
             `Server-recomputed evidence archived (${serverPayload.interval || "server interval"} • ${serverPayload.candlesAnalyzed || 0} candles). Source: live Binance public market data.`,
           );
@@ -167,11 +172,51 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
     }
   };
 
-  const handleAdoptBestStrategy = () => {
-    if (optimizationData?.bestStrategy && optimizationData.validation?.status === "PROVISIONALLY_VALIDATED") {
-      // The AI is advisory-only. It cannot bypass the deterministic promotion gate.
+  const handleAdoptBestStrategy = async () => {
+    if (
+      !optimizationData?.bestStrategy ||
+      optimizationData.validation?.status !== "PROVISIONALLY_VALIDATED" ||
+      !optimizationData.validationRecordId
+    ) {
+      return;
+    }
+
+    setIsLoading(true);
+    setPersistenceMessage("Deploying the server-recomputed candidate to the shadow control plane…");
+
+    try {
+      const response = await fetch("/api/research/strategy-deploy", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({
+          validationRunId: optimizationData.validationRecordId,
+          reason: "Explicit operator promotion from Quantitative Strategy Evolution & Backtest Lab.",
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+
+      if (!response.ok || !payload?.deployment?.id) {
+        setPersistenceMessage(payload?.error || "Server rejected the shadow deployment.");
+        return;
+      }
+
+      setOptimizationData({
+        ...optimizationData,
+        deploymentId: payload.deployment.id,
+      });
+      setPersistenceMessage(
+        `Shadow deployment active: ${payload.deployment.strategyId} v${payload.deployment.strategyVersion}.`,
+      );
+
+      // The browser's local paper terminal may mirror the deployed configuration,
+      // but deployment authority lives on the server.
       onApplyStrategy(optimizationData.bestStrategy);
       onClose();
+    } catch {
+      setPersistenceMessage("Shadow deployment request failed; no local strategy promotion was applied.");
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -463,7 +508,7 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
         {/* Modal Footer */}
         <div className="px-5 py-3 border-t border-neutral-800 bg-neutral-900/70 flex items-center justify-between">
           <span className="text-neutral-500 text-[11px]">
-            Only candidates that pass every deterministic validation gate can be promoted to paper automation. Forward paper/shadow evidence remains a separate gate.
+            Deployment requires a server-recomputed validation record and explicit operator action. Forward shadow evidence remains a separate gate.
           </span>
 
           <div className="flex items-center gap-2">
@@ -476,16 +521,20 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
             <button
               id="adopt-strategy-btn"
               onClick={handleAdoptBestStrategy}
-              disabled={optimizationData?.validation?.status !== "PROVISIONALLY_VALIDATED"}
+              disabled={
+                isLoading ||
+                optimizationData?.validation?.status !== "PROVISIONALLY_VALIDATED" ||
+                !optimizationData?.validationRecordId
+              }
               title={
-                optimizationData?.validation?.status === "PROVISIONALLY_VALIDATED"
-                  ? "Apply the deterministic validated research candidate to paper automation."
-                  : "Candidate must pass every deterministic validation gate before promotion."
+                optimizationData?.validation?.status === "PROVISIONALLY_VALIDATED" && optimizationData?.validationRecordId
+                  ? "Explicitly deploy the server-recomputed validated candidate to the server-owned shadow runtime."
+                  : "A server-recomputed validation record must pass every deterministic gate before deployment."
               }
               className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition-all shadow-md disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
             >
               <CheckCircle2 className="w-3.5 h-3.5" />
-              <span>Promote Validated Candidate</span>
+              <span>Deploy Validated Candidate to Shadow</span>
             </button>
           </div>
         </div>
