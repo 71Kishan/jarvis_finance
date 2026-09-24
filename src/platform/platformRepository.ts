@@ -1225,7 +1225,11 @@ export class PlatformRepository implements InstrumentPersistence {
     const grossWins = trades?.gross_wins || "0";
     const grossLosses = trades?.gross_losses || "0";
     const profitFactor =
-      Number(grossLosses) > 0 ? (Number(grossWins) / Number(grossLosses)).toFixed(4) : "0";
+      Number(grossLosses) > 0
+        ? (Number(grossWins) / Number(grossLosses)).toFixed(4)
+        : Number(grossWins) > 0
+          ? "INF"
+          : "0";
     const expectancyPerTrade =
       closedTrades > 0
         ? (Number(trades?.total_pnl || "0") / closedTrades).toFixed(8)
