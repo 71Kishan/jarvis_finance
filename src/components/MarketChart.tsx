@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { Candle, Trade } from "../types/trading";
-import { AssetSymbol, MarketRegime } from "../engine/marketSimulator";
+import { MarketRegime } from "../engine/marketSimulator";
 
 interface MarketChartProps {
   candles: Candle[];
