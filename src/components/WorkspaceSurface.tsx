@@ -34,7 +34,28 @@ interface RuntimeStatus {
   catalogState?: string;
   shadowStatus?: string;
   shadowSymbol?: string;
+  shadowStrategyId?: string;
   shadowLastProcessedCandleAt?: number;
+}
+
+interface ShadowEvidenceView {
+  runtimeId: string;
+  strategyId: string;
+  strategyVersion: number;
+  symbol: string;
+  status: string;
+  firstObservationAt: number | null;
+  lastObservationAt: number | null;
+  observationCount: number;
+  forwardCalendarDays: number;
+  maxDrawdownPercent: string;
+  latestEquity: string | null;
+  closedTrades: number;
+  winningTrades: number;
+  losingTrades: number;
+  winRatePercent: string;
+  totalPnl: string;
+  totalFees: string;
 }
 
 interface AccountConnectionView {
@@ -137,6 +158,7 @@ export const WorkspaceSurface: React.FC<WorkspaceSurfaceProps> = ({
   const [platformHealth, setPlatformHealth] = useState<any>(null);
   const [accountOverview, setAccountOverview] = useState<AccountOverview | null>(null);
   const [portfolioValuation, setPortfolioValuation] = useState<PortfolioValuationView | null>(null);
+  const [shadowEvidence, setShadowEvidence] = useState<ShadowEvidenceView | null>(null);
   const [accountBusy, setAccountBusy] = useState(false);
   const [accountMessage, setAccountMessage] = useState<string | null>(null);
   const [sandboxBusy, setSandboxBusy] = useState<string | null>(null);
@@ -157,11 +179,40 @@ export const WorkspaceSurface: React.FC<WorkspaceSurfaceProps> = ({
         catalogState: payload?.instrumentCatalog?.state,
         shadowStatus: payload?.autonomousShadow?.status,
         shadowSymbol: payload?.autonomousShadow?.symbol,
+        shadowStrategyId: payload?.autonomousShadow?.strategyId,
         shadowLastProcessedCandleAt: payload?.autonomousShadow?.lastProcessedCandleAt,
       });
     } catch {
       setPlatformHealth(null);
       setRuntime({ status: "UNAVAILABLE" });
+    }
+  };
+
+  const loadShadowEvidence = async () => {
+    const strategyId = runtime?.shadowStrategyId?.trim();
+    const symbol = runtime?.shadowSymbol?.trim().toUpperCase();
+    if (!strategyId || !symbol) {
+      setShadowEvidence(null);
+      return;
+    }
+
+    try {
+      const params = new URLSearchParams({ strategyId, symbol });
+      const response = await fetch("/api/runtime/shadow/evidence?" + params.toString(), {
+        cache: "no-store",
+        credentials: "same-origin",
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        if (response.status === 401 || response.status === 403) {
+          setShadowEvidence(null);
+          return;
+        }
+        throw new Error(payload?.error || "Shadow evidence unavailable.");
+      }
+      setShadowEvidence(payload?.evidence || null);
+    } catch {
+      setShadowEvidence(null);
     }
   };
 
@@ -297,6 +348,13 @@ export const WorkspaceSurface: React.FC<WorkspaceSurfaceProps> = ({
     const timer = setInterval(() => void loadAccountOverview(), 15_000);
     return () => clearInterval(timer);
   }, [view]);
+
+  useEffect(() => {
+    if (view !== "AUTOMATION") return;
+    void loadShadowEvidence();
+    const timer = setInterval(() => void loadShadowEvidence(), 15_000);
+    return () => clearInterval(timer);
+  }, [view, runtime?.shadowStrategyId, runtime?.shadowSymbol]);
 
   useEffect(() => {
     if (view !== "AUTOMATION") return;
@@ -689,6 +747,46 @@ export const WorkspaceSurface: React.FC<WorkspaceSurfaceProps> = ({
               <div className="flex justify-between mt-2"><span className="text-neutral-500">Last processed bar</span><span className="text-neutral-200">{formatTimestamp(runtime?.shadowLastProcessedCandleAt)}</span></div>
             </div>
           </div>
+
+          <section className="mt-3 rounded-lg bg-neutral-950 border border-neutral-800 p-4">
+            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-2">
+              <div>
+                <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-neutral-600">Forward evidence</div>
+                <div className="text-xs text-neutral-500 mt-1">
+                  Server-persisted shadow observations and hypothetical fills. This is research data, not broker cash.
+                </div>
+              </div>
+              {shadowEvidence && (
+                <div className="text-[10px] font-mono text-neutral-600">
+                  {shadowEvidence.forwardCalendarDays} days • {shadowEvidence.observationCount} observations
+                </div>
+              )}
+            </div>
+
+            {shadowEvidence ? (
+              <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-px bg-neutral-800 mt-4">
+                {[
+                  ["Closed trades", String(shadowEvidence.closedTrades)],
+                  ["Win rate", shadowEvidence.winRatePercent + "%"],
+                  ["Total PnL", shadowEvidence.totalPnl],
+                  ["Fees", shadowEvidence.totalFees],
+                  ["Max DD", shadowEvidence.maxDrawdownPercent + "%"],
+                  ["Model equity", shadowEvidence.latestEquity || "—"],
+                  ["First data", formatTimestamp(shadowEvidence.firstObservationAt || undefined)],
+                  ["Last data", formatTimestamp(shadowEvidence.lastObservationAt || undefined)],
+                ].map(([label, value]) => (
+                  <div key={label} className="bg-neutral-950 p-3 min-w-0">
+                    <div className="text-[9px] font-mono uppercase text-neutral-600">{label}</div>
+                    <div className="text-[11px] font-mono text-neutral-200 mt-1 truncate" title={value}>{value}</div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="mt-4 rounded-lg border border-dashed border-neutral-800 px-4 py-5 text-center text-[10px] font-mono text-neutral-600">
+                NO PERSISTED SHADOW EVIDENCE FOR THE SELECTED STRATEGY
+              </div>
+            )}
+          </section>
 
           <div className="mt-3 rounded-lg bg-neutral-950 border border-neutral-800 p-4 font-mono text-xs">
             <div className="flex justify-between"><span className="text-neutral-500">Market gateway</span><span className="text-neutral-200">{runtime?.marketState || "—"}</span></div>
