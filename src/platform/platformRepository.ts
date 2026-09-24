@@ -137,6 +137,7 @@ export interface StrategyValidationRecord {
   policy: Record<string, unknown>;
   metrics: Record<string, unknown>;
   source: "CLIENT_SUBMITTED" | "SERVER_RECOMPUTED";
+  strategy?: Record<string, unknown>;
   createdAt: number;
 }
 
@@ -774,6 +775,7 @@ export class PlatformRepository implements InstrumentPersistence {
     policy: Record<string, unknown>;
     metrics: Record<string, unknown>;
     source?: StrategyValidationRecord["source"];
+    strategy?: Record<string, unknown>;
   }): Promise<StrategyValidationRecord> {
     if (!this.database.isReady()) {
       throw new Error("PostgreSQL is required for strategy validation persistence.");
@@ -796,14 +798,15 @@ export class PlatformRepository implements InstrumentPersistence {
       [
         "INSERT INTO strategy_validation_runs(",
         "  user_id, strategy_id, strategy_version, strategy_name, status, evaluated_at,",
-        "  evidence_hash, policy, metrics, source",
-        ") VALUES ($1,$2,$3,$4,$5,to_timestamp($6 / 1000.0),$7,$8::jsonb,$9::jsonb,$10)",
+        "  evidence_hash, policy, metrics, source, strategy",
+        ") VALUES ($1,$2,$3,$4,$5,to_timestamp($6 / 1000.0),$7,$8::jsonb,$9::jsonb,$10,$11::jsonb)",
         "ON CONFLICT (user_id, strategy_id, strategy_version, evidence_hash)",
         "DO UPDATE SET",
         "  status = EXCLUDED.status, evaluated_at = EXCLUDED.evaluated_at,",
-        "  policy = EXCLUDED.policy, metrics = EXCLUDED.metrics, source = EXCLUDED.source",
+        "  policy = EXCLUDED.policy, metrics = EXCLUDED.metrics, source = EXCLUDED.source,",
+        "  strategy = COALESCE(EXCLUDED.strategy, strategy_validation_runs.strategy)",
         "RETURNING id, user_id, strategy_id, strategy_version, strategy_name, status, evaluated_at,",
-        "          evidence_hash, policy, metrics, source, created_at",
+        "          evidence_hash, policy, metrics, source, strategy, created_at",
       ].join("\n"),
       [
         input.userId,
@@ -816,6 +819,7 @@ export class PlatformRepository implements InstrumentPersistence {
         JSON.stringify(input.policy),
         JSON.stringify(input.metrics),
         input.source || "CLIENT_SUBMITTED",
+        input.strategy ? JSON.stringify(input.strategy) : null,
       ],
     );
 
@@ -833,6 +837,7 @@ export class PlatformRepository implements InstrumentPersistence {
       policy: row.policy,
       metrics: row.metrics,
       source: row.source,
+      strategy: row.strategy || undefined,
       createdAt: row.created_at.getTime(),
     };
   }
