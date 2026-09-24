@@ -42,6 +42,7 @@ interface StoredMiniTicker {
 export class BinanceMarketDataService {
   private readonly symbolMap: Record<string, string>;
   private readonly candles = new Map<string, Candle[]>();
+  private readonly formingCandles = new Map<string, Candle>();
   private readonly tickers = new Map<string, StoredTicker>();
   private readonly miniTickers = new Map<string, StoredMiniTicker>();
   private readonly subscribedStreams = new Set<string>();
@@ -97,6 +98,7 @@ export class BinanceMarketDataService {
 
     return {
       candles,
+      formingCandle,
       ticker: stored.ticker,
       gateway: {
         state: this.state,
@@ -127,6 +129,7 @@ export class BinanceMarketDataService {
     const needsBootstrap = previous !== providerSymbol || !this.candles.has(appSymbol);
     if (previous !== providerSymbol) {
       this.candles.delete(appSymbol);
+      this.formingCandles.delete(appSymbol);
       this.tickers.delete(appSymbol);
     }
 
@@ -253,7 +256,6 @@ export class BinanceMarketDataService {
   }
 
   private handleKline(k: any): void {
-    if (!k?.x) return; // Only completed candles may enter the decision dataset.
 
     const exchangeSymbol = String(k.s || "").toUpperCase();
     const symbol = this.toAppSymbol(exchangeSymbol);
@@ -272,6 +274,13 @@ export class BinanceMarketDataService {
       return;
     }
 
+    // The forming candle is display-only. It is never inserted into the
+    // completed-bar decision dataset used by the strategy engine.
+    if (!Boolean(k.x)) {
+      this.formingCandles.set(symbol, candle);
+      return;
+    }
+
     const series = this.candles.get(symbol) || [];
     const last = series[series.length - 1];
     if (last?.timestamp === candle.timestamp) {
@@ -280,6 +289,7 @@ export class BinanceMarketDataService {
       series.push(candle);
     }
 
+    this.formingCandles.delete(symbol);
     this.candles.set(symbol, series.slice(-MAX_CANDLES_PER_SYMBOL));
     this.lastClosedCandleAt = Math.max(this.lastClosedCandleAt || 0, Number(k.T) || candle.timestamp);
   }
@@ -411,6 +421,21 @@ export class BinanceMarketDataService {
           this.lastClosedCandleAt || 0,
           completed[completed.length - 1].timestamp + 59_999,
         );
+      }
+
+      const latest = rows[rows.length - 1];
+      if (Array.isArray(latest) && Number(latest[6]) > now) {
+        const forming: Candle = {
+          timestamp: Number(latest[0]),
+          open: Number(latest[1]),
+          high: Number(latest[2]),
+          low: Number(latest[3]),
+          close: Number(latest[4]),
+          volume: Number(latest[5]),
+        };
+        if ([forming.timestamp, forming.open, forming.high, forming.low, forming.close, forming.volume].every(Number.isFinite)) {
+          this.formingCandles.set(symbol, forming);
+        }
       }
     } catch (error: any) {
       console.warn("Binance candle bootstrap failed for " + symbol + ":", error?.message || error);
