@@ -86,7 +86,7 @@ describe("Binance Spot user-data event mapping", () => {
         asset: "USDT",
         free: "1000.12345678",
         locked: "2.5",
-        total: "1000.12345678" === "1000.12345678" ? "1002.62345678" : "",
+        total: "1002.62345678",
         updatedAt: 1719467634105,
       },
       {
