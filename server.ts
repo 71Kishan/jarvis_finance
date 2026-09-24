@@ -14,6 +14,8 @@ import { PlatformDatabase } from "./src/server/platformDatabase";
 import { PlatformRepository } from "./src/platform/platformRepository";
 import { BinanceSpotAccountAdapter } from "./src/platform/binanceSpotAccountAdapter";
 import { BinanceSpotUserDataStream } from "./src/server/binanceSpotUserDataStream";
+import { evaluateSpotPortfolioRisk } from "./src/platform/portfolioRisk";
+import { multiplyDecimals } from "./src/platform/decimal";
 import {
   JARVIS_SESSION_COOKIE,
   SESSION_TTL_MS,
@@ -792,6 +794,113 @@ function parseSandboxOrderIntent(
   };
 }
 
+async function buildSandboxPortfolioRiskInput(
+  balances: Array<{ asset: string; total: string; free: string; locked: string; accountId: string; updatedAt: number }>,
+  openOrders: Array<{
+    accountId: string;
+    instrumentId: string;
+    side: "BUY" | "SELL";
+    type: string;
+    quantity: string;
+    limitPrice?: string;
+  }>,
+  baseCurrency = (process.env.JARVIS_PORTFOLIO_BASE_CURRENCY || "USDT").toUpperCase(),
+) {
+  const marks: Array<{ asset: string; valueInBaseCurrency: string; updatedAt: number }> = [];
+  const unpricedAssets = new Set<string>();
+
+  for (const balance of balances) {
+    const asset = balance.asset.toUpperCase();
+    if (asset === baseCurrency || Number(balance.total) === 0) continue;
+
+    const instrument = binanceInstrumentCatalog
+      .list({ quoteAsset: baseCurrency, tradableOnly: true, limit: 5000 })
+      .find((candidate) => candidate.baseAsset?.toUpperCase() === asset);
+
+    const ticker = instrument
+      ? binanceMarketData.getMiniTicker(instrument.providerSymbol)
+      : null;
+
+    if (
+      instrument &&
+      ticker &&
+      Number.isFinite(ticker.price) &&
+      ticker.price > 0 &&
+      Date.now() - ticker.lastUpdated <= 15_000
+    ) {
+      marks.push({
+        asset,
+        valueInBaseCurrency: String(ticker.price),
+        updatedAt: ticker.lastUpdated,
+      });
+    } else {
+      unpricedAssets.add(asset);
+    }
+  }
+
+  const riskOrders: Array<{
+    side: "BUY" | "SELL";
+    type: import("./src/platform/types").OrderType;
+    instrumentId: string;
+    asset: string;
+    quoteAsset: string;
+    notionalInBaseCurrency: string;
+    reserved: boolean;
+  }> = [];
+  let unpricedOpenOrders = 0;
+
+  for (const order of openOrders) {
+    const instrument = binanceInstrumentCatalog.get(order.instrumentId);
+    if (!instrument?.baseAsset || !instrument.quoteAsset) {
+      unpricedOpenOrders += 1;
+      continue;
+    }
+
+    const quote = instrument.quoteAsset.toUpperCase();
+    if (quote !== baseCurrency) {
+      unpricedOpenOrders += 1;
+      continue;
+    }
+
+    const ticker = binanceMarketData.getTicker(instrument.symbol);
+    const marketReference =
+      order.side === "BUY"
+        ? String(ticker?.ask ?? "")
+        : String(ticker?.bid ?? "");
+    const referencePrice =
+      order.limitPrice && Number(order.limitPrice) > 0
+        ? order.limitPrice
+        : marketReference;
+
+    if (!referencePrice || Number(referencePrice) <= 0) {
+      unpricedOpenOrders += 1;
+      continue;
+    }
+
+    try {
+      riskOrders.push({
+        side: order.side,
+        type: (order.type as import("./src/platform/types").OrderType) || "MARKET",
+        instrumentId: order.instrumentId,
+        asset: instrument.baseAsset,
+        quoteAsset: quote,
+        notionalInBaseCurrency: multiplyDecimals(order.quantity, referencePrice),
+        reserved: true,
+      });
+    } catch {
+      unpricedOpenOrders += 1;
+    }
+  }
+
+  return {
+    baseCurrency,
+    marks,
+    unpricedAssets,
+    riskOrders,
+    unpricedOpenOrders,
+  };
+}
+
 async function reconcileSandboxOrder(order: import("./src/platform/platformRepository").PersistedOrder, userId: string) {
   const found = await binanceSpotTestnetAccount.getOrderByClientOrderId?.(
     order.accountId,
@@ -937,6 +1046,44 @@ app.post("/api/account/binance-testnet/orders", requireSameOrigin, requireSessio
         reasons: riskGate.reasons,
         referencePrice: riskGate.referencePrice,
         estimatedNotional: riskGate.estimatedNotional,
+      });
+    }
+
+    if (!instrument.baseAsset || !instrument.quoteAsset || !riskGate.estimatedNotional) {
+      return res.status(422).json({
+        success: false,
+        error: "Portfolio risk could not derive a trusted notional for this sandbox order.",
+      });
+    }
+
+    const baseCurrency = (process.env.JARVIS_PORTFOLIO_BASE_CURRENCY || "USDT").toUpperCase();
+    const riskInput = await buildSandboxPortfolioRiskInput(
+      accountOverview.balances,
+      accountOverview.openOrders,
+      baseCurrency,
+    );
+    const portfolioRisk = evaluateSpotPortfolioRisk({
+      baseCurrency,
+      balances: accountOverview.balances,
+      marks: riskInput.marks,
+      openOrders: riskInput.riskOrders,
+      unpricedOpenOrders: riskInput.unpricedOpenOrders,
+      candidate: {
+        side: intent.side,
+        type: intent.type,
+        asset: instrument.baseAsset,
+        quoteAsset: instrument.quoteAsset,
+        notionalInBaseCurrency: riskGate.estimatedNotional,
+      },
+    });
+
+    if (!portfolioRisk.allowed) {
+      return res.status(422).json({
+        success: false,
+        error: "Portfolio-level risk controls rejected the sandbox request.",
+        reasons: portfolioRisk.reasons,
+        riskSnapshot: portfolioRisk.snapshot,
+        projectedRisk: portfolioRisk.projected,
       });
     }
 
