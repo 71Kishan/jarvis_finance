@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
-import { Activity, Bot, BookOpen, Database, Link2, Radar, Search, ShieldCheck, Wallet, Wrench } from "lucide-react";
+import { Activity, Bot, BookOpen, Database, Link2, ShieldCheck, Wallet, Wrench } from "lucide-react";
 import type { Instrument } from "../platform/types";
+import { MarketsWorkspace } from "./MarketsWorkspace";
 import type { WorkspaceView } from "../platform/workspace";
 
 interface WorkspaceSurfaceProps {
@@ -117,66 +118,8 @@ export const WorkspaceSurface: React.FC<WorkspaceSurfaceProps> = ({
   }, [view]);
 
   if (view === "MARKETS") {
-    return (
-      <main className="flex-1 max-w-7xl w-full mx-auto p-4">
-        <section className="bg-neutral-900/80 border border-neutral-800 rounded-xl p-4">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-            <div>
-              <div className="text-[10px] font-mono text-neutral-500 uppercase tracking-wider">Market Universe</div>
-              <h1 className="text-xl font-bold text-neutral-100 mt-1">Markets</h1>
-              <p className="text-xs text-neutral-500 mt-1">Dynamic provider catalog. This surface never fabricates prices or tradability.</p>
-            </div>
-            <button type="button" onClick={onOpenRadar} className="px-3 py-2 rounded-lg bg-neutral-950 hover:bg-neutral-800 border border-neutral-700 text-xs font-mono text-neutral-200">
-              Open Research Radar
-            </button>
-          </div>
-
-          <div className="relative mt-4">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-600" />
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search BTCUSDT, ETH/USDT, SOL, ..."
-              className="w-full bg-neutral-950 border border-neutral-800 rounded-lg pl-10 pr-3 py-3 text-sm font-mono text-neutral-100 placeholder:text-neutral-600 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-            />
-          </div>
-
-          <div className="flex items-center justify-between mt-3 text-[10px] font-mono text-neutral-600">
-            <span>{catalogState}</span>
-            <span>{instruments.length} displayed</span>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2 mt-3">
-            {instruments.map((instrument) => (
-              <button
-                key={instrument.instrumentId}
-                type="button"
-                onClick={() => onSelectAsset(instrument.symbol)}
-                className="text-left rounded-lg border border-neutral-800 bg-neutral-950/70 hover:bg-neutral-900 p-3 transition-colors"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-sm font-mono font-semibold text-neutral-100">{instrument.displaySymbol}</span>
-                  <span className="text-[9px] font-mono text-neutral-600">{instrument.market}</span>
-                </div>
-                <div className="text-xs text-neutral-500 mt-1">{instrument.name}</div>
-                <div className="flex items-center gap-3 mt-2 text-[10px] font-mono text-neutral-600">
-                  <span>{instrument.baseAsset}/{instrument.quoteAsset}</span>
-                  <span>{instrument.tradable ? "TRADABLE" : "NOT TRADABLE"}</span>
-                </div>
-              </button>
-            ))}
-          </div>
-
-          {catalogState === "UNAVAILABLE" && (
-            <div className="mt-4 rounded-lg border border-amber-900/40 bg-amber-950/20 p-3 text-xs text-amber-300 font-mono">
-              Market catalog unavailable. Jarvis is not substituting a synthetic asset list.
-            </div>
-          )}
-        </section>
-      </main>
-    );
+    return <MarketsWorkspace onSelectAsset={onSelectAsset} onOpenRadar={onOpenRadar} />;
   }
-
   if (view === "PORTFOLIO") {
     return (
       <main className="flex-1 max-w-7xl w-full mx-auto p-4">
