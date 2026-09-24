@@ -863,6 +863,7 @@ export class PlatformRepository implements InstrumentPersistence {
       policy: Record<string, unknown>;
       metrics: Record<string, unknown>;
       source: StrategyValidationRecord["source"];
+      strategy: Record<string, unknown> | null;
       created_at: Date;
     }>(
       [
