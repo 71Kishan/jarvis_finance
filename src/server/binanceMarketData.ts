@@ -124,12 +124,15 @@ export class BinanceMarketDataService {
     const previous = this.symbolMap[appSymbol];
     this.symbolMap[appSymbol] = providerSymbol;
 
+    const needsBootstrap = previous !== providerSymbol || !this.candles.has(appSymbol);
     if (previous !== providerSymbol) {
       this.candles.delete(appSymbol);
       this.tickers.delete(appSymbol);
     }
 
-    await this.bootstrapSymbol(appSymbol, providerSymbol);
+    if (needsBootstrap) {
+      await this.bootstrapSymbol(appSymbol, providerSymbol);
+    }
     this.subscribeStreams(this.getSymbolStreams(providerSymbol));
   }
 
@@ -358,12 +361,3 @@ export class BinanceMarketDataService {
       high24h: Number.isFinite(patch.high24h) ? Number(patch.high24h) : Number(current?.high24h) || price,
       low24h: Number.isFinite(patch.low24h) ? Number(patch.low24h) : Number(current?.low24h) || price,
       volume24h: Number.isFinite(patch.volume24h) ? Number(patch.volume24h) : Number(current?.volume24h) || 0,
-      change24hPercent: Number.isFinite(patch.change24hPercent)
-        ? Number(patch.change24hPercent)
-        : Number(current?.change24hPercent) || 0,
-      lastUpdated: now,
-      source: "BINANCE",
-      quoteQuality: "BID_ASK",
-    };
-
-    this.tickers.set(symbol, { ticker, lastQuoteAt: now });
