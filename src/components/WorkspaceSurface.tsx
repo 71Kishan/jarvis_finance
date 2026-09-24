@@ -74,10 +74,27 @@ interface OpenOrderView {
   updatedAt: number;
 }
 
+interface FillView {
+  id: string;
+  accountId: string;
+  clientOrderId: string;
+  externalOrderId?: string;
+  externalTradeId?: string;
+  instrumentId: string;
+  side: "BUY" | "SELL";
+  quantity: string;
+  price: string;
+  feeAmount?: string;
+  feeAsset?: string;
+  liquidity?: string;
+  executedAt: number;
+}
+
 interface AccountOverview {
   connections: AccountConnectionView[];
   balances: BalanceView[];
   openOrders: OpenOrderView[];
+  fills: FillView[];
 }
 
 function formatTimestamp(value?: number): string {
@@ -139,6 +156,7 @@ export const WorkspaceSurface: React.FC<WorkspaceSurfaceProps> = ({
         connections: Array.isArray(payload?.connections) ? payload.connections : [],
         balances: Array.isArray(payload?.balances) ? payload.balances : [],
         openOrders: Array.isArray(payload?.openOrders) ? payload.openOrders : [],
+        fills: Array.isArray(payload?.fills) ? payload.fills : [],
       });
       setAccountMessage(null);
     } catch (error: any) {
@@ -224,6 +242,7 @@ export const WorkspaceSurface: React.FC<WorkspaceSurfaceProps> = ({
         connections: payload?.connection ? [payload.connection, ...(current?.connections || []).filter((row) => row.id !== payload.connection.id)] : current?.connections || [],
         balances: Array.isArray(payload?.balances) ? payload.balances : current?.balances || [],
         openOrders: Array.isArray(payload?.openOrders) ? payload.openOrders : current?.openOrders || [],
+        fills: Array.isArray(payload?.fills) ? payload.fills : current?.fills || [],
       }));
       setAccountMessage("Binance Spot Testnet account synchronized from the provider.");
       void loadHealth();
@@ -259,6 +278,7 @@ export const WorkspaceSurface: React.FC<WorkspaceSurfaceProps> = ({
     const connections = accountOverview?.connections || [];
     const balances = accountOverview?.balances || [];
     const openOrders = accountOverview?.openOrders || [];
+    const fills = accountOverview?.fills || [];
     const testnetConfigured = platformHealth?.binanceSpotTestnetAccount?.configured === true;
 
     return (
@@ -487,6 +507,50 @@ export const WorkspaceSurface: React.FC<WorkspaceSurfaceProps> = ({
                           </button>
                         )}
                       </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+
+        <section className="rounded-xl border border-neutral-800 bg-neutral-900/80 overflow-hidden">
+          <div className="px-5 py-4 border-b border-neutral-800">
+            <h2 className="text-sm font-semibold text-neutral-100">Recent executions</h2>
+            <p className="text-[11px] text-neutral-500 mt-1">
+              Provider-derived fills persisted once by external trade id. This is execution history, not a performance claim.
+            </p>
+          </div>
+          {fills.length === 0 ? (
+            <div className="px-5 py-8 text-center text-xs font-mono text-neutral-600">NO EXECUTIONS RECORDED</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead className="bg-neutral-950/80 text-[10px] font-mono uppercase text-neutral-600">
+                  <tr>
+                    <th className="text-left px-5 py-3">Instrument</th>
+                    <th className="text-left px-5 py-3">Side</th>
+                    <th className="text-right px-5 py-3">Quantity</th>
+                    <th className="text-right px-5 py-3">Fill Price</th>
+                    <th className="text-right px-5 py-3">Fee</th>
+                    <th className="text-right px-5 py-3">Executed</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-neutral-800">
+                  {fills.map((fill) => (
+                    <tr key={fill.id} className="hover:bg-neutral-950/60">
+                      <td className="px-5 py-3 font-mono text-neutral-300">
+                        <div>{fill.instrumentId}</div>
+                        <div className="text-[9px] text-neutral-700 mt-0.5">{fill.externalTradeId || fill.externalOrderId || fill.clientOrderId}</div>
+                      </td>
+                      <td className={`px-5 py-3 font-mono ${fill.side === "BUY" ? "text-emerald-300" : "text-red-300"}`}>{fill.side}</td>
+                      <td className="px-5 py-3 text-right font-mono text-neutral-300">{formatDecimal(fill.quantity)}</td>
+                      <td className="px-5 py-3 text-right font-mono text-neutral-100">{formatDecimal(fill.price)}</td>
+                      <td className="px-5 py-3 text-right font-mono text-neutral-500">
+                        {fill.feeAmount ? `${formatDecimal(fill.feeAmount)} ${fill.feeAsset || ""}` : "—"}
+                      </td>
+                      <td className="px-5 py-3 text-right font-mono text-neutral-600">{formatTimestamp(fill.executedAt)}</td>
                     </tr>
                   ))}
                 </tbody>
