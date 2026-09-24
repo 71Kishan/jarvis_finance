@@ -880,6 +880,7 @@ app.post("/api/research/strategy-validation/recompute", requireSameOrigin, requi
       strategyVersion: validation.strategyVersion,
       strategyName: validation.strategyName,
       status: validation.status,
+      strategy: optimization.bestStrategy,
       policy: validation.policy,
       backtest: validation.backtest,
       walkForward: validation.walkForward,
