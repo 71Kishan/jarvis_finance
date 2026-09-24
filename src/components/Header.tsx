@@ -65,6 +65,8 @@ interface HeaderProps {
 export const Header: React.FC<HeaderProps> = ({
   currentAsset,
   onSelectAsset,
+  currentView,
+  onChangeView,
   botState,
   marketSource,
   isAutoTrading,
