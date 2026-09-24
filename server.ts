@@ -12,6 +12,7 @@ import { AutonomousPaperRuntime } from "./src/server/paperRuntime";
 import { PlatformDatabase } from "./src/server/platformDatabase";
 import { PlatformRepository } from "./src/platform/platformRepository";
 import { BinanceSpotAccountAdapter } from "./src/platform/binanceSpotAccountAdapter";
+import { BINANCE_CHART_INTERVALS, isBinanceChartInterval, normalizeBinanceKlines } from "./src/server/binanceChartData";
 
 dotenv.config();
 
@@ -790,6 +791,98 @@ app.get("/api/market/live-feed", async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error("Live market data error:", error?.message || error);
     return res.status(503).json({ success: false, status: "DATA_UNAVAILABLE", error: error?.message || "Trusted market data provider unavailable." });
+  }
+});
+
+// Timeframe-specific chart data. The live strategy feed remains 1m and is not
+// changed by chart timeframe selection. This endpoint is display/research data only.
+app.get("/api/market/chart-candles", async (req: Request, res: Response) => {
+  res.setHeader("Cache-Control", "no-store");
+
+  const symbolParam = typeof req.query.symbol === "string" ? req.query.symbol.trim() : "BTC/USD";
+  const intervalParam = typeof req.query.interval === "string" ? req.query.interval : "1m";
+  const limit = Math.min(500, Math.max(50, Number(req.query.limit) || 300));
+  const binanceSymbol = resolveBinanceProviderSymbol(symbolParam);
+
+  if (!binanceSymbol) {
+    return res.status(404).json({
+      success: false,
+      status: "DATA_UNAVAILABLE",
+      error: "Unsupported Binance Spot symbol.",
+    });
+  }
+
+  if (!isBinanceChartInterval(intervalParam)) {
+    return res.status(400).json({
+      success: false,
+      status: "INVALID_INTERVAL",
+      supportedIntervals: BINANCE_CHART_INTERVALS,
+      error: "Unsupported chart interval.",
+    });
+  }
+
+  try {
+    if (intervalParam === "1m") {
+      await binanceMarketData.ensureSymbol(symbolParam, binanceSymbol);
+      const snapshot = binanceMarketData.getSnapshot(symbolParam, limit);
+      if (!snapshot || snapshot.gateway.stale || snapshot.gateway.state !== "READY") {
+        return res.status(503).json({
+          success: false,
+          status: "DATA_UNAVAILABLE",
+          error: "Binance websocket market gateway is not ready or quotes are stale.",
+          gateway: snapshot?.gateway || binanceMarketData.getHealth(),
+        });
+      }
+
+      return res.json({
+        success: true,
+        status: "OK",
+        symbol: symbolParam,
+        providerSymbol: binanceSymbol,
+        interval: intervalParam,
+        candles: snapshot.candles,
+        formingCandle: snapshot.formingCandle,
+        updatedAt: Date.now(),
+        source: "BINANCE_WEBSOCKET",
+      });
+    }
+
+    const endpoint =
+      "https://api.binance.com/api/v3/klines?symbol=" +
+      encodeURIComponent(binanceSymbol) +
+      "&interval=" +
+      encodeURIComponent(intervalParam) +
+      "&limit=" +
+      String(limit);
+
+    const response = await fetch(endpoint, {
+      headers: { Accept: "application/json", "User-Agent": "JarvisFinance/1.0" },
+    });
+    if (!response.ok) throw new Error("Binance chart request HTTP " + response.status);
+
+    const rows: unknown = await response.json();
+    if (!Array.isArray(rows)) throw new Error("Binance chart response was not an array.");
+
+    const normalized = normalizeBinanceKlines(rows, Date.now(), limit);
+
+    return res.json({
+      success: true,
+      status: "OK",
+      symbol: symbolParam,
+      providerSymbol: binanceSymbol,
+      interval: intervalParam,
+      candles: normalized.completed,
+      formingCandle: normalized.formingCandle,
+      updatedAt: Date.now(),
+      source: "BINANCE_REST_KLINES",
+    });
+  } catch (error: any) {
+    console.warn("Binance chart data error:", error?.message || error);
+    return res.status(503).json({
+      success: false,
+      status: "DATA_UNAVAILABLE",
+      error: error?.message || "Trusted Binance chart data provider unavailable.",
+    });
   }
 });
 
