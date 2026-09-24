@@ -121,7 +121,10 @@ export class BinanceSpotAccountAdapter implements ExecutionAdapter {
     this.apiSecret = options.apiSecret ?? process.env.JARVIS_BINANCE_TESTNET_API_SECRET;
     this.baseUrl = (options.baseUrl ?? process.env.JARVIS_BINANCE_TESTNET_BASE_URL ?? DEFAULT_TESTNET_BASE_URL).replace(/\/$/, "");
     this.accountId = options.accountId ?? process.env.JARVIS_BINANCE_TESTNET_ACCOUNT_ID ?? "binance-testnet-local";
-    this.recvWindowMs = Math.min(60_000, Math.max(1_000, options.recvWindowMs ?? Number(process.env.JARVIS_BINANCE_RECV_WINDOW_MS) || DEFAULT_RECV_WINDOW));
+    this.recvWindowMs = Math.min(
+      60_000,
+      Math.max(1_000, options.recvWindowMs ?? (Number(process.env.JARVIS_BINANCE_RECV_WINDOW_MS) || DEFAULT_RECV_WINDOW)),
+    );
     this.testnetOnly = options.testnetOnly ?? process.env.JARVIS_BINANCE_TESTNET_ONLY !== "false";
 
     if (this.testnetOnly) {
