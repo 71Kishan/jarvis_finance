@@ -199,7 +199,7 @@ export default function App() {
 
     const fetchLiveFeed = async () => {
       try {
-        const res = await fetch(`/api/market/live-feed?symbol=${encodeURIComponent(currentAsset)}&limit=80`);
+        const res = await fetch(`/api/market/live-feed?symbol=${encodeURIComponent(currentAsset)}&limit=500`);
         if (!res.ok) throw new Error(`Feed error: ${res.status}`);
         const data = await res.json();
 
@@ -220,6 +220,7 @@ export default function App() {
           marketOpen: currentAsset.includes("/USD") ? true : isUsRegularMarketOpen(),
         });
         setLiveTicker(data.ticker);
+        setFormingCandle(data.formingCandle || null);
         setLiveDataError(null);
 
         if (Array.isArray(data.candles) && data.candles.length > 0) {
@@ -242,6 +243,7 @@ export default function App() {
       } catch (err) {
         console.warn("Live feed unavailable; paper/live mode remains fail-closed:", err);
         setLiveTicker(null);
+        setFormingCandle(null);
         setIsAutoTrading(false);
         setLiveDataError("Trusted market data is unavailable. Auto-paper execution has been paused and no synthetic price is substituted.");
         setCandles([]);
