@@ -381,6 +381,8 @@ app.get("/api/health", (_req: Request, res: Response) => {
     autonomousShadow: {
       status: autonomousShadowRuntime.getStatus().status,
       symbol: autonomousShadowRuntime.getStatus().symbol,
+      strategyId: autonomousShadowRuntime.getStatus().strategy.id,
+      strategyVersion: autonomousShadowRuntime.getStatus().strategy.version,
       lastProcessedCandleAt: autonomousShadowRuntime.getStatus().lastProcessedCandleAt,
     },
     timestamp: Date.now(),
@@ -2096,6 +2098,34 @@ app.post("/api/runtime/paper/stop", requireControlToken, (_req: Request, res: Re
 // Server-owned shadow forward-validation controls.
 // Shadow uses live trusted market data and the deterministic paper risk/execution model,
 // but never sends orders to a venue.
+app.get("/api/runtime/shadow/evidence", requireSession, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const strategyId = typeof req.query.strategyId === "string"
+      ? req.query.strategyId.trim()
+      : "";
+    const symbol = typeof req.query.symbol === "string"
+      ? req.query.symbol.trim().toUpperCase()
+      : "";
+
+    if (!strategyId || strategyId.length > 160 || !symbol || symbol.length > 40) {
+      return res.status(400).json({ error: "strategyId and symbol are required." });
+    }
+
+    const evidence = await platformRepository.getShadowEvidenceSummary(
+      req.jarvisUser!.id,
+      strategyId,
+      symbol,
+    );
+
+    return res.json({ success: true, evidence });
+  } catch (error: any) {
+    return res.status(503).json({
+      success: false,
+      error: error?.message || "Shadow evidence is unavailable.",
+    });
+  }
+});
+
 app.get("/api/runtime/shadow/status", requireControlToken, (_req: Request, res: Response) => {
   res.json(autonomousShadowRuntime.getStatus());
 });
