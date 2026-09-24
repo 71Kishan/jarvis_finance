@@ -24,7 +24,30 @@ export function evaluateSignal(candle: Candle, recentCandles: Candle[], strategy
   }
 
   const price = candle.close;
-  const weights = strategy.indicatorWeights;
+  // Directional score is normalized across directional factors only. Volume is a
+  // participation gate and intentionally contributes no directional points. This
+  // keeps the score on a stable 0-100 scale even when a research strategy supplies
+  // arbitrary positive weights.
+  const rawDirectionalWeights = [
+    Math.max(0, Number(strategy.indicatorWeights.trendEMA) || 0),
+    Math.max(0, Number(strategy.indicatorWeights.rsiReversal) || 0),
+    Math.max(0, Number(strategy.indicatorWeights.bollingerMeanReversion) || 0),
+    Math.max(0, Number(strategy.indicatorWeights.macdMomentum) || 0),
+  ];
+  const directionalWeightSum = rawDirectionalWeights.reduce((sum, value) => sum + value, 0);
+  const weights = directionalWeightSum > 0
+    ? {
+        trendEMA: rawDirectionalWeights[0] / directionalWeightSum,
+        rsiReversal: rawDirectionalWeights[1] / directionalWeightSum,
+        bollingerMeanReversion: rawDirectionalWeights[2] / directionalWeightSum,
+        macdMomentum: rawDirectionalWeights[3] / directionalWeightSum,
+      }
+    : {
+        trendEMA: 0.3333,
+        rsiReversal: 0.2222,
+        bollingerMeanReversion: 0.1667,
+        macdMomentum: 0.2778,
+      };
   const components: SignalComponent[] = [];
 
   const trendLong = ind.ema9 > ind.ema21 && ind.ema21 > ind.ema50 && price > ind.ema9;
