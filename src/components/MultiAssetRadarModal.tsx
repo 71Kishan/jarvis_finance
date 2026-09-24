@@ -17,8 +17,8 @@ import {
 interface MultiAssetRadarModalProps {
   isOpen: boolean;
   onClose: () => void;
-  currentAsset: AssetSymbol;
-  onSelectAndTradeAsset: (symbol: AssetSymbol, executeTrade?: boolean) => void;
+  currentAsset: string;
+  onSelectAndTradeAsset: (symbol: string, executeTrade?: boolean) => void;
   autoRotate: boolean;
   onToggleAutoRotate: () => void;
   minConfidence: number;
