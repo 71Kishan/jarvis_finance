@@ -281,6 +281,7 @@ export const WorkspaceSurface: React.FC<WorkspaceSurfaceProps> = ({
     const openOrders = accountOverview?.openOrders || [];
     const fills = accountOverview?.fills || [];
     const testnetConfigured = platformHealth?.binanceSpotTestnetAccount?.configured === true;
+    const testnetOrderGateEnabled = platformHealth?.binanceSpotTestnetAccount?.orderExecutionEnabled === true;
 
     return (
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 space-y-4">
@@ -366,6 +367,11 @@ export const WorkspaceSurface: React.FC<WorkspaceSurfaceProps> = ({
               SERVER CREDENTIALS NOT CONFIGURED • The account sync control is intentionally unavailable.
             </div>
           )}
+          {testnetConfigured && !testnetOrderGateEnabled && (
+            <div className="mt-4 rounded-lg border border-amber-900/50 bg-amber-950/10 px-3 py-2.5 text-[11px] font-mono text-amber-200">
+              SERVER SANDBOX ORDER GATE OFF • Set JARVIS_BINANCE_TESTNET_ENABLE_ORDERS=true before the testnet trade-permission control can be used.
+            </div>
+          )}
 
           {accountMessage && (
             <div className="mt-4 rounded-lg border border-amber-900/50 bg-amber-950/10 px-3 py-2.5 text-xs text-amber-200">
@@ -403,7 +409,7 @@ export const WorkspaceSurface: React.FC<WorkspaceSurfaceProps> = ({
                     {!connection.permissions.includes("TRADE") && testnetConfigured && (
                       <button
                         type="button"
-                        disabled={sandboxBusy === connection.id}
+                        disabled={sandboxBusy === connection.id || !testnetOrderGateEnabled}
                         onClick={() => void enableSandboxTrading(connection.id)}
                         className="rounded-lg border border-amber-700/40 bg-amber-500/10 px-2.5 py-1.5 text-amber-200 hover:bg-amber-500/15 disabled:opacity-50"
                       >
