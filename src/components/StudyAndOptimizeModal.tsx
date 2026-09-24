@@ -108,7 +108,7 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
             method: "POST",
             headers: { "Content-Type": "application/json" },
             credentials: "same-origin",
-            body: JSON.stringify(fallbackPayload),
+            body: JSON.stringify({ ...fallbackPayload, strategy: opt.bestStrategy }),
           });
           if (fallbackResponse.ok) {
             setPersistenceMessage("Server recomputation was unavailable; submitted research evidence was archived.");
@@ -122,7 +122,7 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
             method: "POST",
             headers: { "Content-Type": "application/json" },
             credentials: "same-origin",
-            body: JSON.stringify({ result: validation }),
+            body: JSON.stringify({ result: validation, strategy: opt.bestStrategy }),
           });
           setPersistenceMessage(
             fallbackResponse.ok
