@@ -8,7 +8,7 @@ interface MarketChartProps {
   activeTrade: Trade | null;
   tradeHistory: Trade[];
   assetSymbol: string;
-  regime: MarketRegime;
+  regime?: MarketRegime | null;
 }
 
 const TIMEFRAME_MS = 60_000;
@@ -46,7 +46,7 @@ function getRange(values: number[], fallback = 1) {
   return { min: Math.max(0, min - padding), max: max + padding };
 }
 
-function getRegimeClass(regime: MarketRegime) {
+function getRegimeClass(regime: MarketRegime | null | undefined) {
   switch (regime) {
     case "BULL_EXPANSION":
       return "text-emerald-300 border-emerald-500/30 bg-emerald-500/10";
@@ -183,8 +183,8 @@ export const MarketChart: React.FC<MarketChartProps> = ({
           <div className="flex flex-wrap items-center gap-2">
             <div className="font-mono font-bold text-lg text-white">{assetSymbol}</div>
             <div className="text-[11px] font-mono text-neutral-500">1m</div>
-            <div className={"px-2 py-0.5 rounded border text-[10px] font-mono uppercase " + getRegimeClass(regime)}>
-              {regime.replaceAll("_", " ")}
+            <div className={"px-2 py-0.5 rounded border text-[10px] font-mono uppercase " + (regime ? getRegimeClass(regime) : "text-neutral-600 border-neutral-800 bg-neutral-900")}>
+              {regime ? regime.replaceAll("_", " ") : "REGIME UNAVAILABLE"}
             </div>
             {formingCandle && (
               <div className="px-2 py-0.5 rounded border border-sky-500/30 bg-sky-500/10 text-sky-300 text-[10px] font-mono uppercase">
