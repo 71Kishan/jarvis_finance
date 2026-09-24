@@ -303,13 +303,29 @@ export class AutonomousShadowRuntime {
         const afterActiveTrade = this.engine.getActiveTrade();
         const afterTradeHistory = this.engine.getTradeHistory();
         const newlyClosedTrades = afterTradeHistory.filter((trade) => !beforeTradeIds.has(trade.id));
+        const openedTrade =
+          !beforeActiveTrade && afterActiveTrade
+            ? afterActiveTrade
+            : null;
+        const activeTradeChanged =
+          Boolean(beforeActiveTrade && afterActiveTrade) &&
+          (
+            beforeActiveTrade!.stopLoss !== afterActiveTrade!.stopLoss ||
+            beforeActiveTrade!.takeProfit !== afterActiveTrade!.takeProfit ||
+            beforeActiveTrade!.amount !== afterActiveTrade!.amount ||
+            beforeActiveTrade!.pnl !== afterActiveTrade!.pnl
+          );
 
         const runtimeId = this.persistedRuntimeId || (await this.persist())?.id;
         if (!runtimeId) {
           throw new Error("Shadow runtime persistence did not return a runtime identifier.");
         }
 
-        if (afterActiveTrade) {
+        if (openedTrade) {
+          await this.repository.upsertShadowTrade(runtimeId, openedTrade);
+        } else if (activeTradeChanged && afterActiveTrade) {
+          // Keep the live research position current when stop/mark state changes;
+          // equity observations remain the high-frequency time series.
           await this.repository.upsertShadowTrade(runtimeId, afterActiveTrade);
         }
         for (const trade of newlyClosedTrades) {
