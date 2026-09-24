@@ -53,7 +53,21 @@ interface BalanceView {
   free: string;
   locked: string;
   total: string;
+  valueInBaseCurrency?: string;
+  markPriceInBaseCurrency?: string;
+  markUpdatedAt?: number;
+  priced?: boolean;
   updatedAt: number;
+}
+
+interface PortfolioValuationView {
+  baseCurrency: string;
+  cashValue: string;
+  holdingsValue: string;
+  totalEquity: string;
+  complete: boolean;
+  asOf: number;
+  unpricedAssets: string[];
 }
 
 interface OpenOrderView {
@@ -119,6 +133,7 @@ export const WorkspaceSurface: React.FC<WorkspaceSurfaceProps> = ({
   const [runtime, setRuntime] = useState<RuntimeStatus | null>(null);
   const [platformHealth, setPlatformHealth] = useState<any>(null);
   const [accountOverview, setAccountOverview] = useState<AccountOverview | null>(null);
+  const [portfolioValuation, setPortfolioValuation] = useState<PortfolioValuationView | null>(null);
   const [accountBusy, setAccountBusy] = useState(false);
   const [accountMessage, setAccountMessage] = useState<string | null>(null);
   const [sandboxBusy, setSandboxBusy] = useState<string | null>(null);
@@ -146,22 +161,33 @@ export const WorkspaceSurface: React.FC<WorkspaceSurfaceProps> = ({
 
   const loadAccountOverview = async () => {
     try {
-      const response = await fetch("/api/account/overview", {
+      const response = await fetch("/api/account/portfolio", {
         cache: "no-store",
         credentials: "same-origin",
       });
       const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload?.error || "Account overview unavailable.");
+      if (!response.ok) throw new Error(payload?.error || "Portfolio account data unavailable.");
+
       setAccountOverview({
         connections: Array.isArray(payload?.connections) ? payload.connections : [],
         balances: Array.isArray(payload?.balances) ? payload.balances : [],
         openOrders: Array.isArray(payload?.openOrders) ? payload.openOrders : [],
         fills: Array.isArray(payload?.fills) ? payload.fills : [],
       });
+      setPortfolioValuation(payload?.valuation ? {
+        baseCurrency: String(payload.valuation.baseCurrency || payload.baseCurrency || "USDT"),
+        cashValue: String(payload.valuation.cashValue ?? "0"),
+        holdingsValue: String(payload.valuation.holdingsValue ?? "0"),
+        totalEquity: String(payload.valuation.totalEquity ?? "0"),
+        complete: payload.valuation.complete === true,
+        asOf: Number(payload.valuation.asOf || Date.now()),
+        unpricedAssets: Array.isArray(payload.valuation.unpricedAssets) ? payload.valuation.unpricedAssets : [],
+      } : null);
       setAccountMessage(null);
     } catch (error: any) {
       setAccountOverview(null);
-      setAccountMessage(error?.message || "Account overview unavailable.");
+      setPortfolioValuation(null);
+      setAccountMessage(error?.message || "Portfolio account data unavailable.");
     }
   };
 
@@ -429,6 +455,54 @@ export const WorkspaceSurface: React.FC<WorkspaceSurfaceProps> = ({
         </section>
 
         <section className="rounded-xl border border-neutral-800 bg-neutral-900/80 overflow-hidden">
+          <div className="px-5 py-4 border-b border-neutral-800 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+            <div>
+              <div className="text-[10px] font-mono uppercase tracking-[0.18em] text-neutral-600">Marked portfolio</div>
+              <h2 className="text-sm font-semibold text-neutral-100 mt-1">Account valuation</h2>
+              <p className="text-[11px] text-neutral-500 mt-1">
+                Trusted provider balances marked only when a fresh spot quote in the configured base currency exists.
+              </p>
+            </div>
+            <div className={portfolioValuation?.complete
+              ? "rounded-full border border-emerald-900/60 bg-emerald-950/20 px-2.5 py-1 text-[10px] font-mono text-emerald-300"
+              : "rounded-full border border-amber-900/60 bg-amber-950/20 px-2.5 py-1 text-[10px] font-mono text-amber-200"}>
+              {portfolioValuation?.complete ? "VALUATION COMPLETE" : "VALUATION PARTIAL"}
+            </div>
+          </div>
+
+          {portfolioValuation ? (
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-px bg-neutral-800">
+              <div className="bg-neutral-950 p-4">
+                <div className="text-[10px] font-mono uppercase text-neutral-600">Total equity</div>
+                <div className="text-xl font-mono text-neutral-100 mt-1">
+                  {formatDecimal(portfolioValuation.totalEquity)} {portfolioValuation.baseCurrency}
+                </div>
+                <div className="text-[10px] text-neutral-600 mt-1">{formatTimestamp(portfolioValuation.asOf)}</div>
+              </div>
+              <div className="bg-neutral-950 p-4">
+                <div className="text-[10px] font-mono uppercase text-neutral-600">Cash</div>
+                <div className="text-lg font-mono text-neutral-200 mt-1">{formatDecimal(portfolioValuation.cashValue)}</div>
+                <div className="text-[10px] text-neutral-600 mt-1">{portfolioValuation.baseCurrency}</div>
+              </div>
+              <div className="bg-neutral-950 p-4">
+                <div className="text-[10px] font-mono uppercase text-neutral-600">Marked holdings</div>
+                <div className="text-lg font-mono text-neutral-200 mt-1">{formatDecimal(portfolioValuation.holdingsValue)}</div>
+                <div className="text-[10px] text-neutral-600 mt-1">{portfolioValuation.baseCurrency}</div>
+              </div>
+              <div className="bg-neutral-950 p-4">
+                <div className="text-[10px] font-mono uppercase text-neutral-600">Unpriced assets</div>
+                <div className="text-lg font-mono text-neutral-200 mt-1">{portfolioValuation.unpricedAssets.length}</div>
+                <div className="text-[10px] text-neutral-600 mt-1">
+                  {portfolioValuation.unpricedAssets.length ? portfolioValuation.unpricedAssets.join(", ") : "None"}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="px-5 py-8 text-center text-xs font-mono text-neutral-600">NO TRUSTED PORTFOLIO VALUATION</div>
+          )}
+        </section>
+
+        <section className="rounded-xl border border-neutral-800 bg-neutral-900/80 overflow-hidden">
           <div className="px-5 py-4 border-b border-neutral-800">
             <h2 className="text-sm font-semibold text-neutral-100">Wallet balances</h2>
             <p className="text-[11px] text-neutral-500 mt-1">
@@ -446,6 +520,7 @@ export const WorkspaceSurface: React.FC<WorkspaceSurfaceProps> = ({
                     <th className="text-right px-5 py-3">Free</th>
                     <th className="text-right px-5 py-3">Locked</th>
                     <th className="text-right px-5 py-3">Total</th>
+                    <th className="text-right px-5 py-3">Value</th>
                     <th className="text-right px-5 py-3">Updated</th>
                   </tr>
                 </thead>
@@ -456,6 +531,11 @@ export const WorkspaceSurface: React.FC<WorkspaceSurfaceProps> = ({
                       <td className="px-5 py-3 text-right font-mono text-neutral-300">{formatDecimal(balance.free)}</td>
                       <td className="px-5 py-3 text-right font-mono text-neutral-500">{formatDecimal(balance.locked)}</td>
                       <td className="px-5 py-3 text-right font-mono text-neutral-100">{formatDecimal(balance.total)}</td>
+                      <td className="px-5 py-3 text-right font-mono text-neutral-300">
+                        {balance.priced && balance.valueInBaseCurrency !== undefined
+                          ? formatDecimal(balance.valueInBaseCurrency)
+                          : "—"}
+                      </td>
                       <td className="px-5 py-3 text-right font-mono text-neutral-600">{formatTimestamp(balance.updatedAt)}</td>
                     </tr>
                   ))}
