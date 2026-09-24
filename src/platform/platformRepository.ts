@@ -112,6 +112,19 @@ export interface PersistedOrder {
   idempotencyFingerprint?: string;
 }
 
+export interface ShadowRuntimeRecord {
+  id: string;
+  userId: string;
+  strategyId: string;
+  strategyVersion: number;
+  symbol: string;
+  status: "STOPPED" | "STARTING" | "RUNNING" | "WAITING_FOR_DATA" | "HALTED" | "ERROR";
+  runtimeState: Record<string, unknown>;
+  lastProcessedCandleAt?: number;
+  startedAt?: number;
+  updatedAt: number;
+}
+
 export interface InstrumentPersistence {
   syncInstruments(instruments: Instrument[]): Promise<void>;
 }
@@ -728,6 +741,124 @@ export class PlatformRepository implements InstrumentPersistence {
       delistingTime: row.delisting_time ? new Date(row.delisting_time).getTime() : undefined,
       session: row.session ?? undefined,
       updatedAt: row.updated_at ? new Date(row.updated_at).getTime() : Date.now(),
+    };
+  }
+
+  public async loadShadowRuntime(
+    userId: string,
+    strategyId: string,
+    symbol: string,
+  ): Promise<ShadowRuntimeRecord | null> {
+    if (!this.database.isReady()) {
+      throw new Error("PostgreSQL is required for durable shadow runtime state.");
+    }
+
+    const result = await this.database.query<{
+      id: string;
+      user_id: string;
+      strategy_id: string;
+      strategy_version: number;
+      symbol: string;
+      status: ShadowRuntimeRecord["status"];
+      runtime_state: Record<string, unknown>;
+      last_processed_candle_at: Date | null;
+      started_at: Date | null;
+      updated_at: Date;
+    }>(
+      [
+        "SELECT id, user_id, strategy_id, strategy_version, symbol, status, runtime_state,",
+        "       last_processed_candle_at, started_at, updated_at",
+        "FROM shadow_runtime_states",
+        "WHERE user_id = $1 AND strategy_id = $2 AND symbol = $3",
+        "LIMIT 1",
+      ].join("\n"),
+      [userId, strategyId, symbol],
+    );
+
+    const row = result.rows[0];
+    if (!row) return null;
+    return {
+      id: row.id,
+      userId: row.user_id,
+      strategyId: row.strategy_id,
+      strategyVersion: row.strategy_version,
+      symbol: row.symbol,
+      status: row.status,
+      runtimeState: row.runtime_state,
+      lastProcessedCandleAt: dateToMs(row.last_processed_candle_at),
+      startedAt: dateToMs(row.started_at),
+      updatedAt: row.updated_at.getTime(),
+    };
+  }
+
+  public async saveShadowRuntime(input: {
+    userId: string;
+    strategyId: string;
+    strategyVersion: number;
+    symbol: string;
+    status: ShadowRuntimeRecord["status"];
+    runtimeState: Record<string, unknown>;
+    lastProcessedCandleAt?: number;
+    startedAt?: number;
+  }): Promise<ShadowRuntimeRecord> {
+    if (!this.database.isReady()) {
+      throw new Error("PostgreSQL is required for durable shadow runtime state.");
+    }
+
+    const result = await this.database.query<{
+      id: string;
+      user_id: string;
+      strategy_id: string;
+      strategy_version: number;
+      symbol: string;
+      status: ShadowRuntimeRecord["status"];
+      runtime_state: Record<string, unknown>;
+      last_processed_candle_at: Date | null;
+      started_at: Date | null;
+      updated_at: Date;
+    }>(
+      [
+        "INSERT INTO shadow_runtime_states(",
+        "  user_id, strategy_id, strategy_version, symbol, status, runtime_state,",
+        "  last_processed_candle_at, started_at, updated_at",
+        ") VALUES ($1,$2,$3,$4,$5,$6::jsonb,",
+        "  CASE WHEN $7::bigint > 0 THEN to_timestamp($7 / 1000.0) ELSE NULL END,",
+        "  CASE WHEN $8::bigint > 0 THEN to_timestamp($8 / 1000.0) ELSE NULL END,",
+        "  now())",
+        "ON CONFLICT (user_id, strategy_id, symbol)",
+        "DO UPDATE SET",
+        "  strategy_version = EXCLUDED.strategy_version, status = EXCLUDED.status,",
+        "  runtime_state = EXCLUDED.runtime_state,",
+        "  last_processed_candle_at = EXCLUDED.last_processed_candle_at,",
+        "  started_at = COALESCE(EXCLUDED.started_at, shadow_runtime_states.started_at),",
+        "  updated_at = now()",
+        "RETURNING id, user_id, strategy_id, strategy_version, symbol, status, runtime_state,",
+        "          last_processed_candle_at, started_at, updated_at",
+      ].join("\n"),
+      [
+        input.userId,
+        input.strategyId,
+        input.strategyVersion,
+        input.symbol,
+        input.status,
+        JSON.stringify(input.runtimeState),
+        input.lastProcessedCandleAt ?? 0,
+        input.startedAt ?? 0,
+      ],
+    );
+    const row = result.rows[0];
+    if (!row) throw new Error("Shadow runtime state could not be persisted.");
+    return {
+      id: row.id,
+      userId: row.user_id,
+      strategyId: row.strategy_id,
+      strategyVersion: row.strategy_version,
+      symbol: row.symbol,
+      status: row.status,
+      runtimeState: row.runtime_state,
+      lastProcessedCandleAt: dateToMs(row.last_processed_candle_at),
+      startedAt: dateToMs(row.started_at),
+      updatedAt: row.updated_at.getTime(),
     };
   }
 
