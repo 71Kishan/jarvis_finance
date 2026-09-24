@@ -304,14 +304,16 @@ export class AutonomousShadowRuntime {
         const afterTradeHistory = this.engine.getTradeHistory();
         const newlyClosedTrades = afterTradeHistory.filter((trade) => !beforeTradeIds.has(trade.id));
 
-        for (const trade of afterTradeHistory) {
-          await this.repository.upsertShadowTrade(this.persistedRuntimeId || (await this.persist())!.id, trade);
+        const runtimeId = this.persistedRuntimeId || (await this.persist())?.id;
+        if (!runtimeId) {
+          throw new Error("Shadow runtime persistence did not return a runtime identifier.");
         }
+
         if (afterActiveTrade) {
-          await this.repository.upsertShadowTrade(
-            this.persistedRuntimeId || (await this.persist())!.id,
-            afterActiveTrade,
-          );
+          await this.repository.upsertShadowTrade(runtimeId, afterActiveTrade);
+        }
+        for (const trade of newlyClosedTrades) {
+          await this.repository.upsertShadowTrade(runtimeId, trade);
         }
 
         const eventType =
@@ -334,14 +336,9 @@ export class AutonomousShadowRuntime {
                 ? { kind: "RISK_HALT" }
                 : null;
 
-        const persisted = await this.persist();
-        if (!persisted?.id) {
-          throw new Error("Shadow runtime persistence did not return a runtime identifier.");
-        }
-
         const vitality = this.engine.getVitality();
         await this.repository.recordShadowObservation({
-          runtimeId: persisted.id,
+          runtimeId,
           candleTimestamp: candle.timestamp,
           closePrice: String(candle.close),
           equity: String(vitality.currentEquity),
@@ -354,6 +351,8 @@ export class AutonomousShadowRuntime {
           activeTrade: afterActiveTrade as unknown as Record<string, unknown> | null,
           tradeEvent: tradeEvent as unknown as Record<string, unknown> | null,
         });
+
+        await this.persist();
 
         if (this.engine.getBotState() === "HALTED_DEAD") break;
       }
