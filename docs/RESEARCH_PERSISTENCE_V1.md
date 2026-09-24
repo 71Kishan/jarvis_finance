@@ -31,3 +31,20 @@ The Research UI can apply a candidate only when its deterministic validation res
 The shadow runtime additionally requires `JARVIS_SHADOW_STRATEGY_ID` and, by default, `JARVIS_SHADOW_REQUIRE_SERVER_VALIDATED=true`.
 
 Real-money execution remains disabled.
+
+## Forward shadow evidence
+
+Once a server-recomputed strategy is activated for shadow, Jarvis persists per-candle forward observations and meaningful trade-state changes. The Automation workspace evaluates the durable sample against a separate forward policy requiring, by default:
+
+- at least 30 closed shadow trades;
+- at least 30 calendar days of forward observation;
+- profit factor of at least 1.05;
+- non-negative average realized PnL per closed shadow trade;
+- maximum drawdown no greater than 10%;
+- a runtime that is not in ERROR or HALTED.
+
+This forward status is a research evidence state. It does not authorize provider orders or claim that an edge will persist.
+
+## Operational readiness
+
+The server health endpoint also reports operational dependencies separately from strategy performance: PostgreSQL readiness, market-data freshness, instrument catalog readiness, authenticated account stream health when configured, provider reconciliation freshness, paper/shadow runtime state, and forward validation status. A missing freshness timestamp fails closed for the affected critical dependency.
