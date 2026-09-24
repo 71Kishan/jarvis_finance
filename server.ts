@@ -337,9 +337,11 @@ const STOCK_UNIVERSE: Record<string, { name: string; category: "STOCK" | "INDEX"
 const binanceMarketData = new BinanceMarketDataService(SYMBOL_MAP);
 const platformDatabase = new PlatformDatabase();
 const platformRepository = new PlatformRepository(platformDatabase);
-const binanceInstrumentCatalog = new BinanceInstrumentCatalog({
-  persist: (instruments) => platformRepository.syncInstruments(instruments),
-});
+const binanceInstrumentCatalog = new BinanceInstrumentCatalog(
+  platformDatabase.isConfigured()
+    ? { persist: (instruments) => platformRepository.syncInstruments(instruments) }
+    : undefined,
+);
 const autonomousPaperRuntime = new AutonomousPaperRuntime(binanceMarketData, {
   symbol: process.env.JARVIS_PAPER_SYMBOL || "BTC/USD",
   initialCapital: Number(process.env.JARVIS_PAPER_INITIAL_CAPITAL) || 10_000,
