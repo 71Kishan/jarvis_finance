@@ -1,5 +1,16 @@
 import React, { useEffect, useRef, useState } from "react";
 import type { Instrument } from "../platform/types";
+
+type CatalogInstrument = Instrument & {
+  quote?: {
+    price: number;
+    change24hPercent: number;
+    high24h: number;
+    low24h: number;
+    volume24h: number;
+    updatedAt: number;
+  };
+};
 import { Search, Loader2 } from "lucide-react";
 
 interface InstrumentSearchProps {
@@ -10,7 +21,7 @@ interface InstrumentSearchProps {
 
 export const InstrumentSearch: React.FC<InstrumentSearchProps> = ({ value, onSelect, disabled }) => {
   const [query, setQuery] = useState(value);
-  const [results, setResults] = useState<Instrument[]>([]);
+  const [results, setResults] = useState<CatalogInstrument[]>([]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const requestRef = useRef(0);
