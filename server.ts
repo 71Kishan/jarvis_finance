@@ -1,7 +1,7 @@
 import express, { Request, Response } from "express";
 import http from "http";
 import path from "path";
-import { timingSafeEqual } from "crypto";
+import { createHash, timingSafeEqual } from "crypto";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, LiveServerMessage, Modality } from "@google/genai";
 import { WebSocketServer, WebSocket } from "ws";
@@ -647,7 +647,355 @@ app.post("/api/account/binance-testnet/sync", requireSameOrigin, requireSession,
       health: await binanceSpotTestnetAccount.getHealth(),
     });
   }
+})
+function sandboxIdempotencyKey(req: Request): string {
+  const value = typeof req.headers["idempotency-key"] === "string"
+    ? req.headers["idempotency-key"].trim()
+    : "";
+  if (!/^[A-Za-z0-9._:-]{12,128}$/.test(value)) {
+    throw new Error("Idempotency-Key must be 12-128 characters using letters, numbers, dot, underscore, colon or hyphen.");
+  }
+  return value;
+}
+
+function sandboxClientOrderId(userId: string, accountId: string, idempotencyKey: string): string {
+  return "jv_" + createHash("sha256")
+    .update(userId + ":" + accountId + ":" + idempotencyKey, "utf8")
+    .digest("hex")
+    .slice(0, 24);
+}
+
+function isDecimalString(value: unknown, positive = false): value is string {
+  if (typeof value !== "string" || !/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(value)) return false;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && (!positive || numeric > 0);
+}
+
+function parseSandboxOrderIntent(
+  body: any,
+  accountId: string,
+  clientOrderId: string,
+): import("./src/platform/types").OrderIntent {
+  const instrumentId = typeof body?.instrumentId === "string" ? body.instrumentId.trim() : "";
+  const side = body?.side === "BUY" || body?.side === "SELL" ? body.side : "";
+  const type = typeof body?.type === "string" ? body.type.trim().toUpperCase() : "";
+  const allowedTypes = new Set(["MARKET", "LIMIT", "LIMIT_MAKER", "STOP", "STOP_LIMIT", "TAKE_PROFIT", "TAKE_PROFIT_LIMIT"]);
+  const quantity = body?.quantity;
+  const limitPrice = body?.limitPrice;
+  const stopPrice = body?.stopPrice;
+  const timeInForce = body?.timeInForce;
+
+  if (!instrumentId || !side || !allowedTypes.has(type) || !isDecimalString(quantity, true)) {
+    throw new Error("Invalid sandbox order intent.");
+  }
+  if (limitPrice !== undefined && !isDecimalString(limitPrice, true)) {
+    throw new Error("limitPrice must be a positive decimal string when supplied.");
+  }
+  if (stopPrice !== undefined && !isDecimalString(stopPrice, true)) {
+    throw new Error("stopPrice must be a positive decimal string when supplied.");
+  }
+  if (timeInForce !== undefined && !["GTC", "IOC", "FOK"].includes(String(timeInForce).toUpperCase())) {
+    throw new Error("Unsupported Spot timeInForce.");
+  }
+  if (body?.reduceOnly === true) {
+    throw new Error("Spot sandbox orders do not support reduceOnly.");
+  }
+
+  return {
+    clientOrderId,
+    accountId,
+    instrumentId,
+    side,
+    type,
+    quantity,
+    limitPrice: limitPrice ? String(limitPrice) : undefined,
+    stopPrice: stopPrice ? String(stopPrice) : undefined,
+    timeInForce: timeInForce ? String(timeInForce).toUpperCase() as "GTC" | "IOC" | "FOK" : undefined,
+    reduceOnly: false,
+    strategyId: typeof body?.strategyId === "string" ? body.strategyId.slice(0, 160) : undefined,
+    strategyVersion: Number.isInteger(body?.strategyVersion) ? body.strategyVersion : undefined,
+    reason: typeof body?.reason === "string" ? body.reason.slice(0, 500) : undefined,
+    requestedAt: Date.now(),
+  };
+}
+
+async function reconcileSandboxOrder(order: import("./src/platform/platformRepository").PersistedOrder, userId: string) {
+  const found = await binanceSpotTestnetAccount.getOrderByClientOrderId?.(
+    order.accountId,
+    order.clientOrderId,
+    order.instrumentId,
+  );
+  if (found) {
+    return platformRepository.updateOrderFromProvider(userId, order.clientOrderId, found);
+  }
+
+  if (order.status !== "UNKNOWN_RECONCILIATION" && order.status !== "PENDING_SUBMIT") {
+    return platformRepository.markOrderStatus(
+      userId,
+      order.clientOrderId,
+      "UNKNOWN_RECONCILIATION",
+      "Provider order lookup returned no order; state was not silently treated as canceled.",
+    );
+  }
+
+  return order;
+}
+
+app.post("/api/account/binance-testnet/enable-sandbox-trading", requireSameOrigin, requireSession, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!binanceSpotTestnetAccount.isOrderExecutionEnabled()) {
+      return res.status(503).json({
+        success: false,
+        error: "Sandbox execution is disabled by operator policy. Set JARVIS_BINANCE_TESTNET_ENABLE_ORDERS=true on the server.",
+      });
+    }
+
+    const account = await platformRepository.getUserAccountConnection(
+      req.jarvisUser!.id,
+      binanceSpotTestnetAccount.getAccountId(),
+    );
+    if (!account || account.provider !== "BINANCE_SPOT_TESTNET") {
+      return res.status(404).json({ success: false, error: "Binance Spot Testnet account is not connected. Sync it first." });
+    }
+
+    if (!account.permissions.includes("TRADE")) {
+      const upgraded = await platformRepository.grantSandboxTradePermission(
+        req.jarvisUser!.id,
+        account.id,
+      );
+      await platformRepository.recordAuditEvent({
+        userId: req.jarvisUser!.id,
+        accountId: account.id,
+        eventType: "SANDBOX_TRADE_ENABLED",
+        payload: { provider: binanceSpotTestnetAccount.provider, testnetOnly: true },
+      });
+      return res.json({ success: true, connection: upgraded, testnetOnly: true });
+    }
+
+    return res.json({ success: true, connection: account, testnetOnly: true });
+  } catch (error: any) {
+    return res.status(503).json({ success: false, error: error?.message || "Unable to enable sandbox trading." });
+  }
 });
+
+app.post("/api/account/binance-testnet/orders", requireSameOrigin, requireSession, async (req: AuthenticatedRequest, res: Response) => {
+  let idempotencyKey = "";
+  try {
+    if (!binanceSpotTestnetAccount.isOrderExecutionEnabled()) {
+      return res.status(503).json({
+        success: false,
+        error: "Sandbox order execution is disabled by operator policy.",
+      });
+    }
+
+    idempotencyKey = sandboxIdempotencyKey(req);
+    const accountId = typeof req.body?.accountId === "string" ? req.body.accountId.trim() : "";
+    if (!accountId) return res.status(400).json({ success: false, error: "accountId is required." });
+
+    const account = await platformRepository.getUserAccountConnection(req.jarvisUser!.id, accountId);
+    if (!account || account.provider !== "BINANCE_SPOT_TESTNET") {
+      return res.status(404).json({ success: false, error: "Connected Binance Spot Testnet account was not found." });
+    }
+    if (account.status !== "CONNECTED" || !account.permissions.includes("TRADE")) {
+      return res.status(403).json({
+        success: false,
+        error: "Sandbox trading is not enabled for this account. Enable the explicit testnet trading gate first.",
+      });
+    }
+
+    const existing = await platformRepository.getOrderByIdempotencyKey(
+      req.jarvisUser!.id,
+      accountId,
+      idempotencyKey,
+    );
+
+    if (existing) {
+      const reconciled = await reconcileSandboxOrder(existing, req.jarvisUser!.id);
+      return res.status(200).json({
+        success: true,
+        idempotentReplay: true,
+        reconciled: reconciled !== existing,
+        order: reconciled,
+      });
+    }
+
+    const clientOrderId = sandboxClientOrderId(req.jarvisUser!.id, accountId, idempotencyKey);
+    const intent = parseSandboxOrderIntent(req.body, accountId, clientOrderId);
+
+    const instrument = await platformRepository.getExecutionInstrument(intent.instrumentId);
+    if (!instrument || instrument.provider !== "BINANCE_SPOT" || instrument.venue.toUpperCase() !== "BINANCE") {
+      return res.status(400).json({ success: false, error: "Instrument is not a persisted Binance Spot instrument." });
+    }
+    if (!instrument.tradable || instrument.status !== "ACTIVE") {
+      return res.status(409).json({ success: false, error: "Instrument is not currently tradable according to the server catalog." });
+    }
+
+    let reserved: import("./src/platform/platformRepository").PersistedOrder;
+    try {
+      reserved = await platformRepository.createPendingOrder(
+        req.jarvisUser!.id,
+        accountId,
+        idempotencyKey,
+        intent,
+      );
+    } catch (error: any) {
+      if (String(error?.code) === "23505") {
+        const raced = await platformRepository.getOrderByIdempotencyKey(
+          req.jarvisUser!.id,
+          accountId,
+          idempotencyKey,
+        );
+        if (raced) {
+          const reconciled = await reconcileSandboxOrder(raced, req.jarvisUser!.id);
+          return res.status(200).json({
+            success: true,
+            idempotentReplay: true,
+            reconciled: reconciled !== raced,
+            order: reconciled,
+          });
+        }
+      }
+      throw error;
+    }
+
+    const providerOrder = await binanceSpotTestnetAccount.submitOrder(intent).catch(async (error: any) => {
+      const status = error?.executionUnknown === true
+        ? "UNKNOWN_RECONCILIATION"
+        : error?.binanceCode !== undefined
+          ? "REJECTED"
+          : "SUBMISSION_FAILED";
+
+      const failed = await platformRepository.markOrderStatus(
+        req.jarvisUser!.id,
+        intent.clientOrderId,
+        status,
+        error?.message || "Provider order submission failed.",
+      );
+      throw Object.assign(new Error(error?.message || "Provider order submission failed."), {
+        publicStatus: status,
+        persistedOrder: failed,
+        executionUnknown: status === "UNKNOWN_RECONCILIATION",
+      });
+    });
+
+    const persisted = await platformRepository.updateOrderFromProvider(
+      req.jarvisUser!.id,
+      intent.clientOrderId,
+      providerOrder,
+    );
+
+    await platformRepository.recordAuditEvent({
+      userId: req.jarvisUser!.id,
+      accountId,
+      eventType: "ORDER_SUBMITTED_SANDBOX",
+      idempotencyKey,
+      payload: {
+        clientOrderId: intent.clientOrderId,
+        externalOrderId: persisted.externalOrderId,
+        provider: binanceSpotTestnetAccount.provider,
+        status: persisted.status,
+        testnetOnly: true,
+      },
+    });
+
+    return res.status(200).json({
+      success: true,
+      idempotentReplay: false,
+      order: persisted,
+    });
+  } catch (error: any) {
+    if (error?.persistedOrder) {
+      return res.status(error.executionUnknown ? 202 : 422).json({
+        success: false,
+        idempotencyKey: idempotencyKey || undefined,
+        executionUnknown: error.executionUnknown === true,
+        order: error.persistedOrder,
+        error: error.message,
+      });
+    }
+    return res.status(503).json({
+      success: false,
+      error: error?.message || "Sandbox order submission failed.",
+    });
+  }
+});
+
+app.post("/api/account/binance-testnet/orders/cancel", requireSameOrigin, requireSession, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!binanceSpotTestnetAccount.isOrderExecutionEnabled()) {
+      return res.status(503).json({ success: false, error: "Sandbox order execution is disabled by operator policy." });
+    }
+
+    const accountId = typeof req.body?.accountId === "string" ? req.body.accountId.trim() : "";
+    const clientOrderId = typeof req.body?.clientOrderId === "string" ? req.body.clientOrderId.trim() : "";
+    if (!accountId || !clientOrderId) {
+      return res.status(400).json({ success: false, error: "accountId and clientOrderId are required." });
+    }
+
+    const account = await platformRepository.getUserAccountConnection(req.jarvisUser!.id, accountId);
+    if (!account || account.provider !== "BINANCE_SPOT_TESTNET" || !account.permissions.includes("TRADE")) {
+      return res.status(403).json({ success: false, error: "Sandbox trading is not enabled for this account." });
+    }
+
+    const order = await platformRepository.getUserOrder(req.jarvisUser!.id, clientOrderId);
+    if (!order || order.accountId !== accountId) {
+      return res.status(404).json({ success: false, error: "Sandbox order was not found." });
+    }
+
+    if (["CANCELLED", "FILLED", "REJECTED", "EXPIRED"].includes(order.status)) {
+      return res.json({ success: true, idempotentReplay: true, order });
+    }
+
+    const reconciled = await reconcileSandboxOrder(order, req.jarvisUser!.id);
+    if (["CANCELLED", "FILLED", "REJECTED", "EXPIRED"].includes(reconciled.status)) {
+      return res.json({ success: true, idempotentReplay: true, order: reconciled });
+    }
+
+    await platformRepository.markOrderStatus(
+      req.jarvisUser!.id,
+      clientOrderId,
+      "CANCEL_PENDING",
+      "Cancellation requested; provider response is authoritative.",
+    );
+
+    try {
+      const cancelled = await binanceSpotTestnetAccount.cancelOrder(
+        accountId,
+        clientOrderId,
+        order.instrumentId,
+      );
+      const persisted = await platformRepository.updateOrderFromProvider(
+        req.jarvisUser!.id,
+        clientOrderId,
+        cancelled,
+      );
+      await platformRepository.recordAuditEvent({
+        userId: req.jarvisUser!.id,
+        accountId,
+        eventType: "ORDER_CANCELLED_SANDBOX",
+        payload: { clientOrderId, externalOrderId: persisted.externalOrderId, testnetOnly: true },
+      });
+      return res.json({ success: true, order: persisted });
+    } catch (error: any) {
+      const status = error?.executionUnknown === true ? "UNKNOWN_RECONCILIATION" : "UNKNOWN_RECONCILIATION";
+      const persisted = await platformRepository.markOrderStatus(
+        req.jarvisUser!.id,
+        clientOrderId,
+        status,
+        error?.message || "Provider cancellation state is uncertain.",
+      );
+      return res.status(202).json({
+        success: false,
+        executionUnknown: true,
+        order: persisted,
+        error: error?.message || "Provider cancellation state is uncertain.",
+      });
+    }
+  } catch (error: any) {
+    return res.status(503).json({ success: false, error: error?.message || "Sandbox order cancellation failed." });
+  }
+});
+;
 
 // Endpoint: AI Copilot — research and paper-terminal assistant.
 // This endpoint is advisory only: it cannot place orders or mutate the trading engine.
