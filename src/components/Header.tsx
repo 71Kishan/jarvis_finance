@@ -31,10 +31,13 @@ import { soundFx } from "../utils/soundEffects";
 import { NotificationCenter } from "./NotificationCenter";
 import { InstrumentSearch } from "./InstrumentSearch";
 import type { Instrument } from "../platform/types";
+import { WORKSPACE_LABELS, WorkspaceView } from "../platform/workspace";
 
 interface HeaderProps {
   currentAsset: string;
   onSelectAsset: (asset: string) => void;
+  currentView: WorkspaceView;
+  onChangeView: (view: WorkspaceView) => void;
   botState: BotState;
   marketSource: MarketDataSource;
   isAutoTrading: boolean;
@@ -86,6 +89,14 @@ export const Header: React.FC<HeaderProps> = ({
   onScrollToAnalytics,
 }) => {
   const getStateBadge = () => {
+    if (currentView !== "PRACTICE") {
+      return {
+        label: currentView === "TERMINAL" ? "MARKET TERMINAL" : WORKSPACE_LABELS[currentView].toUpperCase(),
+        color: "bg-emerald-500/10 text-emerald-400 border-emerald-500/30",
+        icon: Radio,
+        pulse: "bg-emerald-400",
+      };
+    }
     switch (botState) {
       case "THRIVING":
         return {
@@ -194,6 +205,8 @@ export const Header: React.FC<HeaderProps> = ({
             onSelect={(instrument: Instrument) => onSelectAsset(instrument.symbol)}
           />
 
+          {currentView === "PRACTICE" && (
+            <>
           {/* Auto-Trading Toggle */}
           <button
             id="toggle-autotrade-btn"
@@ -363,6 +376,9 @@ export const Header: React.FC<HeaderProps> = ({
             onClear={onClearNotifications}
           />
 
+            </>
+          )}
+
           {/* Risk & Paper Settings Modal */}
           {onOpenRiskSettings && (
             <button
@@ -410,6 +426,28 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
           )}
         </div>
+      <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2 pt-3 mt-3 border-t border-neutral-900">
+        <nav className="flex items-center gap-1 overflow-x-auto pb-0.5" aria-label="Jarvis workspace">
+          {(["TERMINAL", "MARKETS", "PORTFOLIO", "AUTOMATION", "RESEARCH", "PRACTICE"] as WorkspaceView[]).map((view) => (
+            <button
+              key={view}
+              type="button"
+              onClick={() => onChangeView(view)}
+              className={
+                "px-3 py-1.5 rounded-lg text-xs font-mono font-semibold whitespace-nowrap transition-colors " +
+                (currentView === view
+                  ? "bg-neutral-800 text-white border border-neutral-700"
+                  : "text-neutral-500 hover:text-neutral-200 hover:bg-neutral-900 border border-transparent")
+              }
+            >
+              {WORKSPACE_LABELS[view]}
+            </button>
+          ))}
+        </nav>
+        <div className="text-[10px] font-mono text-neutral-600 uppercase tracking-wider">
+          {currentView === "PRACTICE" ? "Paper / Simulation workspace" : "Live market workspace"}
+        </div>
+      </div>
       </div>
     </header>
   );
