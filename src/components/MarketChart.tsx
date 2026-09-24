@@ -1,6 +1,7 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import type { Candle, Trade } from "../types/trading";
 import type { MarketRegime } from "../engine/marketSimulator";
+import { attachIndicators } from "../engine/indicators";
 
 interface MarketChartProps {
   candles: Candle[];
@@ -11,7 +12,16 @@ interface MarketChartProps {
   regime?: MarketRegime | null;
 }
 
-const TIMEFRAME_MS = 60_000;
+type ChartTimeframe = "1m" | "5m" | "15m" | "1h" | "4h" | "1d";
+
+const TIMEFRAME_MS: Record<ChartTimeframe, number> = {
+  "1m": 60_000,
+  "5m": 5 * 60_000,
+  "15m": 15 * 60_000,
+  "1h": 60 * 60_000,
+  "4h": 4 * 60 * 60_000,
+  "1d": 24 * 60 * 60_000,
+};
 
 const fmtPrice = (value: number, digits?: number) =>
   Number.isFinite(value)
@@ -68,6 +78,61 @@ export const MarketChart: React.FC<MarketChartProps> = ({
   regime,
 }) => {
   const [visibleCount, setVisibleCount] = useState(80);
+  const [timeframe, setTimeframe] = useState<ChartTimeframe>("1m");
+  const [remoteCandles, setRemoteCandles] = useState<Candle[]>([]);
+  const [remoteFormingCandle, setRemoteFormingCandle] = useState<Candle | null>(null);
+  const [remoteLoading, setRemoteLoading] = useState(false);
+  const [remoteError, setRemoteError] = useState<string | null>(null);
+
+  const activeCandles = timeframe === "1m" ? candles : remoteCandles;
+  const activeFormingCandle = timeframe === "1m" ? formingCandle : remoteFormingCandle;
+
+  useEffect(() => {
+    if (timeframe === "1m") {
+      setRemoteCandles([]);
+      setRemoteFormingCandle(null);
+      setRemoteError(null);
+      setRemoteLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    const load = async () => {
+      if (!remoteCandles.length) setRemoteLoading(true);
+      try {
+        const url =
+          "/api/market/live-feed?symbol=" +
+          encodeURIComponent(assetSymbol) +
+          "&interval=" +
+          encodeURIComponent(timeframe) +
+          "&limit=300";
+        const response = await fetch(url, { cache: "no-store" });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(payload?.error || "Market feed unavailable.");
+        }
+        const nextCandles = Array.isArray(payload?.candles) ? payload.candles : [];
+        if (!nextCandles.length) throw new Error("No trusted candles returned for this timeframe.");
+        if (!cancelled) {
+          setRemoteCandles(nextCandles);
+          setRemoteFormingCandle(payload?.formingCandle || null);
+          setRemoteError(null);
+        }
+      } catch (error: any) {
+        if (!cancelled) setRemoteError(error?.message || "Trusted chart data unavailable.");
+      } finally {
+        if (!cancelled) setRemoteLoading(false);
+      }
+    };
+
+    void load();
+    const timer = setInterval(() => void load(), 5_000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [assetSymbol, timeframe, remoteCandles.length]);
+
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
   const [showIndicators, setShowIndicators] = useState({
     ema: true,
@@ -77,16 +142,24 @@ export const MarketChart: React.FC<MarketChartProps> = ({
   });
 
   const chartData = useMemo(() => {
-    const closed = candles
+    const closedRaw = activeCandles
       .filter((c) =>
         [c.timestamp, c.open, c.high, c.low, c.close, c.volume].every(Number.isFinite),
       )
       .sort((a, b) => a.timestamp - b.timestamp);
 
-    const displayClosed = closed.slice(-visibleCount);
-    const display = formingCandle
-      ? [...displayClosed, { ...formingCandle }]
-      : displayClosed;
+    const sortedClosed = closedRaw
+      .filter((c) =>
+        [c.timestamp, c.open, c.high, c.low, c.close, c.volume].every(Number.isFinite),
+      )
+      .sort((a, b) => a.timestamp - b.timestamp);
+    const enrichedClosed = attachIndicators(sortedClosed);
+    const displayClosed = enrichedClosed.slice(-visibleCount);
+    let display = displayClosed;
+    if (activeFormingCandle) {
+      const preparedLive = attachIndicators([...sortedClosed, { ...activeFormingCandle }]).at(-1) || { ...activeFormingCandle };
+      display = [...displayClosed, preparedLive];
+    }
 
     const priceValues: number[] = [];
     const volumeValues: number[] = [];
@@ -110,7 +183,7 @@ export const MarketChart: React.FC<MarketChartProps> = ({
       priceRange: getRange(priceValues, 1),
       maxVolume: Math.max(1, ...volumeValues.filter(Number.isFinite)),
     };
-  }, [candles, formingCandle, visibleCount, showIndicators.ema, showIndicators.bollinger]);
+  }, [activeCandles, activeFormingCandle, visibleCount, showIndicators.ema, showIndicators.bollinger]);
 
   const { display, closed, priceRange, maxVolume } = chartData;
   const hasData = display.length > 0;
@@ -145,9 +218,9 @@ export const MarketChart: React.FC<MarketChartProps> = ({
 
   const matchingTrades = useMemo(() => {
     return tradeHistory.filter((trade) =>
-      display.some((c) => Math.abs(trade.entryTime - c.timestamp) < TIMEFRAME_MS),
+      display.some((c) => Math.abs(trade.entryTime - c.timestamp) < TIMEFRAME_MS[timeframe]),
     );
-  }, [display, tradeHistory]);
+  }, [display, tradeHistory, timeframe]);
 
   const priceTicks = Array.from({ length: 5 }, (_, index) => {
     const ratio = index / 4;
@@ -182,7 +255,28 @@ export const MarketChart: React.FC<MarketChartProps> = ({
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex flex-wrap items-center gap-2">
             <div className="font-mono font-bold text-lg text-white">{assetSymbol}</div>
-            <div className="text-[11px] font-mono text-neutral-500">1m</div>
+            <div className="flex items-center gap-1 text-[9px] font-mono">
+              {(["1m", "5m", "15m", "1h", "4h", "1d"] as const).map((item) => (
+                <button
+                  key={item}
+                  type="button"
+                  onClick={() => { setTimeframe(item); setVisibleCount(item === "1d" ? 120 : 80); setHoverIndex(null); }}
+                  className={
+                    "px-1.5 py-1 rounded border " +
+                    (timeframe === item
+                      ? "border-neutral-600 bg-neutral-800 text-neutral-100"
+                      : "border-neutral-800 bg-neutral-900 text-neutral-600 hover:text-neutral-300")
+                  }
+                >
+                  {item}
+                </button>
+              ))}
+            </div>
+            {timeframe !== "1m" && (
+              <div className={"text-[9px] font-mono " + (remoteLoading ? "text-sky-300" : remoteError ? "text-amber-300" : "text-neutral-600")}>
+                {remoteLoading ? "LOADING" : remoteError ? "DATA WARNING" : "REST CHART FEED"}
+              </div>
+            )}
             <div className={"px-2 py-0.5 rounded border text-[10px] font-mono uppercase " + (regime ? getRegimeClass(regime) : "text-neutral-600 border-neutral-800 bg-neutral-900")}>
               {regime ? regime.replaceAll("_", " ") : "REGIME UNAVAILABLE"}
             </div>
@@ -255,6 +349,7 @@ export const MarketChart: React.FC<MarketChartProps> = ({
         <div className="min-h-[420px] flex items-center justify-center text-center">
           <div>
             <div className="text-sm font-mono text-neutral-400">No trusted candles available</div>
+            {remoteError && <div className="text-xs text-amber-300/90 mt-2 max-w-md">{remoteError}</div>}
             <div className="text-xs text-neutral-600 mt-2 max-w-md">
               Jarvis will not replace the live chart with synthetic prices. Check the server market gateway and provider connection.
             </div>
@@ -266,7 +361,7 @@ export const MarketChart: React.FC<MarketChartProps> = ({
             viewBox={"0 0 " + width + " " + height}
             className="w-full h-auto min-h-[380px] select-none touch-none"
             role="img"
-            aria-label={assetSymbol + " one minute candlestick chart"}
+            aria-label={assetSymbol + " " + timeframe + " candlestick chart"}
             onPointerMove={pointerToIndex}
             onPointerLeave={() => setHoverIndex(null)}
           >
@@ -504,7 +599,7 @@ export const MarketChart: React.FC<MarketChartProps> = ({
       )}
 
       <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-neutral-900 text-[10px] font-mono text-neutral-600">
-        <span>{closed.length} completed bars{formingCandle ? " + 1 live forming bar" : ""}</span>
+        <span>{closed.length} completed {timeframe} bars{activeFormingCandle ? " + 1 live forming bar" : ""}</span>
         <span>{hoveredCandle ? "Hover: " + fmtTime(hoveredCandle.timestamp) : "Move pointer across chart for OHLC telemetry"}</span>
         {matchingTrades.length > 0 && <span>{matchingTrades.length} execution marker(s)</span>}
       </div>
