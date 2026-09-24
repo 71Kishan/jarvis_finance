@@ -28,7 +28,7 @@ Each validation record stores:
 
 The Research UI can apply a candidate only when its deterministic validation result is `PROVISIONALLY_VALIDATED`. A server-recomputed record is the required source for activating the server-owned shadow runtime.
 
-The shadow runtime additionally requires `JARVIS_SHADOW_STRATEGY_ID` and, by default, `JARVIS_SHADOW_REQUIRE_SERVER_VALIDATED=true`.
+The normal shadow path is now an explicit server-owned deployment record in `strategy_deployments`. The Research workspace can request deployment using a persisted validation run; the server transaction rechecks that the run is `PROVISIONALLY_VALIDATED`, `SERVER_RECOMPUTED`, and contains the exact strategy configuration before activating it. The shadow runtime then loads the active deployment record on startup.
 
 Real-money execution remains disabled.
 
@@ -48,3 +48,12 @@ This forward status is a research evidence state. It does not authorize provider
 ## Operational readiness
 
 The server health endpoint also reports operational dependencies separately from strategy performance: PostgreSQL readiness, market-data freshness, instrument catalog readiness, authenticated account stream health when configured, provider reconciliation freshness, paper/shadow runtime state, and forward validation status. A missing freshness timestamp fails closed for the affected critical dependency.
+
+
+## Shadow deployment control plane
+
+A validated research result is not automatically an active shadow strategy. Deployment is a separate operator action and is stored durably in PostgreSQL.
+
+Only one SHADOW deployment may be ACTIVE for a user at a time. Activating a new deployment pauses the existing deployment in the same transaction. The deployment stores the exact validated strategy configuration and the validation-run identifier used to authorize it.
+
+Environment-based strategy selection remains available only as an explicit legacy fallback when `JARVIS_SHADOW_ALLOW_LEGACY_ENV=true`. The default is to require a server-owned deployment record.
