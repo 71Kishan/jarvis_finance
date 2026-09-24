@@ -667,23 +667,60 @@ app.get("/api/market/catalog", (req: Request, res: Response) => {
     ? binanceInstrumentCatalog.search(query, { quoteAsset, tradableOnly, limit })
     : binanceInstrumentCatalog.list({ quoteAsset, tradableOnly, limit });
 
+  const filtered = assetClass
+    ? instruments.filter((instrument) => instrument.assetClass === assetClass)
+    : instruments;
+
   return res.json({
     success: true,
     provider: "BINANCE_SPOT",
     query,
     filters: { quoteAsset, assetClass, tradableOnly, limit },
     health: binanceInstrumentCatalog.getHealth(),
-    instruments: assetClass ? instruments.filter((instrument) => instrument.assetClass === assetClass) : instruments,
+    instruments: filtered.map((instrument) => {
+      const quote = binanceMarketData.getMiniTicker(instrument.providerSymbol);
+      return quote
+        ? {
+            ...instrument,
+            quote: {
+              price: quote.price,
+              change24hPercent: quote.change24hPercent,
+              high24h: quote.high,
+              low24h: quote.low,
+              volume24h: quote.volume,
+              updatedAt: quote.lastUpdated,
+            },
+          }
+        : instrument;
+    }),
   });
 });
+
+function resolveBinanceProviderSymbol(symbolParam: string): string | null {
+  const direct = SYMBOL_MAP[symbolParam];
+  if (direct) return direct;
+
+  const needle = symbolParam.trim().toUpperCase();
+  if (!needle) return null;
+
+  const exact = binanceInstrumentCatalog
+    .search(needle, { tradableOnly: true, limit: 50 })
+    .find((instrument) =>
+      instrument.providerSymbol.toUpperCase() === needle ||
+      instrument.symbol.toUpperCase() === needle
+    );
+
+  return exact?.providerSymbol || null;
+}
 
 app.get("/api/market/live-feed", async (req: Request, res: Response) => {
   const symbolParam = typeof req.query.symbol === "string" ? req.query.symbol : "BTC/USD";
   const limit = Math.min(100, Math.max(20, Number(req.query.limit) || 80));
-  const binanceSymbol = SYMBOL_MAP[symbolParam];
+  const binanceSymbol = resolveBinanceProviderSymbol(symbolParam);
 
   try {
     if (binanceSymbol) {
+      await binanceMarketData.ensureSymbol(symbolParam, binanceSymbol);
       const snapshot = binanceMarketData.getSnapshot(symbolParam, limit);
       if (!snapshot || snapshot.gateway.stale || snapshot.gateway.state !== "READY") {
         return res.status(503).json({
