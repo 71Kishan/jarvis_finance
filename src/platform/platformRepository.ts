@@ -1364,7 +1364,14 @@ export class PlatformRepository implements InstrumentPersistence {
         [accountId, idempotencyKey],
       );
       if (duplicate.rows[0]) {
-        return { order: this.mapPersistedOrderRow(duplicate.rows[0]), created: false };
+        const existing = this.mapPersistedOrderRow(duplicate.rows[0]);
+        if (
+          existing.idempotencyFingerprint &&
+          existing.idempotencyFingerprint !== idempotencyFingerprint
+        ) {
+          throw new Error("Idempotency-Key was already used for a different order intent.");
+        }
+        return { order: existing, created: false };
       }
 
       await client.query(
@@ -1503,6 +1510,15 @@ export class PlatformRepository implements InstrumentPersistence {
   }
 
   public async markOrderStatus(userId: string, clientOrderId: string, status: OrderStatus, message?: string): Promise<PersistedOrder> {
+    const current = await this.getUserOrder(userId, clientOrderId);
+    if (!current) throw new Error("Persisted sandbox order was not found.");
+
+    if (!canTransitionOrderStatus(current.status as OrderStatus, status)) {
+      throw new Error(
+        `Invalid order state transition: ${current.status} -> ${status}.`,
+      );
+    }
+
     const result = await this.database.query<any>(
       [
         "UPDATE orders o SET status = $2, updated_at = now(), last_provider_event_at = now()",

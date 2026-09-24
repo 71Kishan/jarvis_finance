@@ -23,7 +23,7 @@ import { PlatformRepository } from "./src/platform/platformRepository";
 import { BinanceSpotAccountAdapter } from "./src/platform/binanceSpotAccountAdapter";
 import { BinanceSpotUserDataStream } from "./src/server/binanceSpotUserDataStream";
 import { evaluateSpotPortfolioRisk } from "./src/platform/portfolioRisk";
-import { multiplyDecimals } from "./src/platform/decimal";
+import { compareDecimals, multiplyDecimals } from "./src/platform/decimal";
 import {
   JARVIS_SESSION_COOKIE,
   SESSION_TTL_MS,
@@ -410,6 +410,40 @@ app.get("/api/health", (_req: Request, res: Response) => {
         lastProcessedCandleAt: autonomousShadowRuntime.getStatus().lastProcessedCandleAt,
       },
     }),
+    timestamp: Date.now(),
+  });
+});
+
+app.get("/api/readiness", (_req: Request, res: Response) => {
+  const market = binanceMarketData.getHealth();
+  const database = platformDatabase.getHealth();
+  const catalog = binanceInstrumentCatalog.getHealth();
+  const testnetConfigured = binanceSpotTestnetAccount.isConfigured();
+  const infrastructureChecks = [
+    database.configured ? database.state === "READY" : true,
+    market.state === "READY" && market.connected && market.lastMessageAt !== undefined,
+    catalog.state === "READY",
+    !testnetConfigured || (
+      binanceSpotUserDataStream.getHealth().connected &&
+      binanceSpotUserDataStream.getHealth().subscribed
+    ),
+    !testnetConfigured || (
+      !sandboxReconciliationHealth.lastError &&
+      sandboxReconciliationHealth.lastSuccessAt !== undefined
+    ),
+  ];
+  const ready = infrastructureChecks.every(Boolean);
+
+  return res.status(ready ? 200 : 503).json({
+    status: ready ? "ready" : "not_ready",
+    checks: {
+      database: database.state,
+      marketData: market.state,
+      instrumentCatalog: catalog.state,
+      accountStream: testnetConfigured ? binanceSpotUserDataStream.getHealth() : "DISABLED",
+      reconciliation: testnetConfigured ? sandboxReconciliationHealth : "DISABLED",
+    },
+    note: "Readiness covers infrastructure only. Strategy validation and shadow evidence remain separate safety gates.",
     timestamp: Date.now(),
   });
 });
@@ -1157,7 +1191,7 @@ async function buildSandboxPortfolioRiskInput(
 
   for (const balance of balances) {
     const asset = balance.asset.toUpperCase();
-    if (asset === baseCurrency || Number(balance.total) === 0) continue;
+    if (asset === baseCurrency || compareDecimals(balance.total, "0") === 0) continue;
 
     const instrument = binanceInstrumentCatalog
       .list({ quoteAsset: baseCurrency, tradableOnly: true, limit: 5000 })
@@ -1214,11 +1248,11 @@ async function buildSandboxPortfolioRiskInput(
         ? String(ticker?.ask ?? "")
         : String(ticker?.bid ?? "");
     const referencePrice =
-      order.limitPrice && Number(order.limitPrice) > 0
+      order.limitPrice && compareDecimals(order.limitPrice, "0") > 0
         ? order.limitPrice
         : marketReference;
 
-    if (!referencePrice || Number(referencePrice) <= 0) {
+    if (!referencePrice || compareDecimals(referencePrice, "0") <= 0) {
       unpricedOpenOrders += 1;
       continue;
     }
