@@ -9,6 +9,8 @@ import dotenv from "dotenv";
 import { BinanceMarketDataService } from "./src/server/binanceMarketData";
 import { BinanceInstrumentCatalog } from "./src/server/binanceInstrumentCatalog";
 import { AutonomousPaperRuntime } from "./src/server/paperRuntime";
+import { PlatformDatabase } from "./src/server/platformDatabase";
+import { PlatformRepository } from "./src/platform/platformRepository";
 
 dotenv.config();
 
@@ -253,6 +255,7 @@ app.get("/api/health", (_req: Request, res: Response) => {
       ...market,
     },
     instrumentCatalog: binanceInstrumentCatalog.getHealth(),
+    database: platformDatabase.getHealth(),
     autonomousPaper: {
       status: autonomousPaperRuntime.getStatus().status,
       symbol: autonomousPaperRuntime.getStatus().symbol,
@@ -332,14 +335,17 @@ const STOCK_UNIVERSE: Record<string, { name: string; category: "STOCK" | "INDEX"
 // One server-owned websocket gateway supplies crypto market data to every client.
 // The mobile/desktop UI is intentionally not responsible for keeping the market connection alive.
 const binanceMarketData = new BinanceMarketDataService(SYMBOL_MAP);
-const binanceInstrumentCatalog = new BinanceInstrumentCatalog();
+const platformDatabase = new PlatformDatabase();
+const platformRepository = new PlatformRepository(platformDatabase);
+const binanceInstrumentCatalog = new BinanceInstrumentCatalog({
+  persist: (instruments) => platformRepository.syncInstruments(instruments),
+});
 const autonomousPaperRuntime = new AutonomousPaperRuntime(binanceMarketData, {
   symbol: process.env.JARVIS_PAPER_SYMBOL || "BTC/USD",
   initialCapital: Number(process.env.JARVIS_PAPER_INITIAL_CAPITAL) || 10_000,
   pollIntervalMs: Number(process.env.JARVIS_PAPER_POLL_MS) || 1000,
 });
 void binanceMarketData.start();
-void binanceInstrumentCatalog.start();
 
 if (process.env.JARVIS_PAPER_AUTOSTART === "true") {
   autonomousPaperRuntime.start();
@@ -818,6 +824,12 @@ app.post("/api/runtime/paper/stop", requireControlToken, (_req: Request, res: Re
 async function startServer() {
   const httpServer = http.createServer(app);
 
+  // PostgreSQL is optional during the research/paper stage. When configured,
+  // initialization and migrations happen before the instrument catalog refresh
+  // so the first authoritative catalog can be durably persisted.
+  await platformDatabase.start();
+  await binanceInstrumentCatalog.start();
+
   // Live API WebSocket Voice Gateway
   const wss = new WebSocketServer({ server: httpServer, path: "/api/live-voice" });
   wss.on("connection", async (clientWs: WebSocket) => {
@@ -924,6 +936,24 @@ async function startServer() {
       res.sendFile(path.join(distPath, "index.html"));
     });
   }
+
+  const shutdown = async (signal: string) => {
+    console.log(`Jarvis Finance received ${signal}; shutting down cleanly.`);
+    await platformDatabase.stop().catch((error: any) => {
+      console.error("PostgreSQL shutdown error:", error?.message || error);
+    });
+    binanceInstrumentCatalog.stop();
+    binanceMarketData.stop();
+    autonomousPaperRuntime.stop("Server shutdown.");
+    await new Promise<void>((resolve) => httpServer.close(() => resolve()));
+  };
+
+  process.once("SIGTERM", () => {
+    void shutdown("SIGTERM");
+  });
+  process.once("SIGINT", () => {
+    void shutdown("SIGINT");
+  });
 
   httpServer.listen(PORT, "0.0.0.0", () => {
     console.log(`Jarvis Finance server running on http://0.0.0.0:${PORT}`);
