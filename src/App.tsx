@@ -443,7 +443,7 @@ export default function App() {
     formingCandle?.close ??
     candles[candles.length - 1]?.close ??
     null;
-  const currentRegime = simulatorRef.current ? simulatorRef.current.getRegime() : "CHOPPY_RANGE";
+  const currentRegime = candles.length > 0 ? simulatorRef.current?.getRegime() ?? null : null;
 
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-100 flex flex-col font-sans selection:bg-emerald-500/30 selection:text-emerald-200">
