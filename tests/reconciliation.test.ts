@@ -54,7 +54,7 @@ describe("Binance Spot user-data event mapping", () => {
     expect(mapped?.status).toBe("PARTIALLY_FILLED");
     expect(mapped?.quantity).toBe("0.01000000");
     expect(mapped?.filledQuantity).toBe("0.00400000");
-    expect(mapped?.averageFillPrice).toBe("99999.900000000000000000");
+    expect(mapped?.averageFillPrice).toBe("99999.9");
     expect(mapped?.fills?.[0]).toMatchObject({
       externalOrderId: "42",
       externalTradeId: "77",
