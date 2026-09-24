@@ -133,21 +133,16 @@ export const StrategyVaultModal: React.FC<StrategyVaultModalProps> = ({
               <span className="text-neutral-400">
                 Trades: <span className="text-neutral-200 font-bold">{dailyGoal.tradesCountToday}</span>
               </span>
-              <span className="px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800 text-[10px]">
-                {dailyGoal.streakDays}-Day Win Streak 🔥
+              <span className="px-2 py-0.5 rounded bg-neutral-950 text-neutral-400 border border-neutral-800 text-[10px]">
+                INCOME TARGETS DISABLED
               </span>
             </div>
           </div>
 
-          {/* Progress Bar */}
-          <div className="w-full bg-neutral-950 rounded-full h-2 overflow-hidden border border-neutral-800">
-            <div
-              className={`h-full transition-all duration-500 ${
-                dailyGoal.targetAchieved ? "bg-emerald-400 animate-pulse" : "bg-emerald-500"
-              }`}
-              style={{ width: `${progressPercent}%` }}
-            />
+          <div className="w-full rounded-lg border border-neutral-800 bg-neutral-950/70 px-3 py-2 text-[10px] font-mono text-neutral-500">
+            PnL and trade count are shown as observed paper-process data only. Jarvis does not optimize against a daily dollar target or win streak.
           </div>
+        </div>
           <div className="flex justify-between items-center text-[10px] text-neutral-500 mt-1 font-mono">
             <span>Income targets disabled</span>
             <span>Only qualified paper setups are eligible for entry.</span>
