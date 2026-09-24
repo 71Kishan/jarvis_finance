@@ -28,6 +28,61 @@ export const WorkspaceSurface: React.FC<WorkspaceSurfaceProps> = ({
   onOpenResearch,
   onOpenSettings,
 }) => {
+  const [runtime, setRuntime] = useState<RuntimeStatus | null>(null);
+  const [platformHealth, setPlatformHealth] = useState<any>(null);
+
+  useEffect(() => {
+    if (view !== "PORTFOLIO") return;
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const response = await fetch("/api/health", { cache: "no-store" });
+        if (!response.ok) throw new Error("HTTP " + response.status);
+        const payload = await response.json();
+        if (!cancelled) setPlatformHealth(payload);
+      } catch {
+        if (!cancelled) setPlatformHealth(null);
+      }
+    };
+    void load();
+    const timer = setInterval(() => void load(), 10_000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [view]);
+
+  useEffect(() => {
+    if (view !== "AUTOMATION") return;
+    let cancelled = false;
+    const fetchStatus = async () => {
+      try {
+        const response = await fetch("/api/health", { cache: "no-store" });
+        if (!response.ok) throw new Error("HTTP " + response.status);
+        const health = await response.json();
+        if (!cancelled) {
+          setRuntime({
+            status: health?.autonomousPaper?.status || "UNKNOWN",
+            symbol: health?.autonomousPaper?.symbol,
+            lastProcessedCandleAt: health?.autonomousPaper?.lastProcessedCandleAt,
+            message: health?.autonomousPaper?.message,
+            databaseState: health?.database?.state,
+            marketState: health?.marketData?.state,
+            catalogState: health?.instrumentCatalog?.state,
+          });
+        }
+      } catch {
+        if (!cancelled) setRuntime({ status: "UNAVAILABLE" });
+      }
+    };
+    void fetchStatus();
+    const timer = setInterval(() => void fetchStatus(), 5_000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [view]);
+
   useEffect(() => {
     if (view !== "PORTFOLIO") return;
     let cancelled = false;
