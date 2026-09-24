@@ -1,6 +1,7 @@
 import type { PoolClient } from "pg";
-import type { AccountConnection, Instrument, TradingPermission } from "./types";
+import type { AccountConnection, BrokerOrder, Fill, Instrument, OrderIntent, OrderStatus, TradingPermission } from "./types";
 import { PlatformDatabase } from "../server/platformDatabase";
+import { canTransitionOrderStatus } from "./orderStateMachine";
 
 interface AccountConnectionRow {
   id: string;
@@ -73,6 +74,42 @@ export interface BinanceReadOnlySync {
     updatedAt: number;
     lastProviderEventAt?: number;
   }>;
+}
+
+
+interface ExecutionInstrument {
+  instrumentId: string;
+  provider: string;
+  venue: string;
+  providerSymbol: string;
+  tradable: boolean;
+  status: "ACTIVE" | "SUSPENDED" | "DELISTED";
+}
+
+export interface PersistedOrder {
+  clientOrderId: string;
+  accountId: string;
+  instrumentId: string;
+  externalOrderId?: string;
+  side: "BUY" | "SELL";
+  type: string;
+  quantity: string;
+  limitPrice?: string;
+  stopPrice?: string;
+  timeInForce?: string;
+  reduceOnly: boolean;
+  strategyId?: string;
+  strategyVersion?: number;
+  reason?: string;
+  requestedAt: number;
+  status: string;
+  filledQuantity: string;
+  averageFillPrice?: string;
+  submittedAt?: number;
+  updatedAt: number;
+  lastProviderEventAt?: number;
+  idempotencyKey?: string;
+  idempotencyFingerprint?: string;
 }
 
 export interface InstrumentPersistence {
@@ -339,9 +376,24 @@ export class PlatformRepository implements InstrumentPersistence {
     connections: AccountConnection[];
     balances: Array<{ accountId: string; asset: string; free: string; locked: string; total: string; updatedAt: number }>;
     openOrders: BinanceReadOnlySync["openOrders"];
+    fills: Array<{
+      id: string;
+      accountId: string;
+      clientOrderId: string;
+      externalOrderId?: string;
+      externalTradeId?: string;
+      instrumentId: string;
+      side: "BUY" | "SELL";
+      quantity: string;
+      price: string;
+      feeAmount?: string;
+      feeAsset?: string;
+      liquidity?: string;
+      executedAt: number;
+    }>;
   }> {
     const connections = await this.listAccountConnections(userId);
-    if (!connections.length) return { connections, balances: [], openOrders: [] };
+    if (!connections.length) return { connections, balances: [], openOrders: [], fills: [] };
 
     const accountIds = connections.map((connection) => connection.id);
     const balancesResult = await this.database.query<{
@@ -395,6 +447,30 @@ export class PlatformRepository implements InstrumentPersistence {
       [accountIds],
     );
 
+    const fillsResult = await this.database.query<{
+      id: string;
+      account_id: string;
+      client_order_id: string;
+      external_order_id: string | null;
+      external_trade_id: string | null;
+      instrument_id: string;
+      side: "BUY" | "SELL";
+      quantity: string;
+      price: string;
+      fee_amount: string | null;
+      fee_asset: string | null;
+      liquidity: string | null;
+      executed_at: Date;
+    }>(
+      [
+        "SELECT id, account_id, client_order_id, external_order_id, external_trade_id, instrument_id, side,",
+        "       quantity::text, price::text, fee_amount::text, fee_asset, liquidity, executed_at",
+        "FROM fills WHERE account_id = ANY($1::uuid[])",
+        "ORDER BY executed_at DESC LIMIT 100",
+      ].join("\n"),
+      [accountIds],
+    );
+
     return {
       connections,
       balances: balancesResult.rows.map((row) => ({
@@ -427,6 +503,21 @@ export class PlatformRepository implements InstrumentPersistence {
         submittedAt: row.submitted_at?.getTime(),
         updatedAt: row.updated_at.getTime(),
         lastProviderEventAt: row.last_provider_event_at?.getTime(),
+      })),
+      fills: fillsResult.rows.map((row) => ({
+        id: row.id,
+        accountId: row.account_id,
+        clientOrderId: row.client_order_id,
+        externalOrderId: row.external_order_id ?? undefined,
+        externalTradeId: row.external_trade_id ?? undefined,
+        instrumentId: row.instrument_id,
+        side: row.side,
+        quantity: row.quantity,
+        price: row.price,
+        feeAmount: row.fee_amount ?? undefined,
+        feeAsset: row.fee_asset ?? undefined,
+        liquidity: row.liquidity ?? undefined,
+        executedAt: row.executed_at.getTime(),
       })),
     };
   }
@@ -589,6 +680,491 @@ export class PlatformRepository implements InstrumentPersistence {
       [userId],
     );
     return result.rows.map(mapAccountConnectionRow);
+  }
+
+  public async getExecutionInstrument(instrumentId: string): Promise<Instrument | null> {
+    if (!this.database.isReady()) return null;
+
+    const result = await this.database.query<any>(
+      [
+        "SELECT instrument_id, symbol, display_symbol, name, asset_class, venue, venue_kind, market,",
+        "       base_asset, quote_asset, currency, provider, provider_symbol, status, tradable,",
+        "       shortable, fractionable, tick_size::text, lot_size::text, min_quantity::text,",
+        "       max_quantity::text, min_notional::text, price_precision, quantity_precision,",
+        "       contract_multiplier::text, listing_time, delisting_time, session, updated_at",
+        "FROM instruments WHERE instrument_id = $1 LIMIT 1",
+      ].join("\n"),
+      [instrumentId],
+    );
+    const row = result.rows[0];
+    if (!row) return null;
+    return {
+      instrumentId: row.instrument_id,
+      symbol: row.symbol,
+      displaySymbol: row.display_symbol,
+      name: row.name,
+      assetClass: row.asset_class,
+      venue: row.venue,
+      venueKind: row.venue_kind,
+      market: row.market,
+      baseAsset: row.base_asset ?? undefined,
+      quoteAsset: row.quote_asset ?? undefined,
+      currency: row.currency ?? undefined,
+      provider: row.provider,
+      providerSymbol: row.provider_symbol,
+      status: row.status,
+      tradable: Boolean(row.tradable),
+      shortable: row.shortable ?? undefined,
+      fractionable: row.fractionable ?? undefined,
+      tickSize: row.tick_size ?? undefined,
+      lotSize: row.lot_size ?? undefined,
+      minQuantity: row.min_quantity ?? undefined,
+      maxQuantity: row.max_quantity ?? undefined,
+      minNotional: row.min_notional ?? undefined,
+      pricePrecision: row.price_precision ?? undefined,
+      quantityPrecision: row.quantity_precision ?? undefined,
+      contractMultiplier: row.contract_multiplier ?? undefined,
+      listingTime: row.listing_time ? new Date(row.listing_time).getTime() : undefined,
+      delistingTime: row.delisting_time ? new Date(row.delisting_time).getTime() : undefined,
+      session: row.session ?? undefined,
+      updatedAt: row.updated_at ? new Date(row.updated_at).getTime() : Date.now(),
+    };
+  }
+
+  public async getUserAccountConnection(userId: string, accountId: string): Promise<AccountConnection | null> {
+    const result = await this.database.query<AccountConnectionRow>(
+      [
+        "SELECT id, provider, account_type, label, external_account_id, status, permissions,",
+        "       last_synced_at, created_at, updated_at",
+        "FROM account_connections WHERE id = $1 AND user_id = $2 LIMIT 1",
+      ].join("\n"),
+      [accountId, userId],
+    );
+    return result.rows[0] ? mapAccountConnectionRow(result.rows[0]) : null;
+  }
+
+  public async listActiveOrdersForUser(userId: string): Promise<PersistedOrder[]> {
+    const result = await this.database.query<any>(
+      [
+        "SELECT o.client_order_id, o.account_id, o.instrument_id, o.external_order_id, o.side, o.order_type,",
+        "       o.quantity::text, o.limit_price::text, o.stop_price::text, o.time_in_force, o.reduce_only,",
+        "       o.strategy_id, o.strategy_version, o.reason, o.requested_at, o.status,",
+        "       o.filled_quantity::text, o.average_fill_price::text, o.submitted_at, o.updated_at,",
+        "       o.last_provider_event_at, o.idempotency_key, o.idempotency_fingerprint",
+        "FROM orders o",
+        "JOIN account_connections a ON a.id = o.account_id",
+        "WHERE a.user_id = $1",
+        "  AND a.provider = 'BINANCE_SPOT_TESTNET'",
+        "  AND o.status IN ('PENDING_SUBMIT','SUBMITTED','PARTIALLY_FILLED','CANCEL_PENDING','UNKNOWN_RECONCILIATION')",
+        "ORDER BY o.updated_at ASC",
+        "LIMIT 100",
+      ].join("\n"),
+      [userId],
+    );
+    return result.rows.map((row) => this.mapPersistedOrderRow(row));
+  }
+
+  public async getUserOrder(userId: string, clientOrderId: string): Promise<PersistedOrder | null> {
+    const result = await this.database.query<any>(
+      [
+        "SELECT o.client_order_id, o.account_id, o.instrument_id, o.external_order_id, o.side, o.order_type,",
+        "       o.quantity::text, o.limit_price::text, o.stop_price::text, o.time_in_force, o.reduce_only,",
+        "       o.strategy_id, o.strategy_version, o.reason, o.requested_at, o.status,",
+        "       o.filled_quantity::text, o.average_fill_price::text, o.submitted_at, o.updated_at,",
+        "       o.last_provider_event_at, o.idempotency_key, o.idempotency_fingerprint",
+        "FROM orders o",
+        "JOIN account_connections a ON a.id = o.account_id",
+        "WHERE o.client_order_id = $1 AND a.user_id = $2",
+        "LIMIT 1",
+      ].join("\n"),
+      [clientOrderId, userId],
+    );
+    return result.rows[0] ? this.mapPersistedOrderRow(result.rows[0]) : null;
+  }
+
+  public async getOrderByIdempotencyKey(userId: string, accountId: string, idempotencyKey: string): Promise<PersistedOrder | null> {
+    const result = await this.database.query<any>(
+      [
+        "SELECT o.client_order_id, o.account_id, o.instrument_id, o.external_order_id, o.side, o.order_type,",
+        "       o.quantity::text, o.limit_price::text, o.stop_price::text, o.time_in_force, o.reduce_only,",
+        "       o.strategy_id, o.strategy_version, o.reason, o.requested_at, o.status,",
+        "       o.filled_quantity::text, o.average_fill_price::text, o.submitted_at, o.updated_at,",
+        "       o.last_provider_event_at, o.idempotency_key, o.idempotency_fingerprint",
+        "FROM orders o",
+        "JOIN account_connections a ON a.id = o.account_id",
+        "WHERE o.account_id = $1 AND a.user_id = $2 AND o.idempotency_key = $3",
+        "LIMIT 1",
+      ].join("\n"),
+      [accountId, userId, idempotencyKey],
+    );
+    return result.rows[0] ? this.mapPersistedOrderRow(result.rows[0]) : null;
+  }
+
+  public async createPendingOrder(
+    userId: string,
+    accountId: string,
+    idempotencyKey: string,
+    idempotencyFingerprint: string,
+    order: OrderIntent,
+  ): Promise<{ order: PersistedOrder; created: boolean }> {
+    if (!this.database.isReady()) throw new Error("PostgreSQL is required for sandbox order persistence.");
+
+    return this.database.transaction(async (client) => {
+      const account = await client.query<AccountConnectionRow>(
+        [
+          "SELECT id, provider, account_type, label, external_account_id, status, permissions,",
+          "       last_synced_at, created_at, updated_at",
+          "FROM account_connections WHERE id = $1 AND user_id = $2 FOR UPDATE",
+        ].join("\n"),
+        [accountId, userId],
+      );
+      if (!account.rows[0]) throw new Error("Connected provider account was not found.");
+      if (account.rows[0].status !== "CONNECTED") throw new Error("Provider account is not connected.");
+      if (account.rows[0].provider !== "BINANCE_SPOT_TESTNET") throw new Error("Unsupported execution provider.");
+      if (!Array.isArray(account.rows[0].permissions) || !account.rows[0].permissions.includes("TRADE")) {
+        throw new Error("Provider account does not have the Jarvis sandbox TRADE permission.");
+      }
+
+      const duplicate = await client.query<any>(
+        [
+          "SELECT client_order_id, account_id, instrument_id, external_order_id, side, order_type,",
+          "       quantity::text, limit_price::text, stop_price::text, time_in_force, reduce_only,",
+          "       strategy_id, strategy_version, reason, requested_at, status,",
+          "       filled_quantity::text, average_fill_price::text, submitted_at, updated_at,",
+          "       last_provider_event_at, idempotency_key, idempotency_fingerprint",
+          "FROM orders WHERE account_id = $1 AND idempotency_key = $2 LIMIT 1",
+        ].join("\n"),
+        [accountId, idempotencyKey],
+      );
+      if (duplicate.rows[0]) {
+        return { order: this.mapPersistedOrderRow(duplicate.rows[0]), created: false };
+      }
+
+      await client.query(
+        [
+          "INSERT INTO orders(",
+          "  client_order_id, account_id, instrument_id, side, order_type, quantity, limit_price, stop_price,",
+          "  time_in_force, reduce_only, strategy_id, strategy_version, reason, status, filled_quantity,",
+          "  requested_at, updated_at, idempotency_key, idempotency_fingerprint",
+          ") VALUES ($1,$2,$3,$4,$5,$6::numeric,$7::numeric,$8::numeric,$9,$10,$11,$12,$13,'PENDING_SUBMIT',0,to_timestamp($14 / 1000.0),now(),$15,$16)",
+        ].join("\n"),
+        [
+          order.clientOrderId,
+          accountId,
+          order.instrumentId,
+          order.side,
+          order.type,
+          order.quantity,
+          order.limitPrice ?? null,
+          order.stopPrice ?? null,
+          order.timeInForce ?? null,
+          order.reduceOnly === true,
+          order.strategyId ?? null,
+          order.strategyVersion ?? null,
+          order.reason ?? null,
+          order.requestedAt,
+          idempotencyKey,
+          idempotencyFingerprint,
+        ],
+      );
+
+      const inserted = await client.query<any>(
+        [
+          "SELECT client_order_id, account_id, instrument_id, external_order_id, side, order_type,",
+          "       quantity::text, limit_price::text, stop_price::text, time_in_force, reduce_only,",
+          "       strategy_id, strategy_version, reason, requested_at, status,",
+          "       filled_quantity::text, average_fill_price::text, submitted_at, updated_at,",
+          "       last_provider_event_at, idempotency_key, idempotency_fingerprint",
+          "FROM orders WHERE client_order_id = $1",
+        ].join("\n"),
+        [order.clientOrderId],
+      );
+      if (!inserted.rows[0]) throw new Error("Sandbox order reservation could not be persisted.");
+      return { order: this.mapPersistedOrderRow(inserted.rows[0]), created: true };
+    });
+  }
+
+  public async applyBinanceBalanceEvent(
+    userId: string,
+    externalAccountId: string,
+    balances: Array<{ asset: string; free: string; locked: string; total: string; updatedAt: number }>,
+  ): Promise<void> {
+    if (!balances.length || !this.database.isReady()) return;
+
+    await this.database.transaction(async (client) => {
+      const account = await client.query<{ id: string }>(
+        [
+          "SELECT id FROM account_connections",
+          "WHERE user_id = $1 AND provider = 'BINANCE_SPOT_TESTNET' AND external_account_id = $2",
+          "LIMIT 1 FOR UPDATE",
+        ].join("\n"),
+        [userId, externalAccountId],
+      );
+      const accountId = account.rows[0]?.id;
+      if (!accountId) return;
+
+      for (const balance of balances) {
+        await client.query(
+          [
+            "INSERT INTO balances(account_id, asset, free, locked, provider_updated_at, updated_at)",
+            "VALUES ($1, $2, $3::numeric, $4::numeric, to_timestamp($5 / 1000.0), now())",
+            "ON CONFLICT (account_id, asset)",
+            "DO UPDATE SET",
+            "  free = EXCLUDED.free, locked = EXCLUDED.locked,",
+            "  provider_updated_at = EXCLUDED.provider_updated_at, updated_at = now()",
+            "WHERE balances.provider_updated_at IS NULL",
+            "   OR EXCLUDED.provider_updated_at >= balances.provider_updated_at",
+          ].join("\n"),
+          [accountId, balance.asset, balance.free, balance.locked, balance.updatedAt],
+        );
+      }
+    });
+  }
+
+  public async updateOrderFromProvider(userId: string, clientOrderId: string, brokerOrder: BrokerOrder): Promise<PersistedOrder> {
+    const current = await this.getUserOrder(userId, clientOrderId);
+    if (!current) {
+      throw new Error("Persisted sandbox order was not found for the authenticated user.");
+    }
+
+    const providerEventAt = brokerOrder.lastProviderEventAt ?? brokerOrder.updatedAt;
+    const currentProviderEventAt = current.lastProviderEventAt ?? 0;
+    const sameEvent = providerEventAt > 0 && currentProviderEventAt > 0 && providerEventAt === currentProviderEventAt;
+    const newer = currentProviderEventAt === 0 || providerEventAt >= currentProviderEventAt;
+    const transitionAllowed = canTransitionOrderStatus(
+      current.status as import("./types").OrderStatus,
+      brokerOrder.status,
+    );
+
+    if (!transitionAllowed || (!sameEvent && !newer)) {
+      await this.persistFills(userId, brokerOrder.fills || []);
+      return current;
+    }
+
+    const result = await this.database.query<any>(
+      [
+        "UPDATE orders o SET",
+        "  external_order_id = COALESCE($2, o.external_order_id), status = $3, filled_quantity = $4::numeric,",
+        "  average_fill_price = $5::numeric, submitted_at = CASE WHEN $6::bigint > 0 THEN to_timestamp($6 / 1000.0) ELSE o.submitted_at END,",
+        "  updated_at = to_timestamp($7 / 1000.0), last_provider_event_at = to_timestamp($8 / 1000.0)",
+        "FROM account_connections a",
+        "WHERE o.client_order_id = $1 AND o.account_id = a.id AND a.user_id = $9",
+        "  AND (o.last_provider_event_at IS NULL OR to_timestamp($8 / 1000.0) >= o.last_provider_event_at)",
+        "RETURNING o.client_order_id, o.account_id, o.instrument_id, o.external_order_id, o.side, o.order_type,",
+        "          o.quantity::text, o.limit_price::text, o.stop_price::text, o.time_in_force, o.reduce_only,",
+        "          o.strategy_id, o.strategy_version, o.reason, o.requested_at, o.status,",
+        "          o.filled_quantity::text, o.average_fill_price::text, o.submitted_at, o.updated_at,",
+        "          o.last_provider_event_at, o.idempotency_key, o.idempotency_fingerprint",
+      ].join("\n"),
+      [
+        clientOrderId,
+        brokerOrder.externalOrderId ?? null,
+        brokerOrder.status,
+        brokerOrder.filledQuantity,
+        brokerOrder.averageFillPrice ?? null,
+        brokerOrder.submittedAt ?? 0,
+        brokerOrder.updatedAt,
+        providerEventAt,
+        userId,
+      ],
+    );
+    await this.persistFills(userId, brokerOrder.fills || []);
+    if (!result.rows[0]) {
+      return (await this.getUserOrder(userId, clientOrderId)) ?? current;
+    }
+    return this.mapPersistedOrderRow(result.rows[0]);
+  }
+
+  public async markOrderStatus(userId: string, clientOrderId: string, status: OrderStatus, message?: string): Promise<PersistedOrder> {
+    const result = await this.database.query<any>(
+      [
+        "UPDATE orders o SET status = $2, updated_at = now(), last_provider_event_at = now()",
+        "FROM account_connections a",
+        "WHERE o.client_order_id = $1 AND o.account_id = a.id AND a.user_id = $3",
+        "RETURNING o.client_order_id, o.account_id, o.instrument_id, o.external_order_id, o.side, o.order_type,",
+        "          o.quantity::text, o.limit_price::text, o.stop_price::text, o.time_in_force, o.reduce_only,",
+        "          o.strategy_id, o.strategy_version, o.reason, o.requested_at, o.status,",
+        "          o.filled_quantity::text, o.average_fill_price::text, o.submitted_at, o.updated_at,",
+        "          o.last_provider_event_at, o.idempotency_key, o.idempotency_fingerprint",
+      ].join("\n"),
+      [clientOrderId, status, userId],
+    );
+    if (!result.rows[0]) throw new Error("Persisted sandbox order was not found.");
+    if (message) {
+      await this.recordAuditEvent({
+        userId,
+        accountId: result.rows[0].account_id,
+        eventType: "ORDER_STATE_NOTE",
+        idempotencyKey: result.rows[0].idempotency_key ?? undefined,
+        payload: { clientOrderId, status, message },
+      });
+    }
+    return this.mapPersistedOrderRow(result.rows[0]);
+  }
+
+  public async persistFills(userId: string, fills: Fill[]): Promise<void> {
+    if (!fills.length || !this.database.isReady()) return;
+
+    await this.database.transaction(async (client) => {
+      for (const fill of fills) {
+        const owner = await client.query<{ user_id: string }>(
+          [
+            "SELECT a.user_id FROM account_connections a",
+            "JOIN orders o ON o.account_id = a.id",
+            "WHERE o.client_order_id = $1 AND a.user_id = $2 LIMIT 1",
+          ].join("\n"),
+          [fill.orderClientId, userId],
+        );
+        if (!owner.rows[0]) throw new Error("Fill does not belong to the authenticated user.");
+
+        const inserted = await client.query<{ id: string }>(
+          [
+            "INSERT INTO fills(",
+            "  id, account_id, client_order_id, external_order_id, external_trade_id, instrument_id, side,",
+            "  quantity, price, fee_amount, fee_asset, liquidity, executed_at",
+            ") VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7::numeric, $8::numeric, $9::numeric, $10, $11, to_timestamp($12 / 1000.0))",
+            "ON CONFLICT (account_id, external_trade_id) WHERE external_trade_id IS NOT NULL DO NOTHING",
+            "RETURNING id",
+          ].join("\n"),
+          [
+            fill.accountId,
+            fill.orderClientId,
+            fill.externalOrderId ?? null,
+            fill.externalTradeId ?? null,
+            fill.instrumentId,
+            fill.side,
+            fill.quantity,
+            fill.price,
+            fill.feeAmount ?? null,
+            fill.feeAsset ?? null,
+            fill.liquidity ?? null,
+            fill.executedAt,
+          ],
+        );
+
+        if (!inserted.rows[0]) continue;
+
+        const instrument = await client.query<{
+          base_asset: string | null;
+          quote_asset: string | null;
+        }>(
+          "SELECT base_asset, quote_asset FROM instruments WHERE instrument_id = $1 LIMIT 1",
+          [fill.instrumentId],
+        );
+        const baseAsset = instrument.rows[0]?.base_asset;
+        const quoteAsset = instrument.rows[0]?.quote_asset;
+        if (!baseAsset || !quoteAsset) {
+          throw new Error("Cannot post a fill to the ledger without canonical base/quote assets.");
+        }
+
+        const ledgerIdempotencyKey = "fill:" + fill.accountId + ":" + (fill.externalTradeId || fill.id);
+        const transaction = await client.query<{ id: string }>(
+          [
+            "INSERT INTO ledger_transactions(",
+            "  account_id, transaction_type, external_reference, idempotency_key, status, memo, posted_at",
+            ") VALUES ($1, 'TRADE', $2, $3, 'POSTED', $4, to_timestamp($5 / 1000.0))",
+            "ON CONFLICT (idempotency_key) DO NOTHING",
+            "RETURNING id",
+          ].join("\n"),
+          [
+            fill.accountId,
+            fill.externalTradeId ?? fill.externalOrderId ?? fill.id,
+            ledgerIdempotencyKey,
+            "Spot fill " + fill.orderClientId,
+            fill.executedAt,
+          ],
+        );
+
+        if (!transaction.rows[0]) continue;
+
+        if (fill.side === "BUY") {
+          await client.query(
+            [
+              "INSERT INTO ledger_entries(transaction_id, account_id, asset, direction, amount, entry_type)",
+              "VALUES ($1, $2, $3, 'DEBIT', $4::numeric * $5::numeric, 'CASH'),",
+              "       ($1, $2, $6, 'CREDIT', $4::numeric, 'ASSET')",
+            ].join("\n"),
+            [
+              transaction.rows[0].id,
+              fill.accountId,
+              quoteAsset,
+              fill.quantity,
+              fill.price,
+              baseAsset,
+            ],
+          );
+        } else {
+          await client.query(
+            [
+              "INSERT INTO ledger_entries(transaction_id, account_id, asset, direction, amount, entry_type)",
+              "VALUES ($1, $2, $3, 'DEBIT', $4::numeric, 'ASSET'),",
+              "       ($1, $2, $6, 'CREDIT', $4::numeric * $5::numeric, 'CASH')",
+            ].join("\n"),
+            [
+              transaction.rows[0].id,
+              fill.accountId,
+              baseAsset,
+              fill.quantity,
+              fill.price,
+              quoteAsset,
+            ],
+          );
+        }
+
+        if (fill.feeAmount && fill.feeAsset) {
+          await client.query(
+            [
+              "INSERT INTO ledger_entries(transaction_id, account_id, asset, direction, amount, entry_type)",
+              "VALUES ($1, $2, $3, 'DEBIT', $4::numeric, 'FEE')",
+            ].join("\n"),
+            [transaction.rows[0].id, fill.accountId, fill.feeAsset.toUpperCase(), fill.feeAmount],
+          );
+        }
+      }
+    });
+  }
+
+
+  public async grantSandboxTradePermission(userId: string, accountId: string): Promise<AccountConnection> {
+    const result = await this.database.query<AccountConnectionRow>(
+      [
+        "UPDATE account_connections",
+        "SET permissions = '[\"READ\",\"TRADE\"]'::jsonb, updated_at = now()",
+        "WHERE id = $1 AND user_id = $2 AND provider = 'BINANCE_SPOT_TESTNET'",
+        "RETURNING id, provider, account_type, label, external_account_id, status, permissions, last_synced_at, created_at, updated_at",
+      ].join("\n"),
+      [accountId, userId],
+    );
+    if (!result.rows[0]) throw new Error("Connected Binance Spot Testnet account was not found.");
+    return mapAccountConnectionRow(result.rows[0]);
+  }
+
+  private mapPersistedOrderRow(row: any): PersistedOrder {
+    return {
+      clientOrderId: row.client_order_id,
+      accountId: row.account_id,
+      instrumentId: row.instrument_id,
+      externalOrderId: row.external_order_id ?? undefined,
+      side: row.side,
+      type: row.order_type,
+      quantity: row.quantity,
+      limitPrice: row.limit_price ?? undefined,
+      stopPrice: row.stop_price ?? undefined,
+      timeInForce: row.time_in_force ?? undefined,
+      reduceOnly: Boolean(row.reduce_only),
+      strategyId: row.strategy_id ?? undefined,
+      strategyVersion: row.strategy_version ?? undefined,
+      reason: row.reason ?? undefined,
+      requestedAt: row.requested_at.getTime(),
+      status: row.status,
+      filledQuantity: row.filled_quantity,
+      averageFillPrice: row.average_fill_price ?? undefined,
+      submittedAt: row.submitted_at?.getTime(),
+      updatedAt: row.updated_at.getTime(),
+      lastProviderEventAt: row.last_provider_event_at?.getTime(),
+      idempotencyKey: row.idempotency_key ?? undefined,
+      idempotencyFingerprint: row.idempotency_fingerprint ?? undefined,
+    };
   }
 
   public async recordAuditEvent(input: {

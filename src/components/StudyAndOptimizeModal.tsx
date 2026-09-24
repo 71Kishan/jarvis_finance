@@ -48,8 +48,18 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
   const [optimizationData, setOptimizationData] = useState<{
     bestStrategy: StrategyConfig;
     bestResult: BacktestResult;
-    candidatesTested: { strategy: StrategyConfig; result: BacktestResult }[];
+    candidatesTested: { strategy: StrategyConfig; result: BacktestResult; selectedFolds?: number }[];
     optimizationInsights: string[];
+    walkForwardReliable?: boolean;
+    walkForwardSummary?: {
+      folds: number;
+      selectedFolds: number;
+      selectedFoldHitRatePercent: number;
+      meanOosReturnPercent: number;
+      medianOosReturnPercent: number;
+      worstOosDrawdownPercent: number;
+      selectionCounts: Record<string, number>;
+    };
   } | null>(null);
 
   if (!isOpen) return null;
@@ -218,7 +228,7 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 {optimizationData.candidatesTested.map((cand, idx) => {
-                  const isTop = idx === 0;
+                  const isTop = cand.strategy.id === optimizationData.bestStrategy.id;
                   const res = cand.result;
 
                   return (
@@ -295,6 +305,42 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
                   );
                 })}
               </div>
+
+              {optimizationData.walkForwardSummary && (
+                <div className="rounded-xl border border-neutral-800 bg-neutral-900/50 p-3">
+                  <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+                    <div>
+                      <div className="text-[10px] font-mono uppercase tracking-[0.16em] text-neutral-500">Walk-forward evidence</div>
+                      <div className="text-xs text-neutral-300 mt-1">
+                        {optimizationData.walkForwardSummary.folds} rolling folds • {optimizationData.walkForwardSummary.selectedFolds} selected-candidate folds
+                      </div>
+                    </div>
+                    <span className={optimizationData.walkForwardReliable
+                      ? "px-2 py-1 rounded border border-emerald-700/50 bg-emerald-950/20 text-emerald-300 text-[10px] font-mono"
+                      : "px-2 py-1 rounded border border-amber-800/50 bg-amber-950/20 text-amber-300 text-[10px] font-mono"}>
+                      {optimizationData.walkForwardReliable ? "EVIDENCE SUFFICIENT FOR FORWARD REVIEW" : "INSUFFICIENT FOR VALIDATION DECISION"}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-3 text-[10px]">
+                    <div className="rounded-lg bg-neutral-950 border border-neutral-800 p-2">
+                      <span className="text-neutral-600 block">OOS positive-fold rate</span>
+                      <strong className="text-neutral-200">{optimizationData.walkForwardSummary.selectedFoldHitRatePercent}%</strong>
+                    </div>
+                    <div className="rounded-lg bg-neutral-950 border border-neutral-800 p-2">
+                      <span className="text-neutral-600 block">Mean OOS return</span>
+                      <strong className="text-neutral-200">{optimizationData.walkForwardSummary.meanOosReturnPercent}%</strong>
+                    </div>
+                    <div className="rounded-lg bg-neutral-950 border border-neutral-800 p-2">
+                      <span className="text-neutral-600 block">Median OOS return</span>
+                      <strong className="text-neutral-200">{optimizationData.walkForwardSummary.medianOosReturnPercent}%</strong>
+                    </div>
+                    <div className="rounded-lg bg-neutral-950 border border-neutral-800 p-2">
+                      <span className="text-neutral-600 block">Worst OOS drawdown</span>
+                      <strong className="text-neutral-200">{optimizationData.walkForwardSummary.worstOosDrawdownPercent}%</strong>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Insights */}
               <div className="bg-neutral-900/50 border border-neutral-800 rounded-xl p-3 space-y-1.5 text-[11px]">

@@ -74,10 +74,27 @@ interface OpenOrderView {
   updatedAt: number;
 }
 
+interface FillView {
+  id: string;
+  accountId: string;
+  clientOrderId: string;
+  externalOrderId?: string;
+  externalTradeId?: string;
+  instrumentId: string;
+  side: "BUY" | "SELL";
+  quantity: string;
+  price: string;
+  feeAmount?: string;
+  feeAsset?: string;
+  liquidity?: string;
+  executedAt: number;
+}
+
 interface AccountOverview {
   connections: AccountConnectionView[];
   balances: BalanceView[];
   openOrders: OpenOrderView[];
+  fills: FillView[];
 }
 
 function formatTimestamp(value?: number): string {
@@ -104,6 +121,7 @@ export const WorkspaceSurface: React.FC<WorkspaceSurfaceProps> = ({
   const [accountOverview, setAccountOverview] = useState<AccountOverview | null>(null);
   const [accountBusy, setAccountBusy] = useState(false);
   const [accountMessage, setAccountMessage] = useState<string | null>(null);
+  const [sandboxBusy, setSandboxBusy] = useState<string | null>(null);
 
   const loadHealth = async () => {
     try {
@@ -138,11 +156,73 @@ export const WorkspaceSurface: React.FC<WorkspaceSurfaceProps> = ({
         connections: Array.isArray(payload?.connections) ? payload.connections : [],
         balances: Array.isArray(payload?.balances) ? payload.balances : [],
         openOrders: Array.isArray(payload?.openOrders) ? payload.openOrders : [],
+        fills: Array.isArray(payload?.fills) ? payload.fills : [],
       });
       setAccountMessage(null);
     } catch (error: any) {
       setAccountOverview(null);
       setAccountMessage(error?.message || "Account overview unavailable.");
+    }
+  };
+
+  const enableSandboxTrading = async (accountId: string) => {
+    if (sandboxBusy) return;
+    setSandboxBusy(accountId);
+    setAccountMessage(null);
+
+    try {
+      const response = await fetch("/api/account/binance-testnet/enable-sandbox-trading", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ accountId }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload?.error || "Unable to enable testnet trading.");
+
+      setAccountOverview((current) => ({
+        connections: current?.connections?.map((row) => row.id === payload.connection.id ? payload.connection : row) || [payload.connection],
+        balances: current?.balances || [],
+        openOrders: current?.openOrders || [],
+        fills: current?.fills || [],
+      }));
+      setAccountMessage("Testnet trading gate enabled for this connected account. Real-money execution remains unavailable.");
+    } catch (error: any) {
+      setAccountMessage(error?.message || "Unable to enable testnet trading.");
+    } finally {
+      setSandboxBusy(null);
+    }
+  };
+
+  const cancelSandboxOrder = async (order: OpenOrderView) => {
+    if (!window.confirm("Cancel testnet order " + order.clientOrderId + "?")) return;
+    if (sandboxBusy) return;
+
+    setSandboxBusy(order.clientOrderId);
+    setAccountMessage(null);
+    try {
+      const response = await fetch("/api/account/binance-testnet/orders/cancel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({
+          accountId: order.accountId,
+          clientOrderId: order.clientOrderId,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok && response.status !== 202) {
+        throw new Error(payload?.error || "Sandbox cancellation failed.");
+      }
+
+      setAccountMessage(payload?.executionUnknown
+        ? "Cancellation state is uncertain; Jarvis will not assume the order is canceled."
+        : "Sandbox order cancellation submitted and reconciled.");
+      await loadAccountOverview();
+    } catch (error: any) {
+      setAccountMessage(error?.message || "Sandbox cancellation failed.");
+    } finally {
+      setSandboxBusy(null);
     }
   };
 
@@ -163,6 +243,7 @@ export const WorkspaceSurface: React.FC<WorkspaceSurfaceProps> = ({
         connections: payload?.connection ? [payload.connection, ...(current?.connections || []).filter((row) => row.id !== payload.connection.id)] : current?.connections || [],
         balances: Array.isArray(payload?.balances) ? payload.balances : current?.balances || [],
         openOrders: Array.isArray(payload?.openOrders) ? payload.openOrders : current?.openOrders || [],
+        fills: Array.isArray(payload?.fills) ? payload.fills : current?.fills || [],
       }));
       setAccountMessage("Binance Spot Testnet account synchronized from the provider.");
       void loadHealth();
@@ -198,7 +279,9 @@ export const WorkspaceSurface: React.FC<WorkspaceSurfaceProps> = ({
     const connections = accountOverview?.connections || [];
     const balances = accountOverview?.balances || [];
     const openOrders = accountOverview?.openOrders || [];
+    const fills = accountOverview?.fills || [];
     const testnetConfigured = platformHealth?.binanceSpotTestnetAccount?.configured === true;
+    const testnetOrderGateEnabled = platformHealth?.binanceSpotTestnetAccount?.orderExecutionEnabled === true;
 
     return (
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 space-y-4">
@@ -284,6 +367,11 @@ export const WorkspaceSurface: React.FC<WorkspaceSurfaceProps> = ({
               SERVER CREDENTIALS NOT CONFIGURED • The account sync control is intentionally unavailable.
             </div>
           )}
+          {testnetConfigured && !testnetOrderGateEnabled && (
+            <div className="mt-4 rounded-lg border border-amber-900/50 bg-amber-950/10 px-3 py-2.5 text-[11px] font-mono text-amber-200">
+              SERVER SANDBOX ORDER GATE OFF • Set JARVIS_BINANCE_TESTNET_ENABLE_ORDERS=true before the testnet trade-permission control can be used.
+            </div>
+          )}
 
           {accountMessage && (
             <div className="mt-4 rounded-lg border border-amber-900/50 bg-amber-950/10 px-3 py-2.5 text-xs text-amber-200">
@@ -308,14 +396,26 @@ export const WorkspaceSurface: React.FC<WorkspaceSurfaceProps> = ({
                       {connection.provider} • {connection.externalAccountId || "provider account id unavailable"}
                     </div>
                   </div>
-                  <div className="flex items-center gap-2 text-[10px] font-mono">
+                  <div className="flex flex-wrap items-center gap-2 text-[10px] font-mono">
                     <span className="inline-flex items-center gap-1 rounded-full border border-emerald-900/60 bg-emerald-950/20 px-2 py-1 text-emerald-300">
                       <CheckCircle2 className="w-3 h-3" />
                       {connection.status}
                     </span>
-                    <span className="rounded-full border border-neutral-800 bg-neutral-900 px-2 py-1 text-neutral-400">
-                      READ ONLY
+                    <span className={connection.permissions.includes("TRADE")
+                      ? "rounded-full border border-amber-700/50 bg-amber-950/20 px-2 py-1 text-amber-200"
+                      : "rounded-full border border-neutral-800 bg-neutral-900 px-2 py-1 text-neutral-400"}>
+                      {connection.permissions.includes("TRADE") ? "TESTNET TRADE ENABLED" : "READ ONLY"}
                     </span>
+                    {!connection.permissions.includes("TRADE") && testnetConfigured && (
+                      <button
+                        type="button"
+                        disabled={sandboxBusy === connection.id || !testnetOrderGateEnabled}
+                        onClick={() => void enableSandboxTrading(connection.id)}
+                        className="rounded-lg border border-amber-700/40 bg-amber-500/10 px-2.5 py-1.5 text-amber-200 hover:bg-amber-500/15 disabled:opacity-50"
+                      >
+                        {sandboxBusy === connection.id ? "ENABLING…" : "ENABLE TESTNET TRADING"}
+                      </button>
+                    )}
                   </div>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4 text-[11px] font-mono">
@@ -401,7 +501,63 @@ export const WorkspaceSurface: React.FC<WorkspaceSurfaceProps> = ({
                       <td className="px-5 py-3 text-right font-mono text-neutral-300">{formatDecimal(order.quantity)}</td>
                       <td className="px-5 py-3 text-right font-mono text-neutral-400">{formatDecimal(order.filledQuantity)}</td>
                       <td className="px-5 py-3 text-right font-mono text-neutral-300">{order.limitPrice || order.stopPrice || "MARKET"}</td>
-                      <td className="px-5 py-3 text-right font-mono text-neutral-500">{order.status}</td>
+                      <td className="px-5 py-3 text-right font-mono">
+                        <div className="text-neutral-500">{order.status}</div>
+                        {["SUBMITTED","PARTIALLY_FILLED","CANCEL_PENDING"].includes(order.status) && (
+                          <button
+                            type="button"
+                            disabled={sandboxBusy === order.clientOrderId}
+                            onClick={() => void cancelSandboxOrder(order)}
+                            className="mt-1 rounded border border-red-900/60 px-2 py-1 text-[9px] text-red-300 hover:bg-red-950/20 disabled:opacity-50"
+                          >
+                            {sandboxBusy === order.clientOrderId ? "CANCELING…" : "CANCEL"}
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+
+        <section className="rounded-xl border border-neutral-800 bg-neutral-900/80 overflow-hidden">
+          <div className="px-5 py-4 border-b border-neutral-800">
+            <h2 className="text-sm font-semibold text-neutral-100">Recent executions</h2>
+            <p className="text-[11px] text-neutral-500 mt-1">
+              Provider-derived fills persisted once by external trade id. This is execution history, not a performance claim.
+            </p>
+          </div>
+          {fills.length === 0 ? (
+            <div className="px-5 py-8 text-center text-xs font-mono text-neutral-600">NO EXECUTIONS RECORDED</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead className="bg-neutral-950/80 text-[10px] font-mono uppercase text-neutral-600">
+                  <tr>
+                    <th className="text-left px-5 py-3">Instrument</th>
+                    <th className="text-left px-5 py-3">Side</th>
+                    <th className="text-right px-5 py-3">Quantity</th>
+                    <th className="text-right px-5 py-3">Fill Price</th>
+                    <th className="text-right px-5 py-3">Fee</th>
+                    <th className="text-right px-5 py-3">Executed</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-neutral-800">
+                  {fills.map((fill) => (
+                    <tr key={fill.id} className="hover:bg-neutral-950/60">
+                      <td className="px-5 py-3 font-mono text-neutral-300">
+                        <div>{fill.instrumentId}</div>
+                        <div className="text-[9px] text-neutral-700 mt-0.5">{fill.externalTradeId || fill.externalOrderId || fill.clientOrderId}</div>
+                      </td>
+                      <td className={`px-5 py-3 font-mono ${fill.side === "BUY" ? "text-emerald-300" : "text-red-300"}`}>{fill.side}</td>
+                      <td className="px-5 py-3 text-right font-mono text-neutral-300">{formatDecimal(fill.quantity)}</td>
+                      <td className="px-5 py-3 text-right font-mono text-neutral-100">{formatDecimal(fill.price)}</td>
+                      <td className="px-5 py-3 text-right font-mono text-neutral-500">
+                        {fill.feeAmount ? `${formatDecimal(fill.feeAmount)} ${fill.feeAsset || ""}` : "—"}
+                      </td>
+                      <td className="px-5 py-3 text-right font-mono text-neutral-600">{formatTimestamp(fill.executedAt)}</td>
                     </tr>
                   ))}
                 </tbody>
