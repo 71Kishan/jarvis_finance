@@ -23,7 +23,7 @@ import { PlatformRepository } from "./src/platform/platformRepository";
 import { BinanceSpotAccountAdapter } from "./src/platform/binanceSpotAccountAdapter";
 import { BinanceSpotUserDataStream } from "./src/server/binanceSpotUserDataStream";
 import { evaluateSpotPortfolioRisk } from "./src/platform/portfolioRisk";
-import { multiplyDecimals } from "./src/platform/decimal";
+import { compareDecimals, multiplyDecimals } from "./src/platform/decimal";
 import {
   JARVIS_SESSION_COOKIE,
   SESSION_TTL_MS,
@@ -1191,7 +1191,7 @@ async function buildSandboxPortfolioRiskInput(
 
   for (const balance of balances) {
     const asset = balance.asset.toUpperCase();
-    if (asset === baseCurrency || Number(balance.total) === 0) continue;
+    if (asset === baseCurrency || compareDecimals(balance.total, "0") === 0) continue;
 
     const instrument = binanceInstrumentCatalog
       .list({ quoteAsset: baseCurrency, tradableOnly: true, limit: 5000 })
@@ -1248,11 +1248,11 @@ async function buildSandboxPortfolioRiskInput(
         ? String(ticker?.ask ?? "")
         : String(ticker?.bid ?? "");
     const referencePrice =
-      order.limitPrice && Number(order.limitPrice) > 0
+      order.limitPrice && compareDecimals(order.limitPrice, "0") > 0
         ? order.limitPrice
         : marketReference;
 
-    if (!referencePrice || Number(referencePrice) <= 0) {
+    if (!referencePrice || compareDecimals(referencePrice, "0") <= 0) {
       unpricedOpenOrders += 1;
       continue;
     }
