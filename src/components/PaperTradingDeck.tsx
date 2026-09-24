@@ -516,7 +516,7 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
           <button
             id="submit-paper-order-btn"
             type="submit"
-            disabled={!!activeTrade || botState === "HALTED_DEAD"}
+            disabled={!!activeTrade || botState === "HALTED_DEAD" || !hasTrustedPrice}
             className={`w-full py-2.5 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all shadow-md ${
               orderType === "LONG"
                 ? "bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white shadow-emerald-950/40"
