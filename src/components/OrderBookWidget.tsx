@@ -2,7 +2,7 @@ import React from "react";
 import { MarketDataSource } from "../types/trading";
 
 interface OrderBookWidgetProps {
-  currentPrice: number;
+  currentPrice: number | null;
   symbol: string;
   dataSource?: MarketDataSource;
   bid?: number | null;
@@ -18,7 +18,7 @@ export const OrderBookWidget: React.FC<OrderBookWidgetProps> = ({
 }) => {
   const hasTop = Number.isFinite(bid) && Number.isFinite(ask) && (bid as number) > 0 && (ask as number) > 0;
   const spread = hasTop ? (ask as number) - (bid as number) : null;
-  const spreadBps = hasTop && currentPrice > 0 ? (spread! / currentPrice) * 10000 : null;
+  const spreadBps = hasTop && currentPrice != null && currentPrice > 0 ? (spread! / currentPrice) * 10000 : null;
 
   return (
     <div id="order-book-depth-widget" className="bg-neutral-900/90 border border-neutral-800 rounded-xl p-3 flex flex-col font-mono text-[11px]">
@@ -42,7 +42,7 @@ export const OrderBookWidget: React.FC<OrderBookWidgetProps> = ({
       </div>
 
       <div className="py-2 border-t border-neutral-800 grid grid-cols-2 gap-2">
-        <div><span className="text-neutral-500">Mid</span><div className="text-neutral-100 font-bold">${currentPrice.toFixed(2)}</div></div>
+        <div><span className="text-neutral-500">Mid</span><div className="text-neutral-100 font-bold">{currentPrice != null ? "$" + currentPrice.toFixed(2) : "—"}</div></div>
         <div><span className="text-neutral-500">Spread</span><div className="text-neutral-200 font-bold">{spread !== null ? "$" + spread.toFixed(4) : "—"}</div></div>
       </div>
 
