@@ -30,10 +30,12 @@ import { BotState, MarketDataSource, ActionNotification } from "../types/trading
 import { AssetSymbol, SUPPORTED_ASSETS } from "../engine/marketSimulator";
 import { soundFx } from "../utils/soundEffects";
 import { NotificationCenter } from "./NotificationCenter";
+import { InstrumentSearch } from "./InstrumentSearch";
+import type { Instrument } from "../platform/types";
 
 interface HeaderProps {
-  currentAsset: AssetSymbol;
-  onSelectAsset: (asset: AssetSymbol) => void;
+  currentAsset: string;
+  onSelectAsset: (asset: string) => void;
   botState: BotState;
   marketSource: MarketDataSource;
   isAutoTrading: boolean;
@@ -188,24 +190,12 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Right: Controls, Asset Switcher & Speed */}
         <div className="flex flex-wrap items-center gap-2 w-full md:w-auto justify-end">
-          {/* Asset Dropdown */}
-          <div className="relative">
-            <select
-              id="asset-selector"
-              aria-label="Select Asset"
-              value={currentAsset}
-              onChange={(e) => onSelectAsset(e.target.value as AssetSymbol)}
-              disabled={botState === "IN_POSITION"}
-              className="appearance-none bg-neutral-900 border border-neutral-700/80 hover:border-neutral-600 rounded-lg px-3 py-1.5 pr-8 text-xs font-mono font-semibold text-neutral-200 focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {Object.values(SUPPORTED_ASSETS).map((asset) => (
-                <option key={asset.symbol} value={asset.symbol}>
-                  {asset.symbol} - {asset.name}
-                </option>
-              ))}
-            </select>
-            <ChevronDown className="w-3.5 h-3.5 absolute right-2.5 top-1/2 -translate-y-1/2 text-neutral-400 pointer-events-none" />
-          </div>
+          {/* Dynamic instrument search: provider catalog, not a hardcoded asset list */}
+          <InstrumentSearch
+            value={currentAsset}
+            disabled={botState === "IN_POSITION"}
+            onSelect={(instrument: Instrument) => onSelectAsset(instrument.symbol)}
+          />
 
           {/* Auto-Trading Toggle */}
           <button
