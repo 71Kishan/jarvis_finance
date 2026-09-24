@@ -108,6 +108,7 @@ export interface PersistedOrder {
   updatedAt: number;
   lastProviderEventAt?: number;
   idempotencyKey?: string;
+  idempotencyFingerprint?: string;
 }
 
 export interface InstrumentPersistence {
@@ -674,7 +675,7 @@ export class PlatformRepository implements InstrumentPersistence {
         "       o.quantity::text, o.limit_price::text, o.stop_price::text, o.time_in_force, o.reduce_only,",
         "       o.strategy_id, o.strategy_version, o.reason, o.requested_at, o.status,",
         "       o.filled_quantity::text, o.average_fill_price::text, o.submitted_at, o.updated_at,",
-        "       o.last_provider_event_at, o.idempotency_key",
+        "       o.last_provider_event_at, o.idempotency_key, o.idempotency_fingerprint",
         "FROM orders o",
         "JOIN account_connections a ON a.id = o.account_id",
         "WHERE o.client_order_id = $1 AND a.user_id = $2",
@@ -707,6 +708,7 @@ export class PlatformRepository implements InstrumentPersistence {
     userId: string,
     accountId: string,
     idempotencyKey: string,
+    idempotencyFingerprint: string,
     order: OrderIntent,
   ): Promise<PersistedOrder> {
     if (!this.database.isReady()) throw new Error("PostgreSQL is required for sandbox order persistence.");
@@ -733,7 +735,7 @@ export class PlatformRepository implements InstrumentPersistence {
           "       quantity::text, limit_price::text, stop_price::text, time_in_force, reduce_only,",
           "       strategy_id, strategy_version, reason, requested_at, status,",
           "       filled_quantity::text, average_fill_price::text, submitted_at, updated_at,",
-          "       last_provider_event_at, idempotency_key",
+          "       last_provider_event_at, idempotency_key, idempotency_fingerprint",
           "FROM orders WHERE account_id = $1 AND idempotency_key = $2 LIMIT 1",
         ].join("\n"),
         [accountId, idempotencyKey],
@@ -764,6 +766,7 @@ export class PlatformRepository implements InstrumentPersistence {
           order.reason ?? null,
           order.requestedAt,
           idempotencyKey,
+          idempotencyFingerprint,
         ],
       );
 
@@ -773,7 +776,7 @@ export class PlatformRepository implements InstrumentPersistence {
           "       quantity::text, limit_price::text, stop_price::text, time_in_force, reduce_only,",
           "       strategy_id, strategy_version, reason, requested_at, status,",
           "       filled_quantity::text, average_fill_price::text, submitted_at, updated_at,",
-          "       last_provider_event_at, idempotency_key",
+          "       last_provider_event_at, idempotency_key, idempotency_fingerprint",
           "FROM orders WHERE client_order_id = $1",
         ].join("\n"),
         [order.clientOrderId],
@@ -883,6 +886,24 @@ export class PlatformRepository implements InstrumentPersistence {
     });
   }
 
+  public async getUserAccountConnectionByExternalId(
+    userId: string,
+    provider: string,
+    externalAccountId: string,
+  ): Promise<AccountConnection | null> {
+    const result = await this.database.query<AccountConnectionRow>(
+      [
+        "SELECT id, provider, account_type, label, external_account_id, status, permissions,",
+        "       last_synced_at, created_at, updated_at",
+        "FROM account_connections",
+        "WHERE user_id = $1 AND provider = $2 AND external_account_id = $3",
+        "ORDER BY created_at ASC LIMIT 1",
+      ].join("\n"),
+      [userId, provider, externalAccountId],
+    );
+    return result.rows[0] ? mapAccountConnectionRow(result.rows[0]) : null;
+  }
+
   public async grantSandboxTradePermission(userId: string, accountId: string): Promise<AccountConnection> {
     const result = await this.database.query<AccountConnectionRow>(
       [
@@ -921,6 +942,7 @@ export class PlatformRepository implements InstrumentPersistence {
       updatedAt: row.updated_at.getTime(),
       lastProviderEventAt: row.last_provider_event_at?.getTime(),
       idempotencyKey: row.idempotency_key ?? undefined,
+      idempotencyFingerprint: row.idempotency_fingerprint ?? undefined,
     };
   }
 
