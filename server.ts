@@ -1835,6 +1835,10 @@ async function startServer() {
     binanceSpotUserDataStream.start();
   }
 
+  if (process.env.JARVIS_SHADOW_AUTOSTART === "true") {
+    await autonomousShadowRuntime.start();
+  }
+
   const reconcileSandboxOrders = async () => {
     if (
       sandboxReconciliationInFlight ||
