@@ -59,6 +59,7 @@ export const DEFAULT_FORWARD_VALIDATION_POLICY: ForwardValidationPolicy = {
 };
 
 function finite(value: string): number {
+  if (value === "INF" || value === "Infinity") return Infinity;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
 }
