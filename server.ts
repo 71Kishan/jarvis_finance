@@ -855,9 +855,9 @@ app.post("/api/account/binance-testnet/orders", requireSameOrigin, requireSessio
       return res.status(409).json({ success: false, error: "Instrument is not currently tradable according to the server catalog." });
     }
 
-    let reserved: import("./src/platform/platformRepository").PersistedOrder;
+    let reservation: Awaited<ReturnType<typeof platformRepository.createPendingOrder>>;
     try {
-      reserved = await platformRepository.createPendingOrder(
+      reservation = await platformRepository.createPendingOrder(
         req.jarvisUser!.id,
         accountId,
         idempotencyKey,
@@ -888,6 +888,16 @@ app.post("/api/account/binance-testnet/orders", requireSameOrigin, requireSessio
         }
       }
       throw error;
+    }
+
+    if (!reservation.created) {
+      const reconciled = await reconcileSandboxOrder(reservation.order, req.jarvisUser!.id);
+      return res.status(200).json({
+        success: true,
+        idempotentReplay: true,
+        reconciled: reconciled !== reservation.order,
+        order: reconciled,
+      });
     }
 
     const providerOrder = await binanceSpotTestnetAccount.submitOrder(intent).catch(async (error: any) => {
