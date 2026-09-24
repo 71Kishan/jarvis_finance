@@ -29,7 +29,7 @@ interface AiCopilotModalProps {
   onClose: () => void;
   vitality: BotVitality;
   currentAsset: string;
-  currentPrice: number;
+  currentPrice: number | null;
   activeTrade: Trade | null;
   strategy: StrategyConfig;
   isAutoTrading: boolean;
