@@ -2001,6 +2001,54 @@ app.get("/api/market/live-feed", async (req: Request, res: Response) => {
   }
 });
 
+async function prepareShadowStrategy(): Promise<void> {
+  const strategyId = process.env.JARVIS_SHADOW_STRATEGY_ID?.trim();
+  const requireValidated = process.env.JARVIS_SHADOW_REQUIRE_SERVER_VALIDATED !== "false";
+
+  if (!strategyId) {
+    if (requireValidated) {
+      throw new Error(
+        "Shadow runtime requires JARVIS_SHADOW_STRATEGY_ID to identify a server-recomputed strategy.",
+      );
+    }
+    return;
+  }
+
+  const operatorEmail = process.env.JARVIS_ADMIN_EMAIL?.trim().toLowerCase();
+  if (!operatorEmail) {
+    throw new Error("Shadow runtime requires JARVIS_ADMIN_EMAIL to load the selected strategy.");
+  }
+
+  const operator = await platformRepository.getAuthUserByEmail(operatorEmail);
+  if (!operator) {
+    throw new Error("Shadow runtime operator account was not found.");
+  }
+
+  const record = await platformRepository.getLatestStrategyValidation(
+    operator.id,
+    strategyId,
+  );
+
+  if (!record?.strategy) {
+    throw new Error("Selected shadow strategy has no persisted strategy configuration.");
+  }
+
+  if (requireValidated) {
+    if (record.status !== "PROVISIONALLY_VALIDATED") {
+      throw new Error(
+        "Selected shadow strategy has not passed the current deterministic validation policy.",
+      );
+    }
+    if (record.source !== "SERVER_RECOMPUTED") {
+      throw new Error(
+        "Selected shadow strategy is not server-recomputed evidence; client-submitted evidence cannot activate shadow automation.",
+      );
+    }
+  }
+
+  autonomousShadowRuntime.configureStrategy(record.strategy as unknown as import("./src/types/trading").StrategyConfig);
+}
+
 function awaitHealth(adapter: BinanceSpotAccountAdapter) {
   // Health is intentionally local/cached here; it never forces a credentialed
   // network call on a public health request.
@@ -2053,8 +2101,20 @@ app.get("/api/runtime/shadow/status", requireControlToken, (_req: Request, res: 
 });
 
 app.post("/api/runtime/shadow/start", requireControlToken, async (_req: Request, res: Response) => {
-  await autonomousShadowRuntime.start();
-  res.json(autonomousShadowRuntime.getStatus());
+  try {
+    await prepareShadowStrategy();
+    await autonomousShadowRuntime.start();
+    const status = autonomousShadowRuntime.getStatus();
+    if (status.status === "ERROR") {
+      return res.status(503).json(status);
+    }
+    return res.json(status);
+  } catch (error: any) {
+    return res.status(422).json({
+      success: false,
+      error: error?.message || "Shadow runtime could not be configured.",
+    });
+  }
 });
 
 app.post("/api/runtime/shadow/stop", requireControlToken, async (_req: Request, res: Response) => {
@@ -2139,7 +2199,12 @@ async function startServer() {
   }
 
   if (process.env.JARVIS_SHADOW_AUTOSTART === "true") {
-    await autonomousShadowRuntime.start();
+    try {
+      await prepareShadowStrategy();
+      await autonomousShadowRuntime.start();
+    } catch (error: any) {
+      console.error("Shadow runtime autostart blocked:", error?.message || error);
+    }
   }
 
   const reconcileSandboxOrders = async () => {
