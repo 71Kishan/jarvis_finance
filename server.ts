@@ -1020,6 +1020,56 @@ app.post("/api/research/strategy-validation/recompute", requireSameOrigin, requi
   }
 });
 
+app.post("/api/research/strategy-deploy", requireSameOrigin, requireSession, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const validationRunId = typeof req.body?.validationRunId === "string"
+      ? req.body.validationRunId.trim()
+      : "";
+    const reason = typeof req.body?.reason === "string"
+      ? req.body.reason.trim().slice(0, 500)
+      : undefined;
+
+    if (!/^[0-9a-f-]{36}$/i.test(validationRunId)) {
+      return res.status(400).json({
+        success: false,
+        error: "A valid validationRunId is required.",
+      });
+    }
+
+    const deployment = await platformRepository.deployShadowStrategy({
+      userId: req.jarvisUser!.id,
+      strategyId: "",
+      validationRunId,
+      strategyVersion: 0,
+      strategy: {},
+      reason,
+    });
+
+    return res.json({
+      success: true,
+      deployment,
+      note: "Shadow strategy deployment is server-owned. The selected validation run, source, strategy identity, and status were rechecked transactionally.",
+    });
+  } catch (error: any) {
+    return res.status(422).json({
+      success: false,
+      error: error?.message || "Shadow strategy deployment was rejected.",
+    });
+  }
+});
+
+app.get("/api/research/strategy-deploy/active", requireSession, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const deployment = await platformRepository.getActiveShadowStrategyDeployment(req.jarvisUser!.id);
+    return res.json({ success: true, deployment });
+  } catch (error: any) {
+    return res.status(503).json({
+      success: false,
+      error: error?.message || "Active shadow strategy deployment is unavailable.",
+    });
+  }
+});
+
 app.get("/api/research/strategy-validations/latest", requireSession, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const strategyId = typeof req.query.strategyId === "string" ? req.query.strategyId.trim() : "";
@@ -2063,26 +2113,41 @@ app.get("/api/market/live-feed", async (req: Request, res: Response) => {
 });
 
 async function prepareShadowStrategy(): Promise<void> {
-  const strategyId = process.env.JARVIS_SHADOW_STRATEGY_ID?.trim();
+  const requireDeployment = process.env.JARVIS_SHADOW_REQUIRE_SERVER_DEPLOYMENT !== "false";
+  const allowLegacyEnv = process.env.JARVIS_SHADOW_ALLOW_LEGACY_ENV === "true";
   const requireValidated = process.env.JARVIS_SHADOW_REQUIRE_SERVER_VALIDATED !== "false";
-
-  if (!strategyId) {
-    if (requireValidated) {
-      throw new Error(
-        "Shadow runtime requires JARVIS_SHADOW_STRATEGY_ID to identify a server-recomputed strategy.",
-      );
-    }
-    return;
-  }
 
   const operatorEmail = process.env.JARVIS_ADMIN_EMAIL?.trim().toLowerCase();
   if (!operatorEmail) {
-    throw new Error("Shadow runtime requires JARVIS_ADMIN_EMAIL to load the selected strategy.");
+    throw new Error("Shadow runtime requires JARVIS_ADMIN_EMAIL.");
   }
 
   const operator = await platformRepository.getAuthUserByEmail(operatorEmail);
   if (!operator) {
     throw new Error("Shadow runtime operator account was not found.");
+  }
+
+  if (requireDeployment) {
+    const deployment = await platformRepository.getActiveShadowStrategyDeployment(operator.id);
+    if (deployment) {
+      autonomousShadowRuntime.configureStrategy(
+        deployment.strategy as unknown as import("./src/types/trading").StrategyConfig,
+      );
+      return;
+    }
+
+    if (!allowLegacyEnv) {
+      throw new Error(
+        "No active server-owned shadow strategy deployment exists. Deploy a server-recomputed, provisionally validated candidate first.",
+      );
+    }
+  }
+
+  const strategyId = process.env.JARVIS_SHADOW_STRATEGY_ID?.trim();
+  if (!strategyId) {
+    throw new Error(
+      "Legacy shadow configuration requires JARVIS_SHADOW_STRATEGY_ID.",
+    );
   }
 
   const record = await platformRepository.getLatestStrategyValidation(
@@ -2091,23 +2156,25 @@ async function prepareShadowStrategy(): Promise<void> {
   );
 
   if (!record?.strategy) {
-    throw new Error("Selected shadow strategy has no persisted strategy configuration.");
+    throw new Error("Selected legacy shadow strategy has no persisted strategy configuration.");
   }
 
   if (requireValidated) {
     if (record.status !== "PROVISIONALLY_VALIDATED") {
       throw new Error(
-        "Selected shadow strategy has not passed the current deterministic validation policy.",
+        "Selected legacy shadow strategy has not passed the current deterministic validation policy.",
       );
     }
     if (record.source !== "SERVER_RECOMPUTED") {
       throw new Error(
-        "Selected shadow strategy is not server-recomputed evidence; client-submitted evidence cannot activate shadow automation.",
+        "Selected legacy shadow strategy is not server-recomputed evidence; client-submitted evidence cannot activate shadow automation.",
       );
     }
   }
 
-  autonomousShadowRuntime.configureStrategy(record.strategy as unknown as import("./src/types/trading").StrategyConfig);
+  autonomousShadowRuntime.configureStrategy(
+    record.strategy as unknown as import("./src/types/trading").StrategyConfig,
+  );
 }
 
 function awaitHealth(adapter: BinanceSpotAccountAdapter) {
