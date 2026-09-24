@@ -272,6 +272,7 @@ export const WorkspaceSurface: React.FC<WorkspaceSurfaceProps> = ({
         fills: Array.isArray(payload?.fills) ? payload.fills : current?.fills || [],
       }));
       setAccountMessage("Binance Spot Testnet account synchronized from the provider.");
+      await loadAccountOverview();
       void loadHealth();
     } catch (error: any) {
       setAccountMessage(error?.message || "Binance testnet sync failed.");
