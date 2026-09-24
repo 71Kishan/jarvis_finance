@@ -32,6 +32,44 @@ interface RuntimeStatus {
   databaseState?: string;
   marketState?: string;
   catalogState?: string;
+  shadowStatus?: string;
+  shadowSymbol?: string;
+  shadowStrategyId?: string;
+  shadowLastProcessedCandleAt?: number;
+}
+
+interface ShadowEvidenceView {
+  runtimeId: string;
+  strategyId: string;
+  strategyVersion: number;
+  symbol: string;
+  status: string;
+  firstObservationAt: number | null;
+  lastObservationAt: number | null;
+  observationCount: number;
+  forwardCalendarDays: number;
+  maxDrawdownPercent: string;
+  latestEquity: string | null;
+  closedTrades: number;
+  winningTrades: number;
+  losingTrades: number;
+  winRatePercent: string;
+  profitFactor: string;
+  expectancyPerTrade: string;
+  totalPnl: string;
+  totalFees: string;
+}
+
+interface ForwardValidationView {
+  status: "INSUFFICIENT_EVIDENCE" | "FAILED" | "PROVISIONALLY_VALIDATED";
+  gates: Array<{
+    id: string;
+    label: string;
+    passed: boolean;
+    observed: string;
+    required: string;
+    reason: string;
+  }>;
 }
 
 interface AccountConnectionView {
@@ -134,6 +172,8 @@ export const WorkspaceSurface: React.FC<WorkspaceSurfaceProps> = ({
   const [platformHealth, setPlatformHealth] = useState<any>(null);
   const [accountOverview, setAccountOverview] = useState<AccountOverview | null>(null);
   const [portfolioValuation, setPortfolioValuation] = useState<PortfolioValuationView | null>(null);
+  const [shadowEvidence, setShadowEvidence] = useState<ShadowEvidenceView | null>(null);
+  const [forwardValidation, setForwardValidation] = useState<ForwardValidationView | null>(null);
   const [accountBusy, setAccountBusy] = useState(false);
   const [accountMessage, setAccountMessage] = useState<string | null>(null);
   const [sandboxBusy, setSandboxBusy] = useState<string | null>(null);
@@ -152,10 +192,44 @@ export const WorkspaceSurface: React.FC<WorkspaceSurfaceProps> = ({
         databaseState: payload?.database?.state,
         marketState: payload?.marketData?.state,
         catalogState: payload?.instrumentCatalog?.state,
+        shadowStatus: payload?.autonomousShadow?.status,
+        shadowSymbol: payload?.autonomousShadow?.symbol,
+        shadowStrategyId: payload?.autonomousShadow?.strategyId,
+        shadowLastProcessedCandleAt: payload?.autonomousShadow?.lastProcessedCandleAt,
       });
     } catch {
       setPlatformHealth(null);
       setRuntime({ status: "UNAVAILABLE" });
+    }
+  };
+
+  const loadShadowEvidence = async () => {
+    const strategyId = runtime?.shadowStrategyId?.trim();
+    const symbol = runtime?.shadowSymbol?.trim().toUpperCase();
+    if (!strategyId || !symbol) {
+      setShadowEvidence(null);
+      return;
+    }
+
+    try {
+      const params = new URLSearchParams({ strategyId, symbol });
+      const response = await fetch("/api/runtime/shadow/evidence?" + params.toString(), {
+        cache: "no-store",
+        credentials: "same-origin",
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        if (response.status === 401 || response.status === 403) {
+          setShadowEvidence(null);
+          return;
+        }
+        throw new Error(payload?.error || "Shadow evidence unavailable.");
+      }
+      setShadowEvidence(payload?.evidence || null);
+      setForwardValidation(payload?.forwardValidation || null);
+    } catch {
+      setShadowEvidence(null);
+      setForwardValidation(null);
     }
   };
 
@@ -272,6 +346,7 @@ export const WorkspaceSurface: React.FC<WorkspaceSurfaceProps> = ({
         fills: Array.isArray(payload?.fills) ? payload.fills : current?.fills || [],
       }));
       setAccountMessage("Binance Spot Testnet account synchronized from the provider.");
+      await loadAccountOverview();
       void loadHealth();
     } catch (error: any) {
       setAccountMessage(error?.message || "Binance testnet sync failed.");
@@ -290,6 +365,13 @@ export const WorkspaceSurface: React.FC<WorkspaceSurfaceProps> = ({
     const timer = setInterval(() => void loadAccountOverview(), 15_000);
     return () => clearInterval(timer);
   }, [view]);
+
+  useEffect(() => {
+    if (view !== "AUTOMATION") return;
+    void loadShadowEvidence();
+    const timer = setInterval(() => void loadShadowEvidence(), 15_000);
+    return () => clearInterval(timer);
+  }, [view, runtime?.shadowStrategyId, runtime?.shadowSymbol]);
 
   useEffect(() => {
     if (view !== "AUTOMATION") return;
@@ -667,11 +749,153 @@ export const WorkspaceSurface: React.FC<WorkspaceSurfaceProps> = ({
             Automated execution is a server-owned subsystem. Paper automation is available from Practice Lab;
             real-money execution remains disabled until the broker adapter, reconciliation and production gates are complete.
           </p>
-          <div className="mt-6 rounded-lg bg-neutral-950 border border-neutral-800 p-4 font-mono text-xs">
-            <div className="flex justify-between"><span className="text-neutral-500">Paper runtime</span><span className="text-neutral-200">{runtime?.status || "LOADING"}</span></div>
-            <div className="flex justify-between mt-2"><span className="text-neutral-500">Symbol</span><span className="text-neutral-200">{runtime?.symbol || "—"}</span></div>
-            <div className="flex justify-between mt-2"><span className="text-neutral-500">Last processed bar</span><span className="text-neutral-200">{formatTimestamp(runtime?.lastProcessedCandleAt)}</span></div>
-            <div className="flex justify-between mt-2"><span className="text-neutral-500">Market gateway</span><span className="text-neutral-200">{runtime?.marketState || "—"}</span></div>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mt-6">
+            <div className="rounded-lg bg-neutral-950 border border-neutral-800 p-4 font-mono text-xs">
+              <div className="text-[10px] uppercase tracking-[0.15em] text-neutral-600">Paper execution layer</div>
+              <div className="flex justify-between mt-3"><span className="text-neutral-500">Runtime</span><span className="text-neutral-200">{runtime?.status || "LOADING"}</span></div>
+              <div className="flex justify-between mt-2"><span className="text-neutral-500">Symbol</span><span className="text-neutral-200">{runtime?.symbol || "—"}</span></div>
+              <div className="flex justify-between mt-2"><span className="text-neutral-500">Last processed bar</span><span className="text-neutral-200">{formatTimestamp(runtime?.lastProcessedCandleAt)}</span></div>
+            </div>
+
+            <div className="rounded-lg bg-neutral-950 border border-neutral-800 p-4 font-mono text-xs">
+              <div className="text-[10px] uppercase tracking-[0.15em] text-neutral-600">Forward shadow layer</div>
+              <div className="flex justify-between mt-3"><span className="text-neutral-500">Runtime</span><span className="text-neutral-200">{runtime?.shadowStatus || "LOADING"}</span></div>
+              <div className="flex justify-between mt-2"><span className="text-neutral-500">Symbol</span><span className="text-neutral-200">{runtime?.shadowSymbol || "—"}</span></div>
+              <div className="flex justify-between mt-2"><span className="text-neutral-500">Last processed bar</span><span className="text-neutral-200">{formatTimestamp(runtime?.shadowLastProcessedCandleAt)}</span></div>
+            </div>
+          </div>
+
+          <section className="mt-3 rounded-lg bg-neutral-950 border border-neutral-800 p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-neutral-600">Operational readiness</div>
+                <div className="text-xs text-neutral-400 mt-1">
+                  Server-side safety dependencies are evaluated independently from market PnL.
+                </div>
+              </div>
+              <span className={
+                platformHealth?.operational?.state === "HEALTHY"
+                  ? "rounded-full border border-emerald-900/60 bg-emerald-950/20 px-2.5 py-1 text-[10px] font-mono text-emerald-300"
+                  : platformHealth?.operational?.state === "HALTED"
+                    ? "rounded-full border border-rose-900/60 bg-rose-950/20 px-2.5 py-1 text-[10px] font-mono text-rose-300"
+                    : "rounded-full border border-amber-900/60 bg-amber-950/20 px-2.5 py-1 text-[10px] font-mono text-amber-200"
+              }>
+                {platformHealth?.operational?.state || "LOADING"}
+              </span>
+            </div>
+            {Array.isArray(platformHealth?.operational?.components) && (
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2 mt-4">
+                {platformHealth.operational.components.map((component: any) => (
+                  <div key={component.id} className="rounded-lg border border-neutral-800 bg-neutral-950 p-2.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[10px] text-neutral-300">{component.label}</span>
+                      <span className={
+                        component.state === "READY"
+                          ? "text-emerald-400"
+                          : component.state === "HALTED"
+                            ? "text-rose-400"
+                            : component.state === "DISABLED"
+                              ? "text-neutral-600"
+                              : "text-amber-300"
+                      }>
+                        {component.state}
+                      </span>
+                    </div>
+                    <div className="text-[9px] text-neutral-600 mt-1 leading-relaxed">{component.message}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <section className="mt-3 rounded-lg bg-neutral-950 border border-neutral-800 p-4">
+            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-2">
+              <div>
+                <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-neutral-600">Forward evidence</div>
+                <div className="text-xs text-neutral-500 mt-1">
+                  Server-persisted shadow observations and hypothetical fills. This is research data, not broker cash.
+                </div>
+              </div>
+              {shadowEvidence && (
+                <div className="text-[10px] font-mono text-neutral-600">
+                  {shadowEvidence.forwardCalendarDays} days • {shadowEvidence.observationCount} observations
+                </div>
+              )}
+            </div>
+
+            {shadowEvidence ? (
+              <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-px bg-neutral-800 mt-4">
+                {[
+                  ["Closed trades", String(shadowEvidence.closedTrades)],
+                  ["Win rate", shadowEvidence.winRatePercent + "%"],
+                  ["Profit factor", shadowEvidence.profitFactor],
+                  ["Expectancy", shadowEvidence.expectancyPerTrade],
+                  ["Total PnL", shadowEvidence.totalPnl],
+                  ["Fees", shadowEvidence.totalFees],
+                  ["Max DD", shadowEvidence.maxDrawdownPercent + "%"],
+                  ["Model equity", shadowEvidence.latestEquity || "—"],
+                  ["First data", formatTimestamp(shadowEvidence.firstObservationAt || undefined)],
+                  ["Last data", formatTimestamp(shadowEvidence.lastObservationAt || undefined)],
+                ].map(([label, value]) => (
+                  <div key={label} className="bg-neutral-950 p-3 min-w-0">
+                    <div className="text-[9px] font-mono uppercase text-neutral-600">{label}</div>
+                    <div className="text-[11px] font-mono text-neutral-200 mt-1 truncate" title={value}>{value}</div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="mt-4 rounded-lg border border-dashed border-neutral-800 px-4 py-5 text-center text-[10px] font-mono text-neutral-600">
+                NO PERSISTED SHADOW EVIDENCE FOR THE SELECTED STRATEGY
+              </div>
+            )}
+
+            {forwardValidation && (
+              <section className="mt-4 rounded-lg border border-neutral-800 bg-neutral-950/70 p-4">
+                <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-2">
+                  <div>
+                    <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-neutral-600">Forward promotion gate</div>
+                    <div className="text-xs text-neutral-300 mt-1">
+                      {forwardValidation.status === "PROVISIONALLY_VALIDATED"
+                        ? "All forward evidence gates currently pass. This is a research-status result, not a profitability guarantee."
+                        : forwardValidation.status === "FAILED"
+                          ? "Forward evidence is sufficient to evaluate, but at least one required gate currently fails."
+                          : "Forward sample is still insufficient for a promotion decision."}
+                    </div>
+                  </div>
+                  <span className={`rounded-full border px-2.5 py-1 text-[10px] font-mono ${
+                    forwardValidation.status === "PROVISIONALLY_VALIDATED"
+                      ? "border-emerald-900/60 bg-emerald-950/20 text-emerald-300"
+                      : forwardValidation.status === "FAILED"
+                        ? "border-rose-900/60 bg-rose-950/20 text-rose-300"
+                        : "border-amber-900/60 bg-amber-950/20 text-amber-200"
+                  }`}>
+                    {forwardValidation.status.replaceAll("_", " ")}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mt-4">
+                  {forwardValidation.gates.map((gate) => (
+                    <div key={gate.id} className="rounded-lg border border-neutral-800 bg-neutral-950 p-2.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[10px] text-neutral-300">{gate.label}</span>
+                        <span className={gate.passed ? "text-emerald-400" : "text-rose-400"}>
+                          {gate.passed ? "PASS" : "FAIL"}
+                        </span>
+                      </div>
+                      <div className="text-[9px] text-neutral-600 mt-1">{gate.observed} • {gate.required}</div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="text-[10px] text-neutral-600 mt-3">
+                  Forward validation never authorizes provider orders. It only determines whether the current shadow evidence meets the research policy.
+                </div>
+              </section>
+            )}
+          </section>
+
+          <div className="mt-3 rounded-lg bg-neutral-950 border border-neutral-800 p-4 font-mono text-xs">
+            <div className="flex justify-between"><span className="text-neutral-500">Market gateway</span><span className="text-neutral-200">{runtime?.marketState || "—"}</span></div>
             <div className="flex justify-between mt-2"><span className="text-neutral-500">Instrument catalog</span><span className="text-neutral-200">{runtime?.catalogState || "—"}</span></div>
             <div className="flex justify-between mt-2"><span className="text-neutral-500">PostgreSQL</span><span className="text-neutral-200">{runtime?.databaseState || "DISABLED"}</span></div>
             {runtime?.message && <div className="mt-3 text-neutral-500 leading-relaxed">{runtime.message}</div>}

@@ -36,7 +36,7 @@ export class AutonomousShadowRuntime {
   private readonly symbol: string;
   private readonly pollIntervalMs: number;
   private readonly researchCapital: number;
-  private readonly initialStrategy: StrategyConfig;
+  private initialStrategy: StrategyConfig;
   private engine: TradingEngine;
   private operatorUserId: string | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
@@ -48,6 +48,7 @@ export class AutonomousShadowRuntime {
   private lastDataAt: number | null = null;
   private message = "Shadow runtime is stopped.";
   private recoveryNote = "";
+  private persistedRuntimeId: string | null = null;
 
   constructor(
     gateway: BinanceMarketDataService,
@@ -72,6 +73,22 @@ export class AutonomousShadowRuntime {
     this.researchCapital = Math.max(100, options?.researchCapital || 10_000);
     this.pollIntervalMs = Math.max(500, options?.pollIntervalMs || 1000);
     this.engine = new TradingEngine(this.researchCapital, 6, this.initialStrategy);
+  }
+
+  public configureStrategy(strategy: StrategyConfig): void {
+    if (this.timer) {
+      throw new Error("Shadow strategy cannot be changed while the runtime is running.");
+    }
+
+    this.initialStrategy = {
+      ...strategy,
+      indicatorWeights: { ...strategy.indicatorWeights },
+    };
+    this.engine = new TradingEngine(this.researchCapital, 6, this.initialStrategy);
+    this.lastProcessedCandleAt = null;
+    this.startedAt = null;
+    this.recoveryNote = "";
+    this.message = "Shadow strategy configured; awaiting start.";
   }
 
   public async start(operatorUserId?: string): Promise<void> {
@@ -169,10 +186,12 @@ export class AutonomousShadowRuntime {
     if (!record) {
       this.engine = new TradingEngine(this.researchCapital, 6, this.initialStrategy);
       this.lastProcessedCandleAt = null;
+      this.persistedRuntimeId = null;
       this.recoveryNote = "";
       return;
     }
 
+    this.persistedRuntimeId = record.id;
     const state = record.runtimeState as any;
     if (state?.version !== 1 || !this.engine.hydrateRuntimeState(state)) {
       throw new Error("Persisted shadow runtime state is unsupported or invalid.");
@@ -183,10 +202,10 @@ export class AutonomousShadowRuntime {
     this.recoveryNote = "Durable PostgreSQL state restored.";
   }
 
-  private async persist(statusOverride?: ShadowRuntimeStatus): Promise<void> {
-    if (!this.operatorUserId) return;
+  private async persist(statusOverride?: ShadowRuntimeStatus): Promise<ShadowRuntimeRecord | null> {
+    if (!this.operatorUserId) return null;
 
-    await this.repository.saveShadowRuntime({
+    const record = await this.repository.saveShadowRuntime({
       userId: this.operatorUserId,
       strategyId: this.engine.getStrategy().id,
       strategyVersion: this.engine.getStrategy().version,
@@ -197,7 +216,9 @@ export class AutonomousShadowRuntime {
       startedAt: this.startedAt || undefined,
     });
 
+    this.persistedRuntimeId = record.id;
     this.lastProcessedCandleAt = this.engine.getLastProcessedCandleTimestamp() || null;
+    return record;
   }
 
   private async safePersist(): Promise<void> {
@@ -274,8 +295,79 @@ export class AutonomousShadowRuntime {
             : [];
 
       for (const candle of toProcess) {
+        const beforeActiveTrade = this.engine.getActiveTrade();
+        const beforeTradeIds = new Set(this.engine.getTradeHistory().map((trade) => trade.id));
+
         this.engine.onTick(candle, candles);
-        this.lastProcessedCandleAt = this.engine.getLastProcessedCandleTimestamp();
+
+        const afterActiveTrade = this.engine.getActiveTrade();
+        const afterTradeHistory = this.engine.getTradeHistory();
+        const newlyClosedTrades = afterTradeHistory.filter((trade) => !beforeTradeIds.has(trade.id));
+        const openedTrade =
+          !beforeActiveTrade && afterActiveTrade
+            ? afterActiveTrade
+            : null;
+        const activeTradeChanged =
+          Boolean(beforeActiveTrade && afterActiveTrade) &&
+          (
+            beforeActiveTrade!.stopLoss !== afterActiveTrade!.stopLoss ||
+            beforeActiveTrade!.takeProfit !== afterActiveTrade!.takeProfit ||
+            beforeActiveTrade!.amount !== afterActiveTrade!.amount ||
+            beforeActiveTrade!.pnl !== afterActiveTrade!.pnl
+          );
+
+        const runtimeId = this.persistedRuntimeId || (await this.persist())?.id;
+        if (!runtimeId) {
+          throw new Error("Shadow runtime persistence did not return a runtime identifier.");
+        }
+
+        if (openedTrade) {
+          await this.repository.upsertShadowTrade(runtimeId, openedTrade);
+        } else if (activeTradeChanged && afterActiveTrade) {
+          // Keep the live research position current when stop/mark state changes;
+          // equity observations remain the high-frequency time series.
+          await this.repository.upsertShadowTrade(runtimeId, afterActiveTrade);
+        }
+        for (const trade of newlyClosedTrades) {
+          await this.repository.upsertShadowTrade(runtimeId, trade);
+        }
+
+        const eventType =
+          newlyClosedTrades.length > 0
+            ? "EXIT"
+            : !beforeActiveTrade && afterActiveTrade
+              ? "ENTRY"
+              : this.engine.getBotState() === "HALTED_DEAD"
+                ? "HALT"
+                : this.engine.getLastSignal()?.eligible
+                  ? "SIGNAL"
+                  : "HEARTBEAT";
+
+        const tradeEvent =
+          newlyClosedTrades[0]
+            ? { kind: "TRADE_CLOSED", trade: newlyClosedTrades[0] }
+            : !beforeActiveTrade && afterActiveTrade
+              ? { kind: "TRADE_OPENED", trade: afterActiveTrade }
+              : this.engine.getBotState() === "HALTED_DEAD"
+                ? { kind: "RISK_HALT" }
+                : null;
+
+        const vitality = this.engine.getVitality();
+        await this.repository.recordShadowObservation({
+          runtimeId,
+          candleTimestamp: candle.timestamp,
+          closePrice: String(candle.close),
+          equity: String(vitality.currentEquity),
+          cash: String(vitality.cash),
+          drawdownPercent: String(vitality.currentDrawdownPercent),
+          dailyDrawdownPercent: String(vitality.dailyDrawdownPercent),
+          botState: this.engine.getBotState(),
+          eventType,
+          signal: this.engine.getLastSignal() as unknown as Record<string, unknown> | null,
+          activeTrade: afterActiveTrade as unknown as Record<string, unknown> | null,
+          tradeEvent: tradeEvent as unknown as Record<string, unknown> | null,
+        });
+
         await this.persist();
 
         if (this.engine.getBotState() === "HALTED_DEAD") break;

@@ -30,6 +30,7 @@ describe("platform instrument registry", () => {
       lotSize: "0.00001000",
       minQuantity: "0.00001000",
       minNotional: "5.00",
+      shortable: false,
       updatedAt: 123
     });
   });

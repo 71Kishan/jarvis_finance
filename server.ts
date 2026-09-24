@@ -12,6 +12,12 @@ import { BinanceInstrumentCatalog } from "./src/server/binanceInstrumentCatalog"
 import { AutonomousPaperRuntime } from "./src/server/paperRuntime";
 import { AutonomousShadowRuntime } from "./src/server/shadowRuntime";
 import { BinanceSpotPortfolioService } from "./src/server/binancePortfolioService";
+import { BinanceHistoricalDataService } from "./src/server/binanceHistoricalData";
+import { StrategyOptimizer } from "./src/engine/optimizer";
+import { attachIndicators } from "./src/engine/indicators";
+import { evaluateStrategyValidation } from "./src/engine/strategyValidation";
+import { evaluateForwardValidation } from "./src/engine/forwardValidation";
+import { evaluateOperationalHealth } from "./src/server/operationalHealth";
 import { PlatformDatabase } from "./src/server/platformDatabase";
 import { PlatformRepository } from "./src/platform/platformRepository";
 import { BinanceSpotAccountAdapter } from "./src/platform/binanceSpotAccountAdapter";
@@ -377,8 +383,33 @@ app.get("/api/health", (_req: Request, res: Response) => {
     autonomousShadow: {
       status: autonomousShadowRuntime.getStatus().status,
       symbol: autonomousShadowRuntime.getStatus().symbol,
+      strategyId: autonomousShadowRuntime.getStatus().strategy.id,
+      strategyVersion: autonomousShadowRuntime.getStatus().strategy.version,
       lastProcessedCandleAt: autonomousShadowRuntime.getStatus().lastProcessedCandleAt,
+      lastPollAt: autonomousShadowRuntime.getStatus().lastPollAt,
     },
+    operational: evaluateOperationalHealth({
+      database: platformDatabase.getHealth(),
+      market: {
+        state: market.state,
+        connected: market.connected,
+        lastMessageAt: market.lastMessageAt,
+      },
+      catalog: binanceInstrumentCatalog.getHealth(),
+      testnetConfigured: binanceSpotTestnetAccount.isConfigured(),
+      userDataStream: binanceSpotUserDataStream.getHealth(),
+      reconciliation: sandboxReconciliationHealth,
+      paper: {
+        status: autonomousPaperRuntime.getStatus().status,
+        lastPollAt: autonomousPaperRuntime.getStatus().lastPollAt,
+        lastProcessedCandleAt: autonomousPaperRuntime.getStatus().lastProcessedCandleAt,
+      },
+      shadow: {
+        status: autonomousShadowRuntime.getStatus().status,
+        lastPollAt: autonomousShadowRuntime.getStatus().lastPollAt,
+        lastProcessedCandleAt: autonomousShadowRuntime.getStatus().lastProcessedCandleAt,
+      },
+    }),
     timestamp: Date.now(),
   });
 });
@@ -465,6 +496,7 @@ const binanceSpotPortfolioService = new BinanceSpotPortfolioService(
   binanceMarketData,
   binanceInstrumentCatalog,
 );
+const binanceHistoricalData = new BinanceHistoricalDataService();
 
 const binanceSpotUserDataStream = new BinanceSpotUserDataStream({
   accountId: binanceSpotTestnetAccount.getAccountId(),
@@ -692,16 +724,6 @@ app.get("/api/account/portfolio", requireSession, async (req: AuthenticatedReque
       baseCurrency,
     );
 
-    await platformRepository.recordAuditEvent({
-      userId: req.jarvisUser!.id,
-      eventType: "PORTFOLIO_VALUATION",
-      payload: {
-        baseCurrency: portfolio.valuation.baseCurrency,
-        complete: portfolio.valuation.complete,
-        unpricedAssets: portfolio.valuation.unpricedAssets,
-      },
-    }).catch(() => undefined);
-
     return res.json({
       success: true,
       baseCurrency,
@@ -714,6 +736,272 @@ app.get("/api/account/portfolio", requireSession, async (req: AuthenticatedReque
     return res.status(503).json({
       success: false,
       error: error?.message || "Portfolio valuation unavailable.",
+    });
+  }
+});
+
+function isStrategyValidationStatus(value: unknown): value is "INSUFFICIENT_EVIDENCE" | "FAILED" | "PROVISIONALLY_VALIDATED" {
+  return value === "INSUFFICIENT_EVIDENCE" ||
+    value === "FAILED" ||
+    value === "PROVISIONALLY_VALIDATED";
+}
+
+app.post("/api/research/strategy-validation", requireSameOrigin, requireSession, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const result = req.body?.result;
+
+    if (!result || typeof result !== "object" || Array.isArray(result)) {
+      return res.status(400).json({ error: "A strategy validation result is required." });
+    }
+
+    const strategyId = typeof result.strategyId === "string" ? result.strategyId.trim() : "";
+    const strategyName = typeof result.strategyName === "string" ? result.strategyName.trim() : "";
+    const strategyVersion = Number(result.strategyVersion);
+    const evaluatedAt = Number(result.evaluatedAt);
+    const status = result.status;
+
+    if (
+      !strategyId ||
+      strategyId.length > 160 ||
+      !strategyName ||
+      strategyName.length > 240 ||
+      !Number.isInteger(strategyVersion) ||
+      strategyVersion < 1 ||
+      !Number.isFinite(evaluatedAt) ||
+      evaluatedAt <= 0 ||
+      !isStrategyValidationStatus(status)
+    ) {
+      return res.status(400).json({ error: "Invalid strategy validation identity or status." });
+    }
+
+    if (!result.policy || typeof result.policy !== "object" || Array.isArray(result.policy)) {
+      return res.status(400).json({ error: "Validation policy is required." });
+    }
+    if (!result.backtest || typeof result.backtest !== "object" || Array.isArray(result.backtest)) {
+      return res.status(400).json({ error: "Backtest evidence is required." });
+    }
+    if (!Array.isArray(result.gates) || result.gates.length > 20) {
+      return res.status(400).json({ error: "Validation gate evidence is invalid." });
+    }
+
+    const evidence = {
+      strategyId,
+      strategyVersion,
+      strategyName,
+      status,
+      policy: result.policy,
+      backtest: result.backtest,
+      walkForward: result.walkForward ?? null,
+      gates: result.gates,
+      evaluatedAt,
+    };
+    const canonical = JSON.stringify(evidence);
+    const evidenceHash = createHash("sha256").update(canonical, "utf8").digest("hex");
+
+    const record = await platformRepository.recordStrategyValidation({
+      userId: req.jarvisUser!.id,
+      strategyId,
+      strategyVersion,
+      strategyName,
+      status,
+      evaluatedAt,
+      evidenceHash,
+      policy: result.policy,
+      strategy: req.body?.strategy && typeof req.body.strategy === "object" && !Array.isArray(req.body.strategy)
+        ? req.body.strategy
+        : undefined,
+      metrics: {
+        backtest: result.backtest,
+        walkForward: result.walkForward ?? null,
+        gates: result.gates,
+      },
+      source: "CLIENT_SUBMITTED",
+    });
+
+    await platformRepository.recordAuditEvent({
+      userId: req.jarvisUser!.id,
+      eventType: "STRATEGY_VALIDATION_RECORDED",
+      payload: {
+        strategyId,
+        strategyVersion,
+        status,
+        source: "CLIENT_SUBMITTED",
+        evidenceHash,
+      },
+    }).catch(() => undefined);
+
+    return res.json({ success: true, record });
+  } catch (error: any) {
+    return res.status(503).json({
+      success: false,
+      error: error?.message || "Strategy validation evidence could not be persisted.",
+    });
+  }
+});
+
+app.post("/api/research/strategy-validation/recompute", requireSameOrigin, requireSession, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const strategy = req.body?.strategy;
+    if (!strategy || typeof strategy !== "object" || Array.isArray(strategy)) {
+      return res.status(400).json({ error: "A strategy configuration is required." });
+    }
+
+    const strategyId = typeof strategy.id === "string" ? strategy.id.trim() : "";
+    const strategyVersion = Number(strategy.version);
+    const strategyName = typeof strategy.name === "string" ? strategy.name.trim() : "";
+    const asset = typeof strategy.asset === "string" ? strategy.asset.trim().toUpperCase() : "";
+    const baseAsset = asset.includes("/") ? asset.split("/")[0] : asset;
+
+    if (
+      !strategyId ||
+      strategyId.length > 160 ||
+      !strategyName ||
+      strategyName.length > 240 ||
+      !Number.isInteger(strategyVersion) ||
+      strategyVersion < 1 ||
+      !baseAsset ||
+      !/^[A-Z0-9]{1,20}$/.test(baseAsset)
+    ) {
+      return res.status(400).json({ error: "Invalid strategy identity." });
+    }
+
+    const interval = (process.env.JARVIS_RESEARCH_CANDLE_INTERVAL || "1h") as import("./src/server/binanceHistoricalData").BinanceResearchInterval;
+    const allowedIntervals = new Set(["15m", "30m", "1h", "2h", "4h", "1d"]);
+    if (!allowedIntervals.has(interval)) {
+      return res.status(500).json({ error: "Unsupported server research interval configuration." });
+    }
+
+    const instrument = binanceInstrumentCatalog
+      .list({ assetClass: "CRYPTO", quoteAsset: "USDT", tradableOnly: true, limit: 5000 })
+      .find((candidate) => candidate.baseAsset?.toUpperCase() === baseAsset);
+
+    if (!instrument) {
+      return res.status(422).json({
+        error: "The requested strategy asset is not available as a tradable Binance Spot USDT instrument.",
+      });
+    }
+
+    const limit = Math.min(
+      2000,
+      Math.max(1200, Number(process.env.JARVIS_RESEARCH_CANDLE_LIMIT) || 1800),
+    );
+    const rawCandles = await binanceHistoricalData.fetchCompletedCandles(
+      instrument.providerSymbol,
+      interval,
+      limit,
+    );
+
+    if (rawCandles.length < 1200) {
+      return res.status(503).json({
+        error: "Server research data is insufficient for the configured walk-forward study.",
+        candlesAvailable: rawCandles.length,
+        candlesRequired: 1200,
+      });
+    }
+
+    const researchCandles = attachIndicators(rawCandles);
+    const optimization = StrategyOptimizer.runOptimizationStudy(strategy, researchCandles);
+    const validation = evaluateStrategyValidation(optimization);
+    const evidence = {
+      strategyId: validation.strategyId,
+      strategyVersion: validation.strategyVersion,
+      strategyName: validation.strategyName,
+      status: validation.status,
+      strategy: optimization.bestStrategy,
+      policy: validation.policy,
+      backtest: validation.backtest,
+      walkForward: validation.walkForward,
+      gates: validation.gates,
+      evaluatedAt: validation.evaluatedAt,
+      source: "SERVER_RECOMPUTED",
+      provider: "BINANCE_SPOT_PUBLIC_MARKET_DATA",
+      providerSymbol: instrument.providerSymbol,
+      interval,
+      candlesAnalyzed: researchCandles.length,
+    };
+    const canonical = JSON.stringify(evidence);
+    const evidenceHash = createHash("sha256").update(canonical, "utf8").digest("hex");
+
+    const record = await platformRepository.recordStrategyValidation({
+      userId: req.jarvisUser!.id,
+      strategyId: validation.strategyId,
+      strategyVersion: validation.strategyVersion,
+      strategyName: validation.strategyName,
+      status: validation.status,
+      evaluatedAt: validation.evaluatedAt,
+      evidenceHash,
+      policy: validation.policy as unknown as Record<string, unknown>,
+      strategy: optimization.bestStrategy as unknown as Record<string, unknown>,
+      metrics: {
+        backtest: validation.backtest,
+        walkForward: validation.walkForward,
+        gates: validation.gates,
+        provider: evidence.provider,
+        providerSymbol: instrument.providerSymbol,
+        interval,
+        candlesAnalyzed: researchCandles.length,
+      },
+      source: "SERVER_RECOMPUTED",
+    });
+
+    await platformRepository.recordAuditEvent({
+      userId: req.jarvisUser!.id,
+      eventType: "STRATEGY_VALIDATION_RECOMPUTED",
+      payload: {
+        strategyId: validation.strategyId,
+        strategyVersion: validation.strategyVersion,
+        status: validation.status,
+        evidenceHash,
+        provider: evidence.provider,
+        providerSymbol: instrument.providerSymbol,
+        interval,
+        candlesAnalyzed: researchCandles.length,
+      },
+    }).catch(() => undefined);
+
+    return res.json({
+      success: true,
+      source: "SERVER_RECOMPUTED",
+      provider: evidence.provider,
+      providerSymbol: instrument.providerSymbol,
+      interval,
+      candlesAnalyzed: researchCandles.length,
+      optimization: {
+        bestStrategy: optimization.bestStrategy,
+        bestResult: optimization.bestResult,
+        candidatesTested: optimization.candidatesTested,
+        optimizationInsights: optimization.optimizationInsights,
+        walkForwardReliable: optimization.walkForwardReliable,
+        walkForwardSummary: optimization.walkForwardSummary,
+        validation,
+      },
+      record,
+    });
+  } catch (error: any) {
+    console.error("Server strategy validation recompute failed:", error?.message || error);
+    return res.status(503).json({
+      success: false,
+      error: error?.message || "Server strategy recomputation is unavailable.",
+    });
+  }
+});
+
+app.get("/api/research/strategy-validations/latest", requireSession, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const strategyId = typeof req.query.strategyId === "string" ? req.query.strategyId.trim() : "";
+    if (!strategyId || strategyId.length > 160) {
+      return res.status(400).json({ error: "strategyId is required." });
+    }
+
+    const record = await platformRepository.getLatestStrategyValidation(
+      req.jarvisUser!.id,
+      strategyId,
+    );
+    return res.json({ success: true, record });
+  } catch (error: any) {
+    return res.status(503).json({
+      success: false,
+      error: error?.message || "Strategy validation history is unavailable.",
     });
   }
 });
@@ -1740,6 +2028,54 @@ app.get("/api/market/live-feed", async (req: Request, res: Response) => {
   }
 });
 
+async function prepareShadowStrategy(): Promise<void> {
+  const strategyId = process.env.JARVIS_SHADOW_STRATEGY_ID?.trim();
+  const requireValidated = process.env.JARVIS_SHADOW_REQUIRE_SERVER_VALIDATED !== "false";
+
+  if (!strategyId) {
+    if (requireValidated) {
+      throw new Error(
+        "Shadow runtime requires JARVIS_SHADOW_STRATEGY_ID to identify a server-recomputed strategy.",
+      );
+    }
+    return;
+  }
+
+  const operatorEmail = process.env.JARVIS_ADMIN_EMAIL?.trim().toLowerCase();
+  if (!operatorEmail) {
+    throw new Error("Shadow runtime requires JARVIS_ADMIN_EMAIL to load the selected strategy.");
+  }
+
+  const operator = await platformRepository.getAuthUserByEmail(operatorEmail);
+  if (!operator) {
+    throw new Error("Shadow runtime operator account was not found.");
+  }
+
+  const record = await platformRepository.getLatestStrategyValidation(
+    operator.id,
+    strategyId,
+  );
+
+  if (!record?.strategy) {
+    throw new Error("Selected shadow strategy has no persisted strategy configuration.");
+  }
+
+  if (requireValidated) {
+    if (record.status !== "PROVISIONALLY_VALIDATED") {
+      throw new Error(
+        "Selected shadow strategy has not passed the current deterministic validation policy.",
+      );
+    }
+    if (record.source !== "SERVER_RECOMPUTED") {
+      throw new Error(
+        "Selected shadow strategy is not server-recomputed evidence; client-submitted evidence cannot activate shadow automation.",
+      );
+    }
+  }
+
+  autonomousShadowRuntime.configureStrategy(record.strategy as unknown as import("./src/types/trading").StrategyConfig);
+}
+
 function awaitHealth(adapter: BinanceSpotAccountAdapter) {
   // Health is intentionally local/cached here; it never forces a credentialed
   // network call on a public health request.
@@ -1787,13 +2123,56 @@ app.post("/api/runtime/paper/stop", requireControlToken, (_req: Request, res: Re
 // Server-owned shadow forward-validation controls.
 // Shadow uses live trusted market data and the deterministic paper risk/execution model,
 // but never sends orders to a venue.
+app.get("/api/runtime/shadow/evidence", requireSession, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const strategyId = typeof req.query.strategyId === "string"
+      ? req.query.strategyId.trim()
+      : "";
+    const symbol = typeof req.query.symbol === "string"
+      ? req.query.symbol.trim().toUpperCase()
+      : "";
+
+    if (!strategyId || strategyId.length > 160 || !symbol || symbol.length > 40) {
+      return res.status(400).json({ error: "strategyId and symbol are required." });
+    }
+
+    const evidence = await platformRepository.getShadowEvidenceSummary(
+      req.jarvisUser!.id,
+      strategyId,
+      symbol,
+    );
+    const forwardValidation = evidence
+      ? evaluateForwardValidation(evidence)
+      : null;
+
+    return res.json({ success: true, evidence, forwardValidation });
+  } catch (error: any) {
+    return res.status(503).json({
+      success: false,
+      error: error?.message || "Shadow evidence is unavailable.",
+    });
+  }
+});
+
 app.get("/api/runtime/shadow/status", requireControlToken, (_req: Request, res: Response) => {
   res.json(autonomousShadowRuntime.getStatus());
 });
 
 app.post("/api/runtime/shadow/start", requireControlToken, async (_req: Request, res: Response) => {
-  await autonomousShadowRuntime.start();
-  res.json(autonomousShadowRuntime.getStatus());
+  try {
+    await prepareShadowStrategy();
+    await autonomousShadowRuntime.start();
+    const status = autonomousShadowRuntime.getStatus();
+    if (status.status === "ERROR") {
+      return res.status(503).json(status);
+    }
+    return res.json(status);
+  } catch (error: any) {
+    return res.status(422).json({
+      success: false,
+      error: error?.message || "Shadow runtime could not be configured.",
+    });
+  }
 });
 
 app.post("/api/runtime/shadow/stop", requireControlToken, async (_req: Request, res: Response) => {
@@ -1878,7 +2257,12 @@ async function startServer() {
   }
 
   if (process.env.JARVIS_SHADOW_AUTOSTART === "true") {
-    await autonomousShadowRuntime.start();
+    try {
+      await prepareShadowStrategy();
+      await autonomousShadowRuntime.start();
+    } catch (error: any) {
+      console.error("Shadow runtime autostart blocked:", error?.message || error);
+    }
   }
 
   const reconcileSandboxOrders = async () => {
@@ -2065,6 +2449,7 @@ async function startServer() {
     binanceInstrumentCatalog.stop();
     binanceMarketData.stop();
     autonomousPaperRuntime.stop("Server shutdown.");
+    await autonomousShadowRuntime.stop("Server shutdown.");
     await new Promise<void>((resolve) => httpServer.close(() => resolve()));
   };
 

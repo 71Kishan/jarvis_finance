@@ -58,6 +58,7 @@ export function normalizeBinanceSpotSymbol(row: BinanceSymbol, updatedAt = Date.
     providerSymbol,
     status: active ? "ACTIVE" : "SUSPENDED",
     tradable,
+    shortable: false,
     fractionable: false,
     tickSize: priceFilter?.tickSize,
     lotSize: lotFilter?.stepSize,

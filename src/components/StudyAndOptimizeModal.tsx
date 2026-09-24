@@ -38,6 +38,7 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
   onApplyStrategy,
 }) => {
   const [isLoading, setIsLoading] = useState(false);
+  const [persistenceMessage, setPersistenceMessage] = useState<string | null>(null);
   const [aiAnalysis, setAiAnalysis] = useState<{
     survivalStatus?: string;
     regimeAssessment?: string;
@@ -76,6 +77,62 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
       const validation = evaluateStrategyValidation(opt);
       strategyVaultInstance.recordValidationResult(opt.bestStrategy, validation);
       setOptimizationData({ ...opt, validation });
+
+      // The browser result is useful for immediate feedback, but promotion evidence
+      // should be recomputed from server-owned market history before it is trusted.
+      setPersistenceMessage("Local study complete. Recomputing validation from server-owned market history…");
+      try {
+        const serverResponse = await fetch("/api/research/strategy-validation/recompute", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({ strategy: opt.bestStrategy }),
+        });
+
+        const serverPayload = await serverResponse.json().catch(() => ({}));
+        if (serverResponse.ok && serverPayload?.optimization?.bestStrategy && serverPayload?.optimization?.validation) {
+          const serverOptimization = serverPayload.optimization;
+          const serverValidation = serverOptimization.validation;
+          strategyVaultInstance.recordValidationResult(serverOptimization.bestStrategy, serverValidation);
+          setOptimizationData(serverOptimization);
+          setPersistenceMessage(
+            `Server-recomputed evidence archived (${serverPayload.interval || "server interval"} • ${serverPayload.candlesAnalyzed || 0} candles). Source: live Binance public market data.`,
+          );
+        } else if (serverResponse.status === 401 || serverResponse.status === 403) {
+          setPersistenceMessage("Local study complete. Sign in to archive or server-recompute research evidence.");
+        } else {
+          const fallbackPayload = {
+            result: validation,
+          };
+          const fallbackResponse = await fetch("/api/research/strategy-validation", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "same-origin",
+            body: JSON.stringify({ ...fallbackPayload, strategy: opt.bestStrategy }),
+          });
+          if (fallbackResponse.ok) {
+            setPersistenceMessage("Server recomputation was unavailable; submitted research evidence was archived.");
+          } else {
+            setPersistenceMessage(serverPayload?.error || "Research ran locally; server evidence archive was unavailable.");
+          }
+        }
+      } catch {
+        try {
+          const fallbackResponse = await fetch("/api/research/strategy-validation", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "same-origin",
+            body: JSON.stringify({ result: validation, strategy: opt.bestStrategy }),
+          });
+          setPersistenceMessage(
+            fallbackResponse.ok
+              ? "Server recomputation was unavailable; submitted research evidence was archived."
+              : "Research ran locally; server evidence archive was unavailable.",
+          );
+        } catch {
+          setPersistenceMessage("Research ran locally; server evidence archive was unavailable.");
+        }
+      }
 
       // 2. Call Gemini AI via server-side endpoint
       const res = await fetch("/api/bot/study", {
@@ -381,6 +438,12 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
                   <div className="text-[10px] text-neutral-500">
                     AI recommendations remain advisory and cannot bypass these deterministic gates. Historical evidence does not guarantee future performance; forward paper/shadow validation is still required.
                   </div>
+                </div>
+              )}
+
+              {persistenceMessage && (
+                <div className="rounded-lg border border-neutral-800 bg-neutral-950/70 px-3 py-2 text-[10px] text-neutral-500">
+                  {persistenceMessage}
                 </div>
               )}
 
