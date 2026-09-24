@@ -10,16 +10,30 @@ export interface BinanceInstrumentCatalogHealth {
   instrumentCount: number;
   lastRefreshAt: number | null;
   lastError: string | null;
+  persistenceState: "DISABLED" | "READY" | "ERROR";
+  lastPersistAt: number | null;
+  persistenceError: string | null;
 }
 
 export class BinanceInstrumentCatalog {
   private readonly registry = new InstrumentRegistry();
+  private readonly persist?: (instruments: Instrument[]) => Promise<void>;
   private timer: ReturnType<typeof setInterval> | null = null;
   private stopped = false;
   private refreshing = false;
   private state: BinanceInstrumentCatalogHealth["state"] = "STARTING";
   private lastRefreshAt: number | null = null;
   private lastError: string | null = null;
+  private persistenceState: BinanceInstrumentCatalogHealth["persistenceState"] = "DISABLED";
+  private lastPersistAt: number | null = null;
+  private persistenceError: string | null = null;
+
+  constructor(options?: {
+    persist?: (instruments: Instrument[]) => Promise<void>;
+  }) {
+    this.persist = options?.persist;
+    this.persistenceState = this.persist ? "ERROR" : "DISABLED";
+  }
 
   public async start(): Promise<void> {
     this.stopped = false;
@@ -67,6 +81,19 @@ export class BinanceInstrumentCatalog {
       this.registry.replace(instruments);
       this.lastRefreshAt = Date.now();
       this.lastError = null;
+
+      if (this.persist) {
+        try {
+          await this.persist(instruments);
+          this.persistenceState = "READY";
+          this.lastPersistAt = Date.now();
+          this.persistenceError = null;
+        } catch (persistError: any) {
+          this.persistenceState = "ERROR";
+          this.persistenceError = persistError?.message || "Instrument persistence failed.";
+        }
+      }
+
       this.state = "READY";
     } catch (error: any) {
       this.lastError = error?.message || "Unknown catalog refresh error";
@@ -98,6 +125,9 @@ export class BinanceInstrumentCatalog {
       instrumentCount: this.registry.size(),
       lastRefreshAt: this.lastRefreshAt,
       lastError: this.lastError,
+      persistenceState: this.persistenceState,
+      lastPersistAt: this.lastPersistAt,
+      persistenceError: this.persistenceError,
     };
   }
 }
