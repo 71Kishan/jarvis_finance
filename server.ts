@@ -728,6 +728,7 @@ function resolveBinanceProviderSymbol(symbolParam: string): string | null {
 }
 
 const BINANCE_CHART_INTERVALS = new Set(["1m", "5m", "15m", "1h", "4h", "1d"]);
+const BINANCE_REST_BASE_URL = "https://api.binance.com";
 const BINANCE_CHART_CACHE_TTL_MS = 5_000;
 const binanceChartCache = new Map<string, { expiresAt: number; value: any }>();
 
@@ -749,7 +750,7 @@ app.get("/api/market/live-feed", async (req: Request, res: Response) => {
         if (cachedChart && cachedChart.expiresAt > now) return res.json(cachedChart.value);
 
         const endpoint =
-          REST_BASE_URL +
+          BINANCE_REST_BASE_URL +
           "/api/v3/klines?symbol=" + encodeURIComponent(binanceSymbol) +
           "&interval=" + encodeURIComponent(interval) +
           "&limit=" + String(limit + 1);
