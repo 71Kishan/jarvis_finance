@@ -39,3 +39,6 @@ The exact database user/database name must match deployment environment configur
 ## Live-money boundary
 
 Real-money order submission remains disabled. A future live-money gate must be a separate, explicit change after execution compatibility, reconciliation, alerting, backup/restore, and extended forward evidence have all been demonstrated.
+## Strategy deployment
+
+The strategy deployment control plane is separate from order submission. A server-recomputed, provisionally validated research run must be explicitly deployed before the shadow runtime can use it. This deployment is durable, auditable, and limited to the SHADOW environment. There is no equivalent live-money deployment record in this phase.
