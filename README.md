@@ -26,7 +26,11 @@ The repository now includes a server-owned autonomous **paper** runtime for supp
 
 Android and laptop browsers are not treated as reliable unattended workers. The phone app is therefore a monitoring/control surface; the long-lived trading process belongs on an always-on server.
 
-Set `JARVIS_PAPER_AUTOSTART=true` only after the strategy has completed the research/validation lifecycle. The current paper runtime persists its account snapshot atomically to disk and replays missed completed candles after restart. A production live-capital deployment still needs a transactional database, broker-order reconciliation, authenticated control plane, and incident recovery.
+Set `JARVIS_PAPER_AUTOSTART=true` only after the strategy has completed the research/validation lifecycle. The current paper runtime persists its account snapshot atomically to disk and replays missed completed candles after restart.
+
+When `DATABASE_URL` is configured, the server initializes PostgreSQL before exposing the platform catalog, applies ordered/checksummed migrations, and persists the canonical Binance instrument catalog transactionally. The database layer is intentionally separate from the paper-runtime snapshot so the paper worker remains usable without PostgreSQL during this research stage.
+
+A production live-capital deployment still needs real authentication, encrypted secrets, broker-order reconciliation, idempotent execution, transactional financial event handling, backups, monitoring, and incident recovery.
 
 ## Setup
 
@@ -70,9 +74,11 @@ Build and start with:
 docker compose up -d --build
 ```
 
-The compose file persists the paper runtime snapshot in a Docker volume. Keep `JARVIS_PAPER_AUTOSTART=false` until the strategy has completed its validation lifecycle; switch it to `true` only for an intentionally unattended paper run.
+The compose stack now includes PostgreSQL 16 with a persistent volume. Set `POSTGRES_PASSWORD` and the matching `DATABASE_URL` in the deployment `.env` file; never commit those values. PostgreSQL health gates the Jarvis container startup, and the server applies pending migrations automatically.
 
-The server does not require a Gemini key for deterministic trading. Gemini is an optional research/copilot dependency. Public Binance market data is also consumed without an API key; account credentials will only be required in a later live-execution phase.
+The compose file also persists the separate paper-runtime snapshot in a Docker volume. Keep `JARVIS_PAPER_AUTOSTART=false` until the strategy has completed its validation lifecycle; switch it to `true` only for an intentionally unattended paper run.
+
+The server does not require a Gemini key for deterministic trading. Gemini is an optional research/copilot dependency. Public Binance market data is also consumed without an API key; authenticated account credentials will only be required in a later execution phase.
 
 ## Android
 
@@ -97,4 +103,4 @@ A green backtest is evidence for research, not permission to risk capital.
 
 ## Before real-money work
 
-The platform core is now defined in `db/migrations/0001_platform_core.sql` and `docs/PLATFORM_CORE_V1.md`. The project still requires production authentication, database migration/runtime wiring, centralized secrets, broker sandbox testing, order idempotency/reconciliation, multiple non-overlapping out-of-sample periods, stronger execution/short-cost modeling, monitoring, incident recovery, and an independently reviewable live-capital gate.
+The platform core now has live PostgreSQL runtime wiring in `src/server/platformDatabase.ts`, a repository boundary in `src/platform/platformRepository.ts`, and migrations in `db/migrations/`. The project still requires real authentication, centralized secret management, an authenticated Binance sandbox adapter, order idempotency/reconciliation, multiple non-overlapping out-of-sample periods, stronger execution/short-cost modeling, monitoring, incident recovery, and an independently reviewable live-capital gate.
