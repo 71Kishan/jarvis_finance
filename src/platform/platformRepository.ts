@@ -693,7 +693,7 @@ export class PlatformRepository implements InstrumentPersistence {
         "       o.quantity::text, o.limit_price::text, o.stop_price::text, o.time_in_force, o.reduce_only,",
         "       o.strategy_id, o.strategy_version, o.reason, o.requested_at, o.status,",
         "       o.filled_quantity::text, o.average_fill_price::text, o.submitted_at, o.updated_at,",
-        "       o.last_provider_event_at, o.idempotency_key",
+        "       o.last_provider_event_at, o.idempotency_key, o.idempotency_fingerprint",
         "FROM orders o",
         "JOIN account_connections a ON a.id = o.account_id",
         "WHERE o.account_id = $1 AND a.user_id = $2 AND o.idempotency_key = $3",
@@ -747,8 +747,8 @@ export class PlatformRepository implements InstrumentPersistence {
           "INSERT INTO orders(",
           "  client_order_id, account_id, instrument_id, side, order_type, quantity, limit_price, stop_price,",
           "  time_in_force, reduce_only, strategy_id, strategy_version, reason, status, filled_quantity,",
-          "  requested_at, updated_at, idempotency_key",
-          ") VALUES ($1,$2,$3,$4,$5,$6::numeric,$7::numeric,$8::numeric,$9,$10,$11,$12,$13,'PENDING_SUBMIT',0,to_timestamp($14 / 1000.0),now(),$15)",
+          "  requested_at, updated_at, idempotency_key, idempotency_fingerprint",
+          ") VALUES ($1,$2,$3,$4,$5,$6::numeric,$7::numeric,$8::numeric,$9,$10,$11,$12,$13,'PENDING_SUBMIT',0,to_timestamp($14 / 1000.0),now(),$15,$16)",
         ].join("\n"),
         [
           order.clientOrderId,
@@ -799,7 +799,7 @@ export class PlatformRepository implements InstrumentPersistence {
         "          o.quantity::text, o.limit_price::text, o.stop_price::text, o.time_in_force, o.reduce_only,",
         "          o.strategy_id, o.strategy_version, o.reason, o.requested_at, o.status,",
         "          o.filled_quantity::text, o.average_fill_price::text, o.submitted_at, o.updated_at,",
-        "          o.last_provider_event_at, o.idempotency_key",
+        "          o.last_provider_event_at, o.idempotency_key, o.idempotency_fingerprint",
       ].join("\n"),
       [
         clientOrderId,
@@ -828,7 +828,7 @@ export class PlatformRepository implements InstrumentPersistence {
         "          o.quantity::text, o.limit_price::text, o.stop_price::text, o.time_in_force, o.reduce_only,",
         "          o.strategy_id, o.strategy_version, o.reason, o.requested_at, o.status,",
         "          o.filled_quantity::text, o.average_fill_price::text, o.submitted_at, o.updated_at,",
-        "          o.last_provider_event_at, o.idempotency_key",
+        "          o.last_provider_event_at, o.idempotency_key, o.idempotency_fingerprint",
       ].join("\n"),
       [clientOrderId, status, userId],
     );
