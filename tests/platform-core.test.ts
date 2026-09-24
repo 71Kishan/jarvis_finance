@@ -67,8 +67,6 @@ describe("binance display-bar contract", () => {
     const anyGateway = gateway as any;
 
     anyGateway.handleKline({
-      e: "kline",
-      k: {
         s: "BTCUSDT",
         x: false,
         t: 1_760_000_000_000,
@@ -78,15 +76,12 @@ describe("binance display-bar contract", () => {
         l: "99",
         c: "100.5",
         v: "12",
-      },
     });
 
     expect(anyGateway.candles.get("BTC/USD") ?? []).toHaveLength(0);
     expect(anyGateway.formingCandles.get("BTC/USD")?.close).toBe(100.5);
 
     anyGateway.handleKline({
-      e: "kline",
-      k: {
         s: "BTCUSDT",
         x: true,
         t: 1_760_000_000_000,
@@ -96,7 +91,6 @@ describe("binance display-bar contract", () => {
         l: "99",
         c: "101",
         v: "15",
-      },
     });
 
     expect(anyGateway.candles.get("BTC/USD")).toHaveLength(1);
