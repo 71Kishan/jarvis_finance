@@ -9,6 +9,7 @@ interface BinanceKlineRow {
   3: string;
   4: string;
   5: string;
+  6: number;
 }
 
 export class BinanceHistoricalDataService {
@@ -93,16 +94,18 @@ export class BinanceHistoricalDataService {
       const low = Number(row[3]);
       const close = Number(row[4]);
       const volume = Number(row[5]);
+      const closeTime = Number(row[6]);
 
       if (
         !Number.isFinite(timestamp) ||
+        !Number.isFinite(closeTime) ||
         !Number.isFinite(open) ||
         !Number.isFinite(high) ||
         !Number.isFinite(low) ||
         !Number.isFinite(close) ||
         !Number.isFinite(volume) ||
         high < low ||
-        timestamp >= Date.now()
+        closeTime >= Date.now()
       ) {
         continue;
       }
