@@ -69,8 +69,6 @@ export const StrategyVaultModal: React.FC<StrategyVaultModalProps> = ({
     setTimeout(() => setFeedback(null), 4000);
   };
 
-  const progressPercent = 0;
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
       <div
@@ -141,11 +139,6 @@ export const StrategyVaultModal: React.FC<StrategyVaultModalProps> = ({
 
           <div className="w-full rounded-lg border border-neutral-800 bg-neutral-950/70 px-3 py-2 text-[10px] font-mono text-neutral-500">
             PnL and trade count are shown as observed paper-process data only. Jarvis does not optimize against a daily dollar target or win streak.
-          </div>
-        </div>
-          <div className="flex justify-between items-center text-[10px] text-neutral-500 mt-1 font-mono">
-            <span>Income targets disabled</span>
-            <span>Only qualified paper setups are eligible for entry.</span>
           </div>
         </div>
 
