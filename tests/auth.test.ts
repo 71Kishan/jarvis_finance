@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   assertUsablePassword,
+  JARVIS_SESSION_COOKIE,
   buildExpiredSessionCookie,
   buildSessionCookie,
   createSessionToken,
