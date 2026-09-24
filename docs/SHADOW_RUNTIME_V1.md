@@ -26,3 +26,8 @@ Shadow is disabled by default. The server exposes control-token-protected status
 Shadow performance is forward paper evidence, not proof of a durable trading edge. A future promotion gate should consider enough forward calendar time, trade count, drawdown, execution assumptions, and stability across market regimes.
 
 Real-money trading remains disabled.
+## Strategy selection
+
+The shadow runtime normally loads the ACTIVE strategy from the server-owned strategy_deployments table. A Research UI promotion creates that deployment only after the selected validation run has been rechecked as SERVER_RECOMPUTED and PROVISIONALLY_VALIDATED.
+
+Environment-based strategy selection is legacy-only and disabled by default. This prevents a stale or locally edited strategy configuration from becoming the server's active shadow strategy without an explicit database-backed deployment record.
