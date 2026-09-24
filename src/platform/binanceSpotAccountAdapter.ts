@@ -1,4 +1,4 @@
-import { createHmac } from "crypto";
+import { createHmac, randomUUID } from "crypto";
 import type {
   AccountConnection,
   AdapterHealth,
@@ -31,6 +31,14 @@ interface BinanceAccountResponse {
   permissions?: string[];
 }
 
+interface BinanceOrderFillResponse {
+  price?: string;
+  qty?: string;
+  commission?: string;
+  commissionAsset?: string;
+  tradeId?: number;
+}
+
 interface BinanceOrderResponse {
   symbol?: string;
   orderId?: number;
@@ -45,7 +53,9 @@ interface BinanceOrderResponse {
   side?: "BUY" | "SELL";
   time?: number;
   updateTime?: number;
+  transactTime?: number;
   stopPrice?: string;
+  fills?: BinanceOrderFillResponse[];
 }
 
 interface ReadOnlyAccountSnapshot {
@@ -110,6 +120,7 @@ export class BinanceSpotAccountAdapter implements ExecutionAdapter {
   private readonly accountId: string;
   private readonly recvWindowMs: number;
   private readonly testnetOnly: boolean;
+  private readonly ordersEnabled: boolean;
   private serverTimeOffsetMs = 0;
 
   private lastSuccessfulSyncAt: number | undefined;
@@ -126,6 +137,7 @@ export class BinanceSpotAccountAdapter implements ExecutionAdapter {
       Math.max(1_000, options.recvWindowMs ?? (Number(process.env.JARVIS_BINANCE_RECV_WINDOW_MS) || DEFAULT_RECV_WINDOW)),
     );
     this.testnetOnly = options.testnetOnly ?? process.env.JARVIS_BINANCE_TESTNET_ONLY !== "false";
+    this.ordersEnabled = process.env.JARVIS_BINANCE_TESTNET_ENABLE_ORDERS === "true";
 
     if (this.testnetOnly) {
       const hostname = new URL(this.baseUrl).hostname;
@@ -205,12 +217,59 @@ export class BinanceSpotAccountAdapter implements ExecutionAdapter {
     return (Array.isArray(payload) ? payload : []).map((row) => this.mapOrder(row));
   }
 
-  public async submitOrder(_order: OrderIntent): Promise<BrokerOrder> {
-    throw new Error("Binance Spot testnet adapter is read-only in this phase; order submission is intentionally disabled.");
+  public async getOrderByClientOrderId(
+    accountId: string,
+    clientOrderId: string,
+    instrumentId?: string,
+  ): Promise<BrokerOrder | null> {
+    this.assertAccount(accountId);
+    const symbol = this.symbolFromInstrumentId(instrumentId);
+    if (!symbol) {
+      throw new Error("Instrument id is required to reconcile a Binance Spot order by client order id.");
+    }
+
+    try {
+      const payload = await this.signedGet<BinanceOrderResponse>("/api/v3/order", [
+        ["symbol", symbol],
+        ["origClientOrderId", clientOrderId],
+      ]);
+      return this.mapOrder(payload);
+    } catch (error: any) {
+      if (Number(error?.binanceCode) === -2013 || Number(error?.binanceCode) === -2011) {
+        return null;
+      }
+      throw error;
+    }
   }
 
-  public async cancelOrder(_accountId: string, _clientOrderId: string): Promise<BrokerOrder> {
-    throw new Error("Binance Spot testnet adapter is read-only in this phase; order cancellation is intentionally disabled.");
+  public async submitOrder(order: OrderIntent): Promise<BrokerOrder> {
+    this.assertOrderExecutionEnabled();
+    this.assertAccount(order.accountId);
+
+    const symbol = this.symbolFromInstrumentId(order.instrumentId);
+    if (!symbol) throw new Error("Binance Spot order requires a canonical Binance instrument id.");
+    if (order.reduceOnly) throw new Error("Binance Spot does not support reduceOnly semantics on this adapter.");
+
+    const params = this.orderParams(order, symbol);
+    const response = await this.signedRequest<BinanceOrderResponse>("POST", "/api/v3/order", params);
+    return this.mapOrder(response);
+  }
+
+  public async cancelOrder(accountId: string, clientOrderId: string, instrumentId?: string): Promise<BrokerOrder> {
+    this.assertOrderExecutionEnabled();
+    this.assertAccount(accountId);
+
+    const symbol = this.symbolFromInstrumentId(instrumentId);
+    if (!symbol) throw new Error("Binance Spot order cancellation requires the canonical instrument id.");
+
+    const existing = await this.getOrderByClientOrderId(accountId, clientOrderId, instrumentId);
+    if (!existing) throw new Error("Binance order was not found during cancellation preflight.");
+
+    const response = await this.signedRequest<BinanceOrderResponse>("DELETE", "/api/v3/order", [
+      ["symbol", symbol],
+      ["origClientOrderId", clientOrderId],
+    ]);
+    return this.mapOrder(response);
   }
 
   private async signedGet<T>(pathname: string, extraParams: Array<[string, string]> = []): Promise<T> {
@@ -270,6 +329,76 @@ export class BinanceSpotAccountAdapter implements ExecutionAdapter {
     }
   }
 
+  private async signedRequest<T>(
+    method: "POST" | "DELETE",
+    pathname: string,
+    extraParams: Array<[string, string]> = [],
+  ): Promise<T> {
+    if (!this.apiKey || !this.apiSecret) {
+      throw new Error("Binance Spot testnet API credentials are not configured on the server.");
+    }
+
+    try {
+      await this.refreshServerTime();
+      const params: Array<[string, string]> = [
+        ...extraParams,
+        ["recvWindow", String(this.recvWindowMs)],
+        ["timestamp", String(Date.now() + this.serverTimeOffsetMs)],
+      ];
+      const signature = buildBinanceSignature(this.apiSecret, params);
+      params.push(["signature", signature]);
+
+      const query = params
+        .map(([key, value]) => encodeURIComponent(key) + "=" + encodeURIComponent(value))
+        .join("&");
+
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+      try {
+        const response = await fetch(this.baseUrl + pathname + "?" + query, {
+          method,
+          headers: {
+            Accept: "application/json",
+            "X-MBX-APIKEY": this.apiKey,
+            "User-Agent": "JarvisFinance/1.0",
+          },
+          signal: controller.signal,
+        });
+        const raw = await response.text();
+        let body: any = {};
+        try {
+          body = raw ? JSON.parse(raw) : {};
+        } catch {
+          body = { msg: raw };
+        }
+
+        if (!response.ok) {
+          const code = Number(body?.code);
+          const message = typeof body?.msg === "string" ? body.msg : "Binance order request failed.";
+          const error: any = new Error(
+            Number.isFinite(code) ? "Binance error " + code + ": " + message : message,
+          );
+          error.binanceCode = Number.isFinite(code) ? code : undefined;
+          error.executionUnknown = response.status >= 500 || code === -1000 || code === -1001 || code === -1006 || code === -1007;
+          throw error;
+        }
+
+        return body as T;
+      } catch (error: any) {
+        if (error?.name === "AbortError") {
+          error.executionUnknown = true;
+        }
+        throw error;
+      } finally {
+        clearTimeout(timeout);
+      }
+    } catch (error: any) {
+      this.lastErrorAt = Date.now();
+      this.lastError = error?.message || "Binance signed order request failed.";
+      throw error;
+    }
+  }
+
   private async refreshServerTime(): Promise<void> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -288,6 +417,78 @@ export class BinanceSpotAccountAdapter implements ExecutionAdapter {
     }
   }
 
+  private assertOrderExecutionEnabled(): void {
+    if (!this.testnetOnly) {
+      throw new Error("Binance order execution is blocked unless testnet-only mode is enabled.");
+    }
+    if (!this.ordersEnabled) {
+      throw new Error("Binance Spot testnet order execution is disabled by operator policy.");
+    }
+  }
+
+  private symbolFromInstrumentId(instrumentId?: string): string | null {
+    const value = String(instrumentId || "").trim().toUpperCase();
+    const parts = value.split(":");
+    if (parts.length !== 3) return null;
+    if (parts[0] !== "BINANCE_SPOT" || parts[1] !== "BINANCE") return null;
+    return parts[2] || null;
+  }
+
+  private orderParams(order: OrderIntent, symbol: string): Array<[string, string]> {
+    const type = order.type;
+    const side = order.side;
+    const params: Array<[string, string]> = [
+      ["symbol", symbol],
+      ["side", side],
+      ["quantity", order.quantity],
+      ["newClientOrderId", order.clientOrderId],
+    ];
+
+    switch (type) {
+      case "MARKET":
+        params.push(["type", "MARKET"]);
+        break;
+      case "LIMIT":
+        params.push(["type", "LIMIT"]);
+        if (!order.limitPrice || !order.timeInForce) throw new Error("LIMIT orders require limitPrice and timeInForce.");
+        params.push(["timeInForce", order.timeInForce], ["price", order.limitPrice]);
+        break;
+      case "LIMIT_MAKER":
+        params.push(["type", "LIMIT_MAKER"]);
+        if (!order.limitPrice) throw new Error("LIMIT_MAKER orders require limitPrice.");
+        params.push(["price", order.limitPrice]);
+        break;
+      case "STOP":
+        params.push(["type", "STOP_LOSS"]);
+        if (!order.stopPrice) throw new Error("STOP orders require stopPrice.");
+        params.push(["stopPrice", order.stopPrice]);
+        break;
+      case "STOP_LIMIT":
+        params.push(["type", "STOP_LOSS_LIMIT"]);
+        if (!order.stopPrice || !order.limitPrice || !order.timeInForce) {
+          throw new Error("STOP_LIMIT orders require stopPrice, limitPrice and timeInForce.");
+        }
+        params.push(["timeInForce", order.timeInForce], ["price", order.limitPrice], ["stopPrice", order.stopPrice]);
+        break;
+      case "TAKE_PROFIT":
+        params.push(["type", "TAKE_PROFIT"]);
+        if (!order.stopPrice) throw new Error("TAKE_PROFIT orders require stopPrice.");
+        params.push(["stopPrice", order.stopPrice]);
+        break;
+      case "TAKE_PROFIT_LIMIT":
+        params.push(["type", "TAKE_PROFIT_LIMIT"]);
+        if (!order.stopPrice || !order.limitPrice || !order.timeInForce) {
+          throw new Error("TAKE_PROFIT_LIMIT orders require stopPrice, limitPrice and timeInForce.");
+        }
+        params.push(["timeInForce", order.timeInForce], ["price", order.limitPrice], ["stopPrice", order.stopPrice]);
+        break;
+      default:
+        throw new Error("Unsupported Binance Spot order type: " + type);
+    }
+
+    return params;
+  }
+
   private assertAccount(accountId: string): void {
     if (accountId !== this.accountId) {
       throw new Error("Unknown Binance Spot testnet account id.");
@@ -302,6 +503,26 @@ export class BinanceSpotAccountAdapter implements ExecutionAdapter {
     if (!symbol || !row.clientOrderId || !row.orderId) {
       throw new Error("Binance returned an open order missing required identifiers.");
     }
+
+    const fills = (Array.isArray(row.fills) ? row.fills : [])
+      .filter((fill) => Number(fill?.qty) > 0 && Number(fill?.price) > 0)
+      .map((fill) => ({
+        id: randomUUID(),
+        accountId: this.accountId,
+        orderClientId: row.clientOrderId!,
+        externalOrderId: String(row.orderId),
+        externalTradeId: Number(fill.tradeId) > 0 ? String(fill.tradeId) : undefined,
+        instrumentId: "BINANCE_SPOT:BINANCE:" + symbol,
+        side,
+        quantity: String(fill.qty),
+        price: String(fill.price),
+        feeAmount: fill.commission ? String(fill.commission) : undefined,
+        feeAsset: fill.commissionAsset ? String(fill.commissionAsset).toUpperCase() : undefined,
+        liquidity: "UNKNOWN" as const,
+        executedAt: Number(row.transactTime || row.updateTime || row.time) > 0
+          ? Number(row.transactTime || row.updateTime || row.time)
+          : Date.now(),
+      } satisfies Fill));
 
     return {
       clientOrderId: row.clientOrderId,
@@ -320,9 +541,10 @@ export class BinanceSpotAccountAdapter implements ExecutionAdapter {
           ? divideDecimalStrings(String(row.cummulativeQuoteQty), String(row.executedQty))
           : undefined,
       requestedAt: Number(row.time) > 0 ? Number(row.time) : Date.now(),
-      submittedAt: Number(row.time) > 0 ? Number(row.time) : undefined,
+      submittedAt: Number(row.transactTime || row.time) > 0 ? Number(row.transactTime || row.time) : undefined,
       updatedAt: Number(row.updateTime) > 0 ? Number(row.updateTime) : Date.now(),
       externalOrderId: String(row.orderId),
+      fills,
     };
   }
 }
