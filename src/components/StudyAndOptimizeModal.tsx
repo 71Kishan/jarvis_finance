@@ -38,6 +38,7 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
   onApplyStrategy,
 }) => {
   const [isLoading, setIsLoading] = useState(false);
+  const [persistenceMessage, setPersistenceMessage] = useState<string | null>(null);
   const [aiAnalysis, setAiAnalysis] = useState<{
     survivalStatus?: string;
     regimeAssessment?: string;
@@ -76,6 +77,26 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
       const validation = evaluateStrategyValidation(opt);
       strategyVaultInstance.recordValidationResult(opt.bestStrategy, validation);
       setOptimizationData({ ...opt, validation });
+
+      // Archive the research evidence for the authenticated operator. The server
+      // records this as CLIENT_SUBMITTED until it can independently recompute the study.
+      setPersistenceMessage(null);
+      void fetch("/api/research/strategy-validation", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ result: validation }),
+      }).then(async (response) => {
+        if (response.ok) {
+          setPersistenceMessage("Research evidence archived to the server.");
+          return;
+        }
+        if (response.status === 401 || response.status === 403) return;
+        const payload = await response.json().catch(() => ({}));
+        setPersistenceMessage(payload?.error || "Research ran locally; server evidence archive was unavailable.");
+      }).catch(() => {
+        setPersistenceMessage("Research ran locally; server evidence archive was unavailable.");
+      });
 
       // 2. Call Gemini AI via server-side endpoint
       const res = await fetch("/api/bot/study", {
@@ -381,6 +402,12 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
                   <div className="text-[10px] text-neutral-500">
                     AI recommendations remain advisory and cannot bypass these deterministic gates. Historical evidence does not guarantee future performance; forward paper/shadow validation is still required.
                   </div>
+                </div>
+              )}
+
+              {persistenceMessage && (
+                <div className="rounded-lg border border-neutral-800 bg-neutral-950/70 px-3 py-2 text-[10px] text-neutral-500">
+                  {persistenceMessage}
                 </div>
               )}
 
