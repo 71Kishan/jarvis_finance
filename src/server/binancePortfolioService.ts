@@ -2,6 +2,7 @@ import type { BinanceMarketDataService } from "./binanceMarketData";
 import type { BinanceInstrumentCatalog } from "./binanceInstrumentCatalog";
 import { valueSpotBalances, type TrustedAssetMark, type ValuedPortfolio } from "../platform/portfolioValuation";
 import type { WalletBalance } from "../platform/types";
+import { multiplyDecimals, normalizeDecimal } from "../platform/decimal";
 
 export interface ValuedBalanceRow {
   accountId: string;
@@ -107,13 +108,5 @@ export class BinanceSpotPortfolioService {
 }
 
 function multiply(left: string, right: string): string {
-  // The portfolio valuation module remains the authority for total equity math.
-  // This local helper only formats per-row marked values through its exact decimal
-  // primitive, keeping the UI from receiving a floating-point valuation.
-  return exactMultiply(left, right);
-}
-
-function exactMultiply(left: string, right: string): string {
-  const { normalizeDecimal, multiplyDecimals } = require("../platform/decimal") as typeof import("../platform/decimal");
   return multiplyDecimals(normalizeDecimal(left), normalizeDecimal(right));
 }
