@@ -463,7 +463,7 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
               <div className="flex items-center justify-between text-[11px] text-neutral-400 mb-1">
                 <span className="text-rose-400 font-semibold">Stop Loss (%)</span>
                 <span className="font-mono text-neutral-400">
-                  ${calculatedStopPrice.toFixed(2)}
+                  {calculatedStopPrice == null ? "—" : "$" + calculatedStopPrice.toFixed(2)}
                 </span>
               </div>
               <input
@@ -481,7 +481,7 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
               <div className="flex items-center justify-between text-[11px] text-neutral-400 mb-1">
                 <span className="text-emerald-400 font-semibold">Take Profit (%)</span>
                 <span className="font-mono text-neutral-400">
-                  ${calculatedTargetPrice.toFixed(2)}
+                  {calculatedTargetPrice == null ? "—" : "$" + calculatedTargetPrice.toFixed(2)}
                 </span>
               </div>
               <input
