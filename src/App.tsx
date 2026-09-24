@@ -19,6 +19,9 @@ import { TradeVerificationToast } from "./components/TradeVerificationToast";
 import { AnalyticsCharts } from "./components/AnalyticsCharts";
 import { AiCopilotModal } from "./components/AiCopilotModal";
 import { ProfitVaultModal } from "./components/ProfitVaultModal";
+import { MainTerminal } from "./components/MainTerminal";
+import { WorkspaceSurface } from "./components/WorkspaceSurface";
+import type { WorkspaceView } from "./platform/workspace";
 import { AssetSymbol, MarketSimulator, SUPPORTED_ASSETS } from "./engine/marketSimulator";
 import { DEFAULT_STRATEGY, TradingEngine } from "./engine/tradingEngine";
 import { strategyVaultInstance } from "./engine/strategyVault";
@@ -42,6 +45,7 @@ import {
 
 export default function App() {
   const [currentAsset, setCurrentAsset] = useState<string>("BTC/USD");
+  const [currentView, setCurrentView] = useState<WorkspaceView>("TERMINAL");
   const [marketSource, setMarketSource] = useState<MarketDataSource>("LIVE_MARKET_DATA");
   const [isAutoTrading, setIsAutoTrading] = useState<boolean>(false);
   const [simulationSpeed, setSimulationSpeed] = useState<number>(2); // 2x default for simulator
@@ -442,6 +446,8 @@ export default function App() {
       <Header
         currentAsset={currentAsset}
         onSelectAsset={handleSelectAsset}
+        currentView={currentView}
+        onChangeView={setCurrentView}
         botState={botState}
         marketSource={marketSource}
         isAutoTrading={isAutoTrading}
@@ -469,8 +475,8 @@ export default function App() {
         onScrollToAnalytics={handleScrollToAnalytics}
       />
 
-      {/* 2. Capital Preservation & Risk Budget HUD */}
-      {vitality && (
+      {/* Practice-only risk HUD. The primary terminal stays focused on markets. */}
+      {currentView === "PRACTICE" && vitality && (
         <VitalityBar
           vitality={vitality}
           onAdjustCircuitBreaker={handleAdjustCircuitBreaker}
@@ -478,98 +484,123 @@ export default function App() {
         />
       )}
 
-      {/* 3. Main Operational Command Center */}
       {marketSource === "LIVE_MARKET_DATA" && liveDataError && (
         <div className="mx-4 mt-3 max-w-7xl w-full self-center rounded-lg border border-amber-900/50 bg-amber-950/20 px-3 py-2 text-xs text-amber-300 font-mono">
           DATA UNAVAILABLE • {liveDataError}
         </div>
       )}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-4 flex flex-col gap-4">
-        {/* Paper Trading Deck & Order Flow Section */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
-          <div className="lg:col-span-8 xl:col-span-9">
-            {vitality && (
-              <PaperTradingDeck
+
+      {currentView === "TERMINAL" ? (
+        <MainTerminal
+          asset={currentAsset}
+          candles={candles}
+          ticker={liveTicker}
+          currentPrice={currentPrice}
+          regime={currentRegime}
+          onSelectAsset={handleSelectAsset}
+          onOpenPortfolio={() => setCurrentView("PORTFOLIO")}
+          onOpenAutomation={() => setCurrentView("AUTOMATION")}
+          onOpenResearch={() => setCurrentView("RESEARCH")}
+        />
+      ) : currentView === "PRACTICE" ? (
+        <main className="flex-1 max-w-7xl w-full mx-auto p-4 flex flex-col gap-4">
+          <div className="rounded-xl border border-amber-800/40 bg-amber-950/10 px-4 py-3">
+            <div className="text-xs font-mono font-semibold text-amber-300">PRACTICE LAB</div>
+            <div className="text-[11px] text-amber-200/70 mt-1">
+              Paper/simulation only. This workspace is intentionally separate from the primary market terminal.
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
+            <div className="lg:col-span-8 xl:col-span-9">
+              {vitality && (
+                <PaperTradingDeck
+                  currentPrice={currentPrice}
+                  asset={currentAsset}
+                  botState={botState}
+                  vitality={vitality}
+                  strategy={strategy}
+                  activeTrade={activeTrade}
+                  marketSource={marketSource}
+                  ticker={liveTicker}
+                  isAutoTrading={isAutoTrading}
+                  onToggleAutoTrading={handleToggleAutoTrading}
+                  onToggleMarketSource={(src) => setMarketSource(src)}
+                  onExecutePaperTrade={handleExecutePaperTrade}
+                  onRunImmediateTrade={handleRunImmediateTrade}
+                  onOpenMultiAssetRadar={() => setIsRadarOpen(true)}
+                  onOpenStrategyVault={() => setIsVaultOpen(true)}
+                  autoRotateAssets={autoRotateAssets}
+                  onToggleAutoRotateAssets={() => setAutoRotateAssets((prev) => !prev)}
+                  dailyGoal={dailyGoal}
+                  onForceBotScan={handleForceBotScan}
+                  onCloseActiveTrade={handleManualCloseActiveTrade}
+                  onSimulateEmergencyTest={handleSimulateEmergencyTest}
+                  onOpenSettings={() => setIsRiskSettingsOpen(true)}
+                />
+              )}
+            </div>
+
+            <div className="lg:col-span-4 xl:col-span-3">
+              <OrderBookWidget
                 currentPrice={currentPrice}
-                asset={currentAsset}
-                botState={botState}
-                vitality={vitality}
-                strategy={strategy}
-                activeTrade={activeTrade}
-                marketSource={marketSource}
-                ticker={liveTicker}
-                isAutoTrading={isAutoTrading}
-                onToggleAutoTrading={handleToggleAutoTrading}
-                onToggleMarketSource={(src) => setMarketSource(src)}
-                onExecutePaperTrade={handleExecutePaperTrade}
-                onRunImmediateTrade={handleRunImmediateTrade}
-                onOpenMultiAssetRadar={() => setIsRadarOpen(true)}
-                onOpenStrategyVault={() => setIsVaultOpen(true)}
-                autoRotateAssets={autoRotateAssets}
-                onToggleAutoRotateAssets={() => setAutoRotateAssets((prev) => !prev)}
-                dailyGoal={dailyGoal}
-                onForceBotScan={handleForceBotScan}
-                onCloseActiveTrade={handleManualCloseActiveTrade}
-                onSimulateEmergencyTest={handleSimulateEmergencyTest}
-                onOpenSettings={() => setIsRiskSettingsOpen(true)}
+                symbol={currentAsset}
+                dataSource={marketSource}
+                bid={liveTicker?.bid}
+                ask={liveTicker?.ask}
               />
-            )}
+            </div>
           </div>
 
-          <div className="lg:col-span-4 xl:col-span-3">
-            <OrderBookWidget
-              currentPrice={currentPrice}
-              symbol={currentAsset}
-            />
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
+            <div className="lg:col-span-7 xl:col-span-8 flex flex-col gap-4">
+              <MarketChart
+                candles={candles}
+                activeTrade={activeTrade}
+                tradeHistory={tradeHistory}
+                assetSymbol={currentAsset}
+                regime={currentRegime}
+              />
+            </div>
+            <div className="lg:col-span-5 xl:col-span-4 flex flex-col">
+              <BotMindStream
+                thoughts={thoughts}
+                activeRuleCount={strategy.rules.length}
+                strategyVersion={strategy.version}
+              />
+            </div>
           </div>
-        </div>
 
-        {/* Live Candlestick Financial Chart & Quantitative Decision Stream */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
-          {/* Chart Section (7 columns on lg screens) */}
-          <div className="lg:col-span-7 xl:col-span-8 flex flex-col gap-4">
-            <MarketChart
-              candles={candles}
+          {vitality && (
+            <div id="analytics-charts-section" className="w-full">
+              <AnalyticsCharts
+                equityCurve={equityCurve}
+                tradeHistory={tradeHistory}
+                vitality={vitality}
+                currentAsset={currentAsset}
+              />
+            </div>
+          )}
+
+          <div id="trade-journal-section" className="w-full">
+            <TradeExecutionTable
               activeTrade={activeTrade}
               tradeHistory={tradeHistory}
-              assetSymbol={currentAsset}
-              regime={currentRegime}
+              strategy={strategy}
+              onManualCloseActiveTrade={handleManualCloseActiveTrade}
+              onOpenTradeCritique={(trade) => setSelectedTradeCritique(trade)}
             />
           </div>
-
-          {/* Quantitative Decision Stream Terminal (5 columns on lg) */}
-          <div className="lg:col-span-5 xl:col-span-4 flex flex-col">
-            <BotMindStream
-              thoughts={thoughts}
-              activeRuleCount={strategy.rules.length}
-              strategyVersion={strategy.version}
-            />
-          </div>
-        </div>
-
-        {/* Comprehensive Analytics, Profit/Loss, Drawdown & Win-Rate Suite */}
-        {vitality && (
-          <div id="analytics-charts-section" className="w-full">
-            <AnalyticsCharts
-              equityCurve={equityCurve}
-              tradeHistory={tradeHistory}
-              vitality={vitality}
-              currentAsset={currentAsset}
-            />
-          </div>
-        )}
-
-        {/* Bottom Section: Active Trade & Historical Executions Table */}
-        <div id="trade-journal-section" className="w-full">
-          <TradeExecutionTable
-            activeTrade={activeTrade}
-            tradeHistory={tradeHistory}
-            strategy={strategy}
-            onManualCloseActiveTrade={handleManualCloseActiveTrade}
-            onOpenTradeCritique={(trade) => setSelectedTradeCritique(trade)}
-          />
-        </div>
-      </main>
+        </main>
+      ) : (
+        <WorkspaceSurface
+          view={currentView as Exclude<WorkspaceView, "TERMINAL" | "PRACTICE">}
+          onSelectAsset={handleSelectAsset}
+          onOpenRadar={() => setIsRadarOpen(true)}
+          onOpenResearch={() => setIsStudyModalOpen(true)}
+          onOpenSettings={() => setIsRiskSettingsOpen(true)}
+        />
+      )}
 
       {/* Floating Verification Receipt Toast */}
       {verificationToastTrade && (
