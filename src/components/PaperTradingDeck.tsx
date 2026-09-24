@@ -86,6 +86,7 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
 
   const availableCash = vitality.cash;
   const positionSizeUsd = amountUsd;
+  const hasTrustedPrice = Number.isFinite(currentPrice) && Number(currentPrice) > 0;
   const calculatedStopPrice =
     orderType === "LONG"
       ? Number(currentPrice) * (1 - stopLossPercent / 100)
@@ -112,6 +113,12 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
       return;
     }
 
+    if (!hasTrustedPrice) {
+      setExecutionFeedback("Execution blocked: trusted market price is unavailable.");
+      setTimeout(() => setExecutionFeedback(null), 3000);
+      return;
+    }
+
     const ok = onExecutePaperTrade({
       type: orderType,
       amountUsd,
@@ -123,7 +130,7 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
     });
 
     if (ok) {
-      setExecutionFeedback(`✓ Paper ${orderType} filled at $${currentPrice.toFixed(2)}`);
+      setExecutionFeedback(`✓ Paper ${orderType} filled at ${Number(currentPrice).toFixed(2)}`);
       setTimeout(() => setExecutionFeedback(null), 4000);
     }
   };
