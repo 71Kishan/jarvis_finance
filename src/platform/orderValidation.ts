@@ -30,7 +30,7 @@ function maxCheck(value: string, maximum?: string): boolean {
 function priceForOrder(order: OrderIntent, quote?: TrustedQuote): string | undefined {
   if (order.type === "MARKET") {
     if (!quote) return undefined;
-    return quote.sidePrice;
+    return order.side === "BUY" ? quote.ask : quote.bid;
   }
   if (order.type === "LIMIT" || order.type === "LIMIT_MAKER" || order.type === "STOP_LIMIT" || order.type === "TAKE_PROFIT_LIMIT") {
     return order.limitPrice;
