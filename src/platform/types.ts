@@ -136,6 +136,7 @@ export interface BrokerOrder extends OrderIntent {
   submittedAt?: number;
   updatedAt: number;
   lastProviderEventAt?: number;
+  fills?: Fill[];
 }
 
 export interface Fill {
@@ -143,6 +144,7 @@ export interface Fill {
   accountId: string;
   orderClientId: string;
   externalOrderId?: string;
+  externalTradeId?: string;
   instrumentId: string;
   side: OrderSide;
   quantity: string;
@@ -210,6 +212,7 @@ export interface ExecutionAdapter {
   getBalances(accountId: string): Promise<WalletBalance[]>;
   getPositions(accountId: string): Promise<PortfolioPosition[]>;
   getOpenOrders(accountId: string): Promise<BrokerOrder[]>;
+  getOrderByClientOrderId?(accountId: string, clientOrderId: string, instrumentId?: string): Promise<BrokerOrder | null>;
   submitOrder(order: OrderIntent): Promise<BrokerOrder>;
-  cancelOrder(accountId: string, clientOrderId: string): Promise<BrokerOrder>;
+  cancelOrder(accountId: string, clientOrderId: string, instrumentId?: string): Promise<BrokerOrder>;
 }
