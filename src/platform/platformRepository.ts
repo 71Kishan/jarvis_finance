@@ -910,7 +910,7 @@ export class PlatformRepository implements InstrumentPersistence {
     const result = await this.database.query<AccountConnectionRow>(
       [
         "UPDATE account_connections",
-        "SET permissions = '["READ","TRADE"]'::jsonb, updated_at = now()",
+        "SET permissions = '[\"READ\",\"TRADE\"]'::jsonb, updated_at = now()",
         "WHERE id = $1 AND user_id = $2 AND provider = 'BINANCE_SPOT_TESTNET'",
         "RETURNING id, provider, account_type, label, external_account_id, status, permissions, last_synced_at, created_at, updated_at",
       ].join("\n"),
