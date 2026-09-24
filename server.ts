@@ -7,6 +7,7 @@ import { GoogleGenAI, LiveServerMessage, Modality } from "@google/genai";
 import { WebSocketServer, WebSocket } from "ws";
 import dotenv from "dotenv";
 import { BinanceMarketDataService } from "./src/server/binanceMarketData";
+import { BinanceInstrumentCatalog } from "./src/server/binanceInstrumentCatalog";
 import { AutonomousPaperRuntime } from "./src/server/paperRuntime";
 
 dotenv.config();
@@ -251,6 +252,7 @@ app.get("/api/health", (_req: Request, res: Response) => {
       provider: "BINANCE_WEBSOCKET",
       ...market,
     },
+    instrumentCatalog: binanceInstrumentCatalog.getHealth(),
     autonomousPaper: {
       status: autonomousPaperRuntime.getStatus().status,
       symbol: autonomousPaperRuntime.getStatus().symbol,
@@ -330,12 +332,14 @@ const STOCK_UNIVERSE: Record<string, { name: string; category: "STOCK" | "INDEX"
 // One server-owned websocket gateway supplies crypto market data to every client.
 // The mobile/desktop UI is intentionally not responsible for keeping the market connection alive.
 const binanceMarketData = new BinanceMarketDataService(SYMBOL_MAP);
+const binanceInstrumentCatalog = new BinanceInstrumentCatalog();
 const autonomousPaperRuntime = new AutonomousPaperRuntime(binanceMarketData, {
   symbol: process.env.JARVIS_PAPER_SYMBOL || "BTC/USD",
   initialCapital: Number(process.env.JARVIS_PAPER_INITIAL_CAPITAL) || 10_000,
   pollIntervalMs: Number(process.env.JARVIS_PAPER_POLL_MS) || 1000,
 });
 void binanceMarketData.start();
+void binanceInstrumentCatalog.start();
 
 if (process.env.JARVIS_PAPER_AUTOSTART === "true") {
   autonomousPaperRuntime.start();
@@ -648,6 +652,29 @@ app.get("/api/market/multi-scan", async (req: Request, res: Response) => {
   } catch (error: any) {
     return res.status(500).json({ error: "Failed to scan assets", message: error?.message || "Unknown error" });
   }
+});
+
+app.get("/api/market/catalog", (req: Request, res: Response) => {
+  res.setHeader("Cache-Control", "no-store");
+
+  const query = typeof req.query.q === "string" ? req.query.q : "";
+  const quoteAsset = typeof req.query.quoteAsset === "string" ? req.query.quoteAsset : undefined;
+  const assetClass = typeof req.query.assetClass === "string" ? req.query.assetClass.toUpperCase() : undefined;
+  const tradableOnly = req.query.tradableOnly !== "false";
+  const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 50));
+
+  const instruments = query
+    ? binanceInstrumentCatalog.search(query, { quoteAsset, tradableOnly, limit })
+    : binanceInstrumentCatalog.list({ quoteAsset, tradableOnly, limit });
+
+  return res.json({
+    success: true,
+    provider: "BINANCE_SPOT",
+    query,
+    filters: { quoteAsset, assetClass, tradableOnly, limit },
+    health: binanceInstrumentCatalog.getHealth(),
+    instruments: assetClass ? instruments.filter((instrument) => instrument.assetClass === assetClass) : instruments,
+  });
 });
 
 app.get("/api/market/live-feed", async (req: Request, res: Response) => {
