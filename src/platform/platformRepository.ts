@@ -376,9 +376,24 @@ export class PlatformRepository implements InstrumentPersistence {
     connections: AccountConnection[];
     balances: Array<{ accountId: string; asset: string; free: string; locked: string; total: string; updatedAt: number }>;
     openOrders: BinanceReadOnlySync["openOrders"];
+    fills: Array<{
+      id: string;
+      accountId: string;
+      clientOrderId: string;
+      externalOrderId?: string;
+      externalTradeId?: string;
+      instrumentId: string;
+      side: "BUY" | "SELL";
+      quantity: string;
+      price: string;
+      feeAmount?: string;
+      feeAsset?: string;
+      liquidity?: string;
+      executedAt: number;
+    }>;
   }> {
     const connections = await this.listAccountConnections(userId);
-    if (!connections.length) return { connections, balances: [], openOrders: [] };
+    if (!connections.length) return { connections, balances: [], openOrders: [], fills: [] };
 
     const accountIds = connections.map((connection) => connection.id);
     const balancesResult = await this.database.query<{
@@ -432,6 +447,30 @@ export class PlatformRepository implements InstrumentPersistence {
       [accountIds],
     );
 
+    const fillsResult = await this.database.query<{
+      id: string;
+      account_id: string;
+      client_order_id: string;
+      external_order_id: string | null;
+      external_trade_id: string | null;
+      instrument_id: string;
+      side: "BUY" | "SELL";
+      quantity: string;
+      price: string;
+      fee_amount: string | null;
+      fee_asset: string | null;
+      liquidity: string | null;
+      executed_at: Date;
+    }>(
+      [
+        "SELECT id, account_id, client_order_id, external_order_id, external_trade_id, instrument_id, side,",
+        "       quantity::text, price::text, fee_amount::text, fee_asset, liquidity, executed_at",
+        "FROM fills WHERE account_id = ANY($1::uuid[])",
+        "ORDER BY executed_at DESC LIMIT 100",
+      ].join("\n"),
+      [accountIds],
+    );
+
     return {
       connections,
       balances: balancesResult.rows.map((row) => ({
@@ -464,6 +503,21 @@ export class PlatformRepository implements InstrumentPersistence {
         submittedAt: row.submitted_at?.getTime(),
         updatedAt: row.updated_at.getTime(),
         lastProviderEventAt: row.last_provider_event_at?.getTime(),
+      })),
+      fills: fillsResult.rows.map((row) => ({
+        id: row.id,
+        accountId: row.account_id,
+        clientOrderId: row.client_order_id,
+        externalOrderId: row.external_order_id ?? undefined,
+        externalTradeId: row.external_trade_id ?? undefined,
+        instrumentId: row.instrument_id,
+        side: row.side,
+        quantity: row.quantity,
+        price: row.price,
+        feeAmount: row.fee_amount ?? undefined,
+        feeAsset: row.fee_asset ?? undefined,
+        liquidity: row.liquidity ?? undefined,
+        executedAt: row.executed_at.getTime(),
       })),
     };
   }
