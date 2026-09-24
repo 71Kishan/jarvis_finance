@@ -727,14 +727,77 @@ function resolveBinanceProviderSymbol(symbolParam: string): string | null {
   return exact?.providerSymbol || null;
 }
 
+const BINANCE_CHART_INTERVALS = new Set(["1m", "5m", "15m", "1h", "4h", "1d"]);
+const BINANCE_CHART_CACHE_TTL_MS = 5_000;
+const binanceChartCache = new Map<string, { expiresAt: number; value: any }>();
+
 app.get("/api/market/live-feed", async (req: Request, res: Response) => {
   const symbolParam = typeof req.query.symbol === "string" ? req.query.symbol : "BTC/USD";
-  const limit = Math.min(100, Math.max(20, Number(req.query.limit) || 80));
+  const requestedInterval = typeof req.query.interval === "string" ? req.query.interval : "1m";
+  const interval = BINANCE_CHART_INTERVALS.has(requestedInterval) ? requestedInterval : "1m";
+  const limit = Math.min(300, Math.max(50, Number(req.query.limit) || 120));
   const binanceSymbol = resolveBinanceProviderSymbol(symbolParam);
 
   try {
     if (binanceSymbol) {
       await binanceMarketData.ensureSymbol(symbolParam, binanceSymbol);
+
+      if (interval !== "1m") {
+        const cacheKey = "binance:chart:" + binanceSymbol + ":" + interval + ":" + limit;
+        const cachedChart = binanceChartCache.get(cacheKey);
+        const now = Date.now();
+        if (cachedChart && cachedChart.expiresAt > now) return res.json(cachedChart.value);
+
+        const endpoint =
+          REST_BASE_URL +
+          "/api/v3/klines?symbol=" + encodeURIComponent(binanceSymbol) +
+          "&interval=" + encodeURIComponent(interval) +
+          "&limit=" + String(limit + 1);
+        const response = await fetch(endpoint, {
+          headers: { Accept: "application/json", "User-Agent": "JarvisFinance/1.0" },
+        });
+        if (!response.ok) throw new Error("Binance HTTP " + response.status);
+
+        const rows: any = await response.json();
+        if (!Array.isArray(rows)) throw new Error("Invalid Binance kline response.");
+
+        const currentTime = Date.now();
+        const completed: any[] = [];
+        let formingCandle: any = null;
+        for (const row of rows) {
+          if (!Array.isArray(row)) continue;
+          const candle = {
+            timestamp: Number(row[0]),
+            open: Number(row[1]),
+            high: Number(row[2]),
+            low: Number(row[3]),
+            close: Number(row[4]),
+            volume: Number(row[5]),
+          };
+          if (!Object.values(candle).every(Number.isFinite)) continue;
+          const closeTime = Number(row[6]);
+          if (Number.isFinite(closeTime) && closeTime > currentTime) {
+            formingCandle = candle;
+          } else {
+            completed.push(candle);
+          }
+        }
+
+        const payload = {
+          success: true,
+          status: "OK",
+          symbol: symbolParam,
+          interval,
+          candles: completed.slice(-limit),
+          formingCandle,
+          ticker: binanceMarketData.getTicker(symbolParam),
+          gateway: binanceMarketData.getHealth(),
+          source: "BINANCE_REST_KLINES",
+        };
+        binanceChartCache.set(cacheKey, { expiresAt: now + BINANCE_CHART_CACHE_TTL_MS, value: payload });
+        return res.json(payload);
+      }
+
       const snapshot = binanceMarketData.getSnapshot(symbolParam, limit);
       if (!snapshot || snapshot.gateway.stale || snapshot.gateway.state !== "READY") {
         return res.status(503).json({
@@ -749,13 +812,23 @@ app.get("/api/market/live-feed", async (req: Request, res: Response) => {
         success: true,
         status: "OK",
         symbol: symbolParam,
+        interval,
         candles: snapshot.candles,
+        formingCandle: snapshot.formingCandle,
+        source: "BINANCE_WEBSOCKET",
         ticker: snapshot.ticker,
         gateway: snapshot.gateway,
       });
     }
     const stock = STOCK_UNIVERSE[symbolParam];
     if (!stock) return res.status(404).json({ success: false, status: "DATA_UNAVAILABLE", error: "Unsupported symbol." });
+    if (interval !== "1d") {
+      return res.status(400).json({
+        success: false,
+        status: "UNSUPPORTED_INTERVAL",
+        error: "Trusted stock chart data is currently daily-only in Jarvis.",
+      });
+    }
     if (!fdsConfigured()) return res.status(503).json({ success: false, status: "DATA_UNAVAILABLE", error: "Financial Datasets is not configured for this security." });
 
     const snapshotPayload = await cached(`fds:snapshot:${symbolParam}`, 5000, () => fetchFinancialDatasets("/prices/snapshot/", { ticker: symbolParam }));
@@ -763,8 +836,8 @@ app.get("/api/market/live-feed", async (req: Request, res: Response) => {
     if (!Number.isFinite(snapshot.price)) throw new Error("Financial Datasets returned no reliable latest price.");
 
     const end = new Date();
-    const start = new Date(end.getTime() - 1000 * 60 * 60 * 24 * 5);
-    const pricesPayload = await cached(`fds:minute:${symbolParam}`, 30000, () => fetchFinancialDatasets("/prices/", {
+    const start = new Date(end.getTime() - 1000 * 60 * 60 * 24 * 370);
+    const pricesPayload = await cached(`fds:daily:${symbolParam}:chart`, 30000, () => fetchFinancialDatasets("/prices/", {
       ticker: symbolParam, interval: "minute", interval_multiplier: "1",
       start_date: start.toISOString().slice(0,10), end_date: end.toISOString().slice(0,10),
     }));
@@ -781,6 +854,7 @@ app.get("/api/market/live-feed", async (req: Request, res: Response) => {
     }
     return res.json({
       success: true, status: "OK", symbol: symbolParam, candles,
+      interval,
       ticker: {
         symbol: symbolParam, price: snapshot.price, bid: snapshot.bid ?? snapshot.price, ask: snapshot.ask ?? snapshot.price,
         high24h: snapshot.high ?? snapshot.price, low24h: snapshot.low ?? snapshot.price, volume24h: snapshot.volume ?? 0,
