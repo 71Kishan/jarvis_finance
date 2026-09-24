@@ -40,7 +40,7 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
     survivalStatus?: string;
     regimeAssessment?: string;
     thoughtLog?: string;
-    survivalVow?: string;
+    riskDisciplineNote?: string;
     keyTakeaway?: string;
     recommendedStrategy?: StrategyConfig;
   } | null>(null);
@@ -146,7 +146,7 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
                 <span>Execute Quantitative Strategy Optimization Cycle</span>
               </div>
               <p className="text-[11px] text-neutral-400 max-w-xl">
-                Evaluates {candles.length} historical candles, performs parameter surface search, backtests risk-to-reward ratios, and recalibrates algorithmic execution thresholds.
+                Evaluates {candles.length} historical candles, tests a small set of strategy variants against historical data using the configured risk and execution model.
               </p>
             </div>
 
@@ -180,7 +180,7 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
                     Quantitative Risk & Regime Assessment
                   </span>
                   <span className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 text-[10px]">
-                    Status: {aiAnalysis.survivalStatus || "OPTIMAL"}
+                    Status: {aiAnalysis.survivalStatus || "MONITOR"}
                   </span>
                 </div>
 
@@ -190,7 +190,7 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
 
                 <div className="bg-neutral-950 p-3 rounded-lg border border-neutral-800/80 text-[11px] space-y-1">
                   <div className="text-amber-400 font-semibold">
-                    Risk Mandate: "{aiAnalysis.survivalVow}"
+                    Risk Discipline: "{aiAnalysis.riskDisciplineNote || "Use configured limits; no model output overrides risk controls."}"
                   </div>
                   <div className="text-neutral-400">
                     Regime Assessment: <strong className="text-neutral-200">{aiAnalysis.regimeAssessment}</strong>
@@ -212,7 +212,7 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
                   Simulated Strategy Candidates ({optimizationData.candidatesTested.length} tested across historical data)
                 </h3>
                 <span className="text-[10px] text-neutral-500">
-                  Sorted by Win-Rate & Survival Score
+                  Order shown: validation evidence and held-out test results
                 </span>
               </div>
 
@@ -238,7 +238,7 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
                             </span>
                             {isTop && (
                               <span className="px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 text-[9px] font-bold border border-emerald-500/40">
-                                TOP PERFORMER
+                                SELECTED RESEARCH CANDIDATE
                               </span>
                             )}
                           </div>
@@ -288,7 +288,7 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
                       </div>
 
                       <div className="flex items-center justify-between text-[10px] text-neutral-400 pt-1 border-t border-neutral-800/60">
-                        <span>Min Confidence: {cand.strategy.minConfidence}%</span>
+                        <span>Signal Threshold: {cand.strategy.minConfidence}%</span>
                         <span>SL: {cand.strategy.stopLossPercent}% | TP: +{cand.strategy.takeProfitPercent}%</span>
                       </div>
                     </div>
@@ -313,7 +313,7 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
         {/* Modal Footer */}
         <div className="px-5 py-3 border-t border-neutral-800 bg-neutral-900/70 flex items-center justify-between">
           <span className="text-neutral-500 text-[11px]">
-            Adopting updates the terminal's live execution matrix immediately.
+            Loading a candidate updates the paper terminal configuration and pauses automated paper execution.
           </span>
 
           <div className="flex items-center gap-2">
@@ -330,7 +330,7 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
               className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition-all shadow-md disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
             >
               <CheckCircle2 className="w-3.5 h-3.5" />
-              <span>Adopt Optimized Strategy</span>
+              <span>Load Research Candidate</span>
             </button>
           </div>
         </div>

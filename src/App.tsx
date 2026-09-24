@@ -19,10 +19,14 @@ import { TradeVerificationToast } from "./components/TradeVerificationToast";
 import { AnalyticsCharts } from "./components/AnalyticsCharts";
 import { AiCopilotModal } from "./components/AiCopilotModal";
 import { ProfitVaultModal } from "./components/ProfitVaultModal";
-import { AssetSymbol, MarketSimulator } from "./engine/marketSimulator";
+import { MainTerminal } from "./components/MainTerminal";
+import { WorkspaceSurface } from "./components/WorkspaceSurface";
+import type { WorkspaceView } from "./platform/workspace";
+import { AssetSymbol, MarketSimulator, SUPPORTED_ASSETS } from "./engine/marketSimulator";
 import { DEFAULT_STRATEGY, TradingEngine } from "./engine/tradingEngine";
 import { strategyVaultInstance } from "./engine/strategyVault";
 import { cryptoSecurityService } from "./utils/cryptoSecurity";
+import { isUsRegularMarketOpen } from "./utils/marketHours";
 import {
   BotState,
   BotThoughtLog,
@@ -40,11 +44,14 @@ import {
 } from "./types/trading";
 
 export default function App() {
-  const [currentAsset, setCurrentAsset] = useState<AssetSymbol>("BTC/USD");
-  const [marketSource, setMarketSource] = useState<MarketDataSource>("LIVE_EXCHANGE");
-  const [isAutoTrading, setIsAutoTrading] = useState<boolean>(true);
+  const [currentAsset, setCurrentAsset] = useState<string>("BTC/USD");
+  const [currentView, setCurrentView] = useState<WorkspaceView>("TERMINAL");
+  const [marketSource, setMarketSource] = useState<MarketDataSource>("LIVE_MARKET_DATA");
+  const [isAutoTrading, setIsAutoTrading] = useState<boolean>(false);
   const [simulationSpeed, setSimulationSpeed] = useState<number>(2); // 2x default for simulator
   const [liveTicker, setLiveTicker] = useState<LiveExchangeTicker | null>(null);
+  const [formingCandle, setFormingCandle] = useState<Candle | null>(null);
+  const [liveDataError, setLiveDataError] = useState<string | null>(null);
 
   // Engines refs
   const simulatorRef = useRef<MarketSimulator | null>(null);
@@ -54,7 +61,7 @@ export default function App() {
     simulatorRef.current = new MarketSimulator("BTC/USD", 80);
   }
   if (!tradingEngineRef.current) {
-    tradingEngineRef.current = new TradingEngine(10000, 2.5, DEFAULT_STRATEGY);
+    tradingEngineRef.current = new TradingEngine(10000, 6, DEFAULT_STRATEGY);
   }
 
   // Synchronized state for React render
@@ -93,7 +100,7 @@ export default function App() {
   const [copilotInitialMode, setCopilotInitialMode] = useState<"CHAT" | "VOICE">("CHAT");
   const [isProfitVaultOpen, setIsProfitVaultOpen] = useState(false);
   const [isSessionLocked, setIsSessionLocked] = useState(() => cryptoSecurityService.isSessionLocked());
-  const [autoRotateAssets, setAutoRotateAssets] = useState(true);
+  const [autoRotateAssets, setAutoRotateAssets] = useState(false);
 
   // Monitor user activity and session auto-lock
   useEffect(() => {
@@ -118,7 +125,7 @@ export default function App() {
       window.removeEventListener("touchstart", handleActivity);
       clearInterval(interval);
     };
-  }, []);
+  }, [marketSource]);
   const [dailyGoal, setDailyGoal] = useState<DailyPerformanceGoal>(() =>
     strategyVaultInstance.getDailyGoal()
   );
@@ -138,7 +145,7 @@ export default function App() {
     setActiveTrade(engine.getActiveTrade() ? { ...engine.getActiveTrade()! } : null);
     setTradeHistory([...engine.getTradeHistory()]);
     setThoughts([...engine.getThoughts()]);
-    setCandles([...sim.getCandles()]);
+    if (marketSource === "SIMULATED") setCandles([...sim.getCandles()]);
     setPaperSettings(engine.getPaperSettings());
     setDailyGoal(strategyVaultInstance.getDailyGoal());
     setNotifications([...engine.getNotifications()]);
@@ -147,7 +154,7 @@ export default function App() {
     if (newState === "HALTED_DEAD") {
       setIsEmergencyModalOpen(true);
     }
-  }, []);
+  }, [marketSource]);
 
   // Hook state sync callback to engine
   useEffect(() => {
@@ -184,23 +191,37 @@ export default function App() {
     return () => clearInterval(timer);
   }, [marketSource, isAutoTrading, simulationSpeed, botState, stepTick]);
 
-  // Live Exchange Data Polling Loop (when LIVE_EXCHANGE is active)
+  // Live Exchange Data Polling Loop (when LIVE_MARKET_DATA is active)
   useEffect(() => {
-    if (marketSource !== "LIVE_EXCHANGE") return;
+    if (marketSource !== "LIVE_MARKET_DATA") return;
 
     let isSubscribed = true;
 
     const fetchLiveFeed = async () => {
       try {
-        const res = await fetch(`/api/market/live-feed?symbol=${encodeURIComponent(currentAsset)}&limit=80`);
+        const res = await fetch(`/api/market/live-feed?symbol=${encodeURIComponent(currentAsset)}&limit=500`);
         if (!res.ok) throw new Error(`Feed error: ${res.status}`);
         const data = await res.json();
 
         if (!isSubscribed) return;
-
-        if (data.ticker) {
-          setLiveTicker(data.ticker);
+        if (!data?.ticker || !Array.isArray(data.candles) || data.candles.length === 0) {
+          throw new Error("Trusted provider returned an incomplete market snapshot.");
         }
+
+        const bid = Number(data.ticker.bid);
+        const ask = Number(data.ticker.ask);
+        const mid = (bid + ask) / 2;
+        const spreadBps = Number.isFinite(bid) && Number.isFinite(ask) && mid > 0
+          ? ((ask - bid) / mid) * 10_000
+          : undefined;
+        tradingEngineRef.current?.setMarketQuality({
+          spreadBps,
+          dataTimestamp: Number(data.ticker.lastUpdated) || Date.now(),
+          marketOpen: currentAsset.includes("/USD") ? true : isUsRegularMarketOpen(),
+        });
+        setLiveTicker(data.ticker);
+        setFormingCandle(data.formingCandle || null);
+        setLiveDataError(null);
 
         if (Array.isArray(data.candles) && data.candles.length > 0) {
           if (simulatorRef.current && tradingEngineRef.current) {
@@ -215,11 +236,17 @@ export default function App() {
               tradingEngineRef.current.onTick(lastCandle, allCandles);
             }
 
+            setCandles([...allCandles]);
             syncStateFromEngine();
           }
         }
       } catch (err) {
-        console.warn("Live feed poll error, falling back to local tick:", err);
+        console.warn("Live feed unavailable; paper/live mode remains fail-closed:", err);
+        setLiveTicker(null);
+        setFormingCandle(null);
+        setIsAutoTrading(false);
+        setLiveDataError("Trusted market data is unavailable. Auto-paper execution has been paused and no synthetic price is substituted.");
+        setCandles([]);
       }
     };
 
@@ -236,21 +263,50 @@ export default function App() {
   }, [marketSource, currentAsset, isAutoTrading, botState, syncStateFromEngine]);
 
   // Handle Asset Switch
-  const handleSelectAsset = (asset: AssetSymbol) => {
-    setCurrentAsset(asset);
-    if (simulatorRef.current && tradingEngineRef.current) {
-      simulatorRef.current.setAsset(asset, 80);
-      const strat = tradingEngineRef.current.getStrategy();
-      tradingEngineRef.current.updateStrategy({
-        ...strat,
-        asset,
+  const handleSelectAsset = (asset: string) => {
+    if (!asset) return;
+    if (activeTrade) {
+      tradingEngineRef.current?.addNotification({
+        type: "RISK_ALERT",
+        title: "Asset switch blocked",
+        message: "Close the active paper position before changing assets. Position context must remain fixed until exit.",
+        badgeText: "LOCKED",
       });
       syncStateFromEngine();
+      return;
     }
+
+    setCurrentAsset(asset);
+    const strat = tradingEngineRef.current?.getStrategy();
+    if (strat && tradingEngineRef.current) {
+      tradingEngineRef.current.updateStrategy({ ...strat, asset });
+    }
+
+    // The synthetic simulator only knows its explicit demo universe. Any dynamically
+    // discovered market is immediately treated as live-market-data-only.
+    if (simulatorRef.current) {
+      const knownSynthetic = Object.prototype.hasOwnProperty.call(
+        SUPPORTED_ASSETS,
+        asset as AssetSymbol,
+      );
+      if (knownSynthetic) {
+        simulatorRef.current.setAsset(asset as AssetSymbol, 80);
+      } else {
+        setMarketSource("LIVE_MARKET_DATA");
+        setCandles([]);
+      }
+    }
+
+    if (!Object.prototype.hasOwnProperty.call(SUPPORTED_ASSETS, asset)) {
+      setIsAutoTrading(false);
+    }
+    syncStateFromEngine();
   };
 
   // Toggle Auto Trading
   const handleToggleAutoTrading = () => {
+    if (!isAutoTrading && botState === "HALTED_DEAD") return;
+    if (!isAutoTrading && marketSource === "LIVE_MARKET_DATA" && liveDataError) return;
     setIsAutoTrading((prev) => !prev);
   };
 
@@ -270,7 +326,7 @@ export default function App() {
     if (!tradingEngineRef.current) return;
     tradingEngineRef.current.reviveBot(recapital);
     setIsEmergencyModalOpen(false);
-    setIsAutoTrading(true);
+    setIsAutoTrading(false);
     syncStateFromEngine();
   };
 
@@ -298,6 +354,8 @@ export default function App() {
   // Apply Evolved Strategy from AI Lab
   const handleApplyStrategy = (newStrategy: StrategyConfig) => {
     if (!tradingEngineRef.current) return;
+    // Loading a research candidate never leaves automated paper execution running.
+    setIsAutoTrading(false);
     tradingEngineRef.current.updateStrategy(newStrategy);
     syncStateFromEngine();
   };
@@ -305,9 +363,10 @@ export default function App() {
   // Execute Manual Paper Order
   const handleExecutePaperTrade = (request: PaperOrderRequest): boolean => {
     if (!tradingEngineRef.current || !simulatorRef.current) return false;
+    if (marketSource === "LIVE_MARKET_DATA" && liveDataError) return false;
     const lastCandle = simulatorRef.current.getLastCandle();
-    const currentPrice = lastCandle ? lastCandle.close : 65000;
-    const success = tradingEngineRef.current.executePaperTrade(request, currentPrice);
+    if (!lastCandle || !Number.isFinite(lastCandle.close) || lastCandle.close <= 0) return false;
+    const success = tradingEngineRef.current.executePaperTrade(request, lastCandle.close);
     if (success) {
       syncStateFromEngine();
       const trade = tradingEngineRef.current.getActiveTrade();
@@ -316,60 +375,14 @@ export default function App() {
     return success;
   };
 
-  // Instantly run one verified trade on the live market to confirm execution & update strategy vault
-  const handleRunImmediateTrade = async () => {
-    if (!tradingEngineRef.current || !simulatorRef.current) return;
-    const lastCandle = simulatorRef.current.getLastCandle();
-    const currentPrice = lastCandle ? lastCandle.close : 65000;
-
-    // If auto-rotation across markets is active:
-    // If current asset score is below minimum, scan other assets (Forex, Tech Stocks, Crypto, Indices)
-    // to find the highest-probability winning setup
-    if (autoRotateAssets) {
-      try {
-        const res = await fetch(`/api/market/multi-scan?minConfidence=${strategy.minConfidence}`);
-        if (res.ok) {
-          const data = await res.json();
-          const top = data.opportunities?.[0];
-          if (top && top.symbol !== currentAsset && top.score >= 70) {
-            handleSelectAsset(top.symbol as AssetSymbol);
-            setTimeout(() => {
-              if (tradingEngineRef.current) {
-                const tr = tradingEngineRef.current.runImmediateVerifiedTrade(
-                  top.price,
-                  top.bestDirection === "SHORT" ? "SHORT" : "LONG"
-                );
-                syncStateFromEngine();
-                if (tr) setVerificationToastTrade(tr);
-              }
-            }, 300);
-            return;
-          }
-        }
-      } catch (err) {
-        console.warn("Opportunity auto-rotation check skipped:", err);
-      }
-    }
-
-    const tr = tradingEngineRef.current.runImmediateVerifiedTrade(currentPrice);
-    syncStateFromEngine();
-    if (tr) setVerificationToastTrade(tr);
+  // User action: run a fresh, rules-based paper scan. Direct/immediate execution is deliberately disabled.
+  const handleRunImmediateTrade = () => {
+    handleForceBotScan();
   };
 
-  // Select asset and optionally execute a trade immediately
-  const handleSelectAndTradeAsset = (asset: AssetSymbol, executeTrade?: boolean) => {
+  // Select an asset for review; selecting an asset never places an order automatically.
+  const handleSelectAndTradeAsset = (asset: string, _executeTrade?: boolean) => {
     handleSelectAsset(asset);
-    if (executeTrade) {
-      setTimeout(() => {
-        if (tradingEngineRef.current && simulatorRef.current) {
-          const candle = simulatorRef.current.getLastCandle();
-          const price = candle ? candle.close : 100;
-          const tr = tradingEngineRef.current.runImmediateVerifiedTrade(price);
-          syncStateFromEngine();
-          if (tr) setVerificationToastTrade(tr);
-        }
-      }, 350);
-    }
   };
 
   // Force Quantitative Confluence Scan
@@ -398,7 +411,7 @@ export default function App() {
     if (!tradingEngineRef.current) return;
     tradingEngineRef.current.fullResetAccount(initialCapital);
     setIsEmergencyModalOpen(false);
-    setIsAutoTrading(true);
+    setIsAutoTrading(false);
     syncStateFromEngine();
   };
 
@@ -427,8 +440,12 @@ export default function App() {
     if (el) el.scrollIntoView({ behavior: "smooth" });
   };
 
-  const currentPrice = candles[candles.length - 1]?.close || 65000;
-  const currentRegime = simulatorRef.current ? simulatorRef.current.getRegime() : "BULL_EXPANSION";
+  const currentPrice =
+    liveTicker?.price ??
+    formingCandle?.close ??
+    candles[candles.length - 1]?.close ??
+    null;
+  const currentRegime = candles.length > 0 ? simulatorRef.current?.getRegime() ?? null : null;
 
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-100 flex flex-col font-sans selection:bg-emerald-500/30 selection:text-emerald-200">
@@ -436,6 +453,8 @@ export default function App() {
       <Header
         currentAsset={currentAsset}
         onSelectAsset={handleSelectAsset}
+        currentView={currentView}
+        onChangeView={setCurrentView}
         botState={botState}
         marketSource={marketSource}
         isAutoTrading={isAutoTrading}
@@ -463,8 +482,8 @@ export default function App() {
         onScrollToAnalytics={handleScrollToAnalytics}
       />
 
-      {/* 2. Capital Preservation & Risk Budget HUD */}
-      {vitality && (
+      {/* Practice-only risk HUD. The primary terminal stays focused on markets. */}
+      {currentView === "PRACTICE" && vitality && (
         <VitalityBar
           vitality={vitality}
           onAdjustCircuitBreaker={handleAdjustCircuitBreaker}
@@ -472,93 +491,123 @@ export default function App() {
         />
       )}
 
-      {/* 3. Main Operational Command Center */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-4 flex flex-col gap-4">
-        {/* Paper Trading Deck & Order Flow Section */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
-          <div className="lg:col-span-8 xl:col-span-9">
-            {vitality && (
-              <PaperTradingDeck
-                currentPrice={currentPrice}
-                asset={currentAsset}
-                botState={botState}
-                vitality={vitality}
-                strategy={strategy}
-                activeTrade={activeTrade}
-                marketSource={marketSource}
-                ticker={liveTicker}
-                isAutoTrading={isAutoTrading}
-                onToggleAutoTrading={handleToggleAutoTrading}
-                onToggleMarketSource={(src) => setMarketSource(src)}
-                onExecutePaperTrade={handleExecutePaperTrade}
-                onRunImmediateTrade={handleRunImmediateTrade}
-                onOpenMultiAssetRadar={() => setIsRadarOpen(true)}
-                onOpenStrategyVault={() => setIsVaultOpen(true)}
-                autoRotateAssets={autoRotateAssets}
-                onToggleAutoRotateAssets={() => setAutoRotateAssets((prev) => !prev)}
-                dailyGoal={dailyGoal}
-                onForceBotScan={handleForceBotScan}
-                onCloseActiveTrade={handleManualCloseActiveTrade}
-                onSimulateEmergencyTest={handleSimulateEmergencyTest}
-                onOpenSettings={() => setIsRiskSettingsOpen(true)}
-              />
-            )}
-          </div>
-
-          <div className="lg:col-span-4 xl:col-span-3">
-            <OrderBookWidget
-              currentPrice={currentPrice}
-              symbol={currentAsset}
-            />
-          </div>
+      {marketSource === "LIVE_MARKET_DATA" && liveDataError && (
+        <div className="mx-4 mt-3 max-w-7xl w-full self-center rounded-lg border border-amber-900/50 bg-amber-950/20 px-3 py-2 text-xs text-amber-300 font-mono">
+          DATA UNAVAILABLE • {liveDataError}
         </div>
+      )}
 
-        {/* Live Candlestick Financial Chart & Quantitative Decision Stream */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
-          {/* Chart Section (7 columns on lg screens) */}
-          <div className="lg:col-span-7 xl:col-span-8 flex flex-col gap-4">
-            <MarketChart
-              candles={candles}
+      {currentView === "TERMINAL" ? (
+        <MainTerminal
+          asset={currentAsset}
+          candles={candles}
+          ticker={liveTicker}
+          currentPrice={currentPrice}
+          regime={currentRegime}
+          onSelectAsset={handleSelectAsset}
+          onOpenPortfolio={() => setCurrentView("PORTFOLIO")}
+          onOpenAutomation={() => setCurrentView("AUTOMATION")}
+          onOpenResearch={() => setCurrentView("RESEARCH")}
+        />
+      ) : currentView === "PRACTICE" ? (
+        <main className="flex-1 max-w-7xl w-full mx-auto p-4 flex flex-col gap-4">
+          <div className="rounded-xl border border-amber-800/40 bg-amber-950/10 px-4 py-3">
+            <div className="text-xs font-mono font-semibold text-amber-300">PRACTICE LAB</div>
+            <div className="text-[11px] text-amber-200/70 mt-1">
+              Paper/simulation only. This workspace is intentionally separate from the primary market terminal.
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
+            <div className="lg:col-span-8 xl:col-span-9">
+              {vitality && (
+                <PaperTradingDeck
+                  currentPrice={currentPrice}
+                  asset={currentAsset}
+                  botState={botState}
+                  vitality={vitality}
+                  strategy={strategy}
+                  activeTrade={activeTrade}
+                  marketSource={marketSource}
+                  ticker={liveTicker}
+                  isAutoTrading={isAutoTrading}
+                  onToggleAutoTrading={handleToggleAutoTrading}
+                  onToggleMarketSource={(src) => setMarketSource(src)}
+                  onExecutePaperTrade={handleExecutePaperTrade}
+                  onRunImmediateTrade={handleRunImmediateTrade}
+                  onOpenMultiAssetRadar={() => setIsRadarOpen(true)}
+                  onOpenStrategyVault={() => setIsVaultOpen(true)}
+                  autoRotateAssets={autoRotateAssets}
+                  onToggleAutoRotateAssets={() => setAutoRotateAssets((prev) => !prev)}
+                  dailyGoal={dailyGoal}
+                  onForceBotScan={handleForceBotScan}
+                  onCloseActiveTrade={handleManualCloseActiveTrade}
+                  onSimulateEmergencyTest={handleSimulateEmergencyTest}
+                  onOpenSettings={() => setIsRiskSettingsOpen(true)}
+                />
+              )}
+            </div>
+
+            <div className="lg:col-span-4 xl:col-span-3">
+              <OrderBookWidget
+                currentPrice={currentPrice}
+                symbol={currentAsset}
+                dataSource={marketSource}
+                bid={liveTicker?.bid}
+                ask={liveTicker?.ask}
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
+            <div className="lg:col-span-7 xl:col-span-8 flex flex-col gap-4">
+              <MarketChart
+                candles={candles}
+                activeTrade={activeTrade}
+                tradeHistory={tradeHistory}
+                assetSymbol={currentAsset}
+                regime={currentRegime}
+              />
+            </div>
+            <div className="lg:col-span-5 xl:col-span-4 flex flex-col">
+              <BotMindStream
+                thoughts={thoughts}
+                activeRuleCount={strategy.rules.length}
+                strategyVersion={strategy.version}
+              />
+            </div>
+          </div>
+
+          {vitality && (
+            <div id="analytics-charts-section" className="w-full">
+              <AnalyticsCharts
+                equityCurve={equityCurve}
+                tradeHistory={tradeHistory}
+                vitality={vitality}
+                currentAsset={currentAsset}
+              />
+            </div>
+          )}
+
+          <div id="trade-journal-section" className="w-full">
+            <TradeExecutionTable
               activeTrade={activeTrade}
               tradeHistory={tradeHistory}
-              assetSymbol={currentAsset}
-              regime={currentRegime}
+              strategy={strategy}
+              onManualCloseActiveTrade={handleManualCloseActiveTrade}
+              onOpenTradeCritique={(trade) => setSelectedTradeCritique(trade)}
             />
           </div>
-
-          {/* Quantitative Decision Stream Terminal (5 columns on lg) */}
-          <div className="lg:col-span-5 xl:col-span-4 flex flex-col">
-            <BotMindStream
-              thoughts={thoughts}
-              activeRuleCount={strategy.rules.length}
-              strategyVersion={strategy.version}
-            />
-          </div>
-        </div>
-
-        {/* Comprehensive Analytics, Profit/Loss, Drawdown & Win-Rate Suite */}
-        {vitality && (
-          <div id="analytics-charts-section" className="w-full">
-            <AnalyticsCharts
-              equityCurve={equityCurve}
-              tradeHistory={tradeHistory}
-              vitality={vitality}
-              currentAsset={currentAsset}
-            />
-          </div>
-        )}
-
-        {/* Bottom Section: Active Trade & Historical Executions Table */}
-        <div id="trade-journal-section" className="w-full">
-          <TradeExecutionTable
-            activeTrade={activeTrade}
-            tradeHistory={tradeHistory}
-            strategy={strategy}
-            onManualCloseActiveTrade={handleManualCloseActiveTrade}
-            onOpenTradeCritique={(trade) => setSelectedTradeCritique(trade)}
-          />
-        </div>
-      </main>
+        </main>
+      ) : (
+        <WorkspaceSurface
+          view={currentView as Exclude<WorkspaceView, "TERMINAL" | "PRACTICE">}
+          onSelectAsset={handleSelectAsset}
+          onOpenRadar={() => setIsRadarOpen(true)}
+          onOpenResearch={() => setIsStudyModalOpen(true)}
+          onOpenSettings={() => setIsRiskSettingsOpen(true)}
+        />
+      )}
 
       {/* Floating Verification Receipt Toast */}
       {verificationToastTrade && (
@@ -578,18 +627,18 @@ export default function App() {
           <div className="flex items-center gap-2">
             <span
               className={`inline-block w-2 h-2 rounded-full ${
-                marketSource === "LIVE_EXCHANGE" ? "bg-emerald-500 animate-pulse" : "bg-amber-500"
+                marketSource === "LIVE_MARKET_DATA" ? "bg-emerald-500 animate-pulse" : "bg-amber-500"
               }`}
             />
             <span>
-              Aegis Engine:{" "}
-              {marketSource === "LIVE_EXCHANGE"
-                ? "Live Binance/Coinbase Exchange Feed"
-                : "High-Speed Stochastic Simulator"}
+              Jarvis Finance Engine:{" "}
+              {marketSource === "LIVE_MARKET_DATA"
+                ? "Verified live market-data feed"
+                : "Explicit demo simulator"}
             </span>
           </div>
           <div>
-            <span>Autonomous AI Quant &bull; Hard Survival Circuit Breakers &bull; Zero Capital Risk Paper Trading</span>
+            <span>Research + paper trading &bull; Risk controls are modeled, not guaranteed</span>
           </div>
         </div>
       </footer>
@@ -636,7 +685,7 @@ export default function App() {
         />
       )}
 
-      {/* Autonomous Multi-Asset Opportunity Radar Modal */}
+      {/* Multi-Asset Research Radar Modal */}
       <MultiAssetRadarModal
         isOpen={isRadarOpen}
         onClose={() => setIsRadarOpen(false)}
@@ -655,7 +704,7 @@ export default function App() {
         onApplyStrategy={handleApplyStrategy}
       />
 
-      {/* 24/7 Market Hours & Android Auto-Pilot Modal */}
+      {/* Market Hours & Mobile Runtime Modal */}
       <MarketHoursModal
         isOpen={isMarketHoursOpen}
         onClose={() => setIsMarketHoursOpen(false)}
@@ -680,11 +729,12 @@ export default function App() {
           currentPrice={currentPrice}
           activeTrade={activeTrade}
           strategy={strategy}
+          isAutoTrading={isAutoTrading}
           initialMode={copilotInitialMode}
         />
       )}
 
-      {/* Cold Storage Profit Vault & Withdrawal Ledger Modal */}
+      {/* Virtual Paper Reserve & Transfer Ledger Modal */}
       {vitality && tradingEngineRef.current && (
         <ProfitVaultModal
           isOpen={isProfitVaultOpen}
@@ -694,7 +744,7 @@ export default function App() {
         />
       )}
 
-      {/* Security PIN Lock Screen Overlay (Zero-Knowledge Session Guard) */}
+      {/* Local Security PIN Lock Screen Overlay */}
       {isSessionLocked && (
         <SecurityPinLockScreen onUnlock={() => setIsSessionLocked(false)} />
       )}

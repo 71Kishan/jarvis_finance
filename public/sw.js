@@ -1,4 +1,4 @@
-// Service Worker for 24/7 Autonomous Survival Trading Bot PWA
+// Service Worker for Jarvis Finance PWA
 const CACHE_NAME = 'survival-bot-cache-v1';
 const STATIC_ASSETS = [
   '/',
