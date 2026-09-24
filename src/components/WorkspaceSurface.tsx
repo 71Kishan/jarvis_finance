@@ -15,7 +15,10 @@ interface RuntimeStatus {
   status?: string;
   symbol?: string;
   lastProcessedCandleAt?: number;
-  reason?: string;
+  message?: string;
+  databaseState?: string;
+  marketState?: string;
+  catalogState?: string;
 }
 
 export const WorkspaceSurface: React.FC<WorkspaceSurfaceProps> = ({
@@ -65,9 +68,20 @@ export const WorkspaceSurface: React.FC<WorkspaceSurfaceProps> = ({
     let cancelled = false;
     const fetchStatus = async () => {
       try {
-        const response = await fetch("/api/runtime/paper/status", { cache: "no-store" });
-        const payload = await response.json();
-        if (!cancelled) setRuntime(payload);
+        const response = await fetch("/api/health", { cache: "no-store" });
+        if (!response.ok) throw new Error("HTTP " + response.status);
+        const health = await response.json();
+        if (!cancelled) {
+          setRuntime({
+            status: health?.autonomousPaper?.status || "UNKNOWN",
+            symbol: health?.autonomousPaper?.symbol,
+            lastProcessedCandleAt: health?.autonomousPaper?.lastProcessedCandleAt,
+            message: health?.autonomousPaper?.message,
+            databaseState: health?.database?.state,
+            marketState: health?.marketData?.state,
+            catalogState: health?.instrumentCatalog?.state,
+          });
+        }
       } catch {
         if (!cancelled) setRuntime({ status: "UNAVAILABLE" });
       }
@@ -190,6 +204,10 @@ export const WorkspaceSurface: React.FC<WorkspaceSurfaceProps> = ({
             <div className="flex justify-between"><span className="text-neutral-500">Paper runtime</span><span className="text-neutral-200">{runtime?.status || "LOADING"}</span></div>
             <div className="flex justify-between mt-2"><span className="text-neutral-500">Symbol</span><span className="text-neutral-200">{runtime?.symbol || "—"}</span></div>
             <div className="flex justify-between mt-2"><span className="text-neutral-500">Last processed bar</span><span className="text-neutral-200">{runtime?.lastProcessedCandleAt ? new Date(runtime.lastProcessedCandleAt).toLocaleString() : "—"}</span></div>
+            <div className="flex justify-between mt-2"><span className="text-neutral-500">Market gateway</span><span className="text-neutral-200">{runtime?.marketState || "—"}</span></div>
+            <div className="flex justify-between mt-2"><span className="text-neutral-500">Instrument catalog</span><span className="text-neutral-200">{runtime?.catalogState || "—"}</span></div>
+            <div className="flex justify-between mt-2"><span className="text-neutral-500">PostgreSQL</span><span className="text-neutral-200">{runtime?.databaseState || "DISABLED"}</span></div>
+            {runtime?.message && <div className="mt-3 text-neutral-500 leading-relaxed">{runtime.message}</div>}
           </div>
           <div className="flex flex-wrap gap-2 mt-5">
             <button type="button" onClick={onOpenResearch} className="px-3 py-2 rounded-lg bg-violet-600/20 hover:bg-violet-600/30 border border-violet-500/30 text-xs font-mono text-violet-200">
