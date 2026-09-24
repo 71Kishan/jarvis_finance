@@ -908,7 +908,8 @@ export class PlatformRepository implements InstrumentPersistence {
   }
 
   public async persistFills(userId: string, fills: Fill[]): Promise<void> {
-    if (!fills.length) return;
+    if (!fills.length || !this.database.isReady()) return;
+
     await this.database.transaction(async (client) => {
       for (const fill of fills) {
         const owner = await client.query<{ user_id: string }>(
@@ -921,13 +922,14 @@ export class PlatformRepository implements InstrumentPersistence {
         );
         if (!owner.rows[0]) throw new Error("Fill does not belong to the authenticated user.");
 
-        await client.query(
+        const inserted = await client.query<{ id: string }>(
           [
             "INSERT INTO fills(",
             "  id, account_id, client_order_id, external_order_id, external_trade_id, instrument_id, side,",
             "  quantity, price, fee_amount, fee_asset, liquidity, executed_at",
             ") VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7::numeric, $8::numeric, $9::numeric, $10, $11, to_timestamp($12 / 1000.0))",
             "ON CONFLICT (account_id, external_trade_id) WHERE external_trade_id IS NOT NULL DO NOTHING",
+            "RETURNING id",
           ].join("\n"),
           [
             fill.accountId,
@@ -944,27 +946,89 @@ export class PlatformRepository implements InstrumentPersistence {
             fill.executedAt,
           ],
         );
+
+        if (!inserted.rows[0]) continue;
+
+        const instrument = await client.query<{
+          base_asset: string | null;
+          quote_asset: string | null;
+        }>(
+          "SELECT base_asset, quote_asset FROM instruments WHERE instrument_id = $1 LIMIT 1",
+          [fill.instrumentId],
+        );
+        const baseAsset = instrument.rows[0]?.base_asset;
+        const quoteAsset = instrument.rows[0]?.quote_asset;
+        if (!baseAsset || !quoteAsset) {
+          throw new Error("Cannot post a fill to the ledger without canonical base/quote assets.");
+        }
+
+        const ledgerIdempotencyKey = "fill:" + fill.accountId + ":" + (fill.externalTradeId || fill.id);
+        const transaction = await client.query<{ id: string }>(
+          [
+            "INSERT INTO ledger_transactions(",
+            "  account_id, transaction_type, external_reference, idempotency_key, status, memo, posted_at",
+            ") VALUES ($1, 'TRADE', $2, $3, 'POSTED', $4, to_timestamp($5 / 1000.0))",
+            "ON CONFLICT (idempotency_key) DO NOTHING",
+            "RETURNING id",
+          ].join("\n"),
+          [
+            fill.accountId,
+            fill.externalTradeId ?? fill.externalOrderId ?? fill.id,
+            ledgerIdempotencyKey,
+            "Spot fill " + fill.orderClientId,
+            fill.executedAt,
+          ],
+        );
+
+        if (!transaction.rows[0]) continue;
+
+        if (fill.side === "BUY") {
+          await client.query(
+            [
+              "INSERT INTO ledger_entries(transaction_id, account_id, asset, direction, amount, entry_type)",
+              "VALUES ($1, $2, $3, 'DEBIT', $4::numeric * $5::numeric, 'CASH'),",
+              "       ($1, $2, $6, 'CREDIT', $4::numeric, 'ASSET')",
+            ].join("\n"),
+            [
+              transaction.rows[0].id,
+              fill.accountId,
+              quoteAsset,
+              fill.quantity,
+              fill.price,
+              baseAsset,
+            ],
+          );
+        } else {
+          await client.query(
+            [
+              "INSERT INTO ledger_entries(transaction_id, account_id, asset, direction, amount, entry_type)",
+              "VALUES ($1, $2, $3, 'DEBIT', $4::numeric, 'ASSET'),",
+              "       ($1, $2, $6, 'CREDIT', $4::numeric * $5::numeric, 'CASH')",
+            ].join("\n"),
+            [
+              transaction.rows[0].id,
+              fill.accountId,
+              baseAsset,
+              fill.quantity,
+              fill.price,
+              quoteAsset,
+            ],
+          );
+        }
+
+        if (fill.feeAmount && fill.feeAsset) {
+          await client.query(
+            [
+              "INSERT INTO ledger_entries(transaction_id, account_id, asset, direction, amount, entry_type)",
+              "VALUES ($1, $2, $3, 'DEBIT', $4::numeric, 'FEE')",
+            ].join("\n"),
+            [transaction.rows[0].id, fill.accountId, fill.feeAsset.toUpperCase(), fill.feeAmount],
+          );
+        }
       }
     });
   }
 
-  public async getUserAccountConnectionByExternalId(
-    userId: string,
-    provider: string,
-    externalAccountId: string,
-  ): Promise<AccountConnection | null> {
-    const result = await this.database.query<AccountConnectionRow>(
-      [
-        "SELECT id, provider, account_type, label, external_account_id, status, permissions,",
-        "       last_synced_at, created_at, updated_at",
-        "FROM account_connections",
-        "WHERE user_id = $1 AND provider = $2 AND external_account_id = $3",
-        "ORDER BY created_at ASC LIMIT 1",
-      ].join("\n"),
-      [userId, provider, externalAccountId],
-    );
-    return result.rows[0] ? mapAccountConnectionRow(result.rows[0]) : null;
-  }
 
   public async grantSandboxTradePermission(userId: string, accountId: string): Promise<AccountConnection> {
     const result = await this.database.query<AccountConnectionRow>(
