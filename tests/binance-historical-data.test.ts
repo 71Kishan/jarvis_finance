@@ -15,7 +15,7 @@ describe("Binance historical research data", () => {
       const page = endTime
         ? [[4, "103", "105", "102", "104", "10", 4_999]]
         : [
-            ...Array.from({ length: 120 }, (_, index) => [
+            ...Array.from({ length: 1000 }, (_, index) => [
               index + 5,
               "104",
               "106",
@@ -34,12 +34,12 @@ describe("Binance historical research data", () => {
 
     try {
       const service = new BinanceHistoricalDataService("https://example.test");
-      const candles = await service.fetchCompletedCandles("BTCUSDT", "1h", 150);
+      const candles = await service.fetchCompletedCandles("BTCUSDT", "1h", 1200);
 
       expect(calls.length).toBe(2);
       expect(candles[0]?.timestamp).toBe(4);
-      expect(candles[candles.length - 1]?.timestamp).toBe(123);
-      expect(candles.length).toBe(120);
+      expect(candles[candles.length - 1]?.timestamp).toBe(1003);
+      expect(candles.length).toBe(1000);
       expect(candles.every((candle) => candle.close === 105 || candle.close === 104)).toBe(true);
     } finally {
       globalThis.fetch = originalFetch;
