@@ -11,6 +11,7 @@ import { BinanceInstrumentCatalog } from "./src/server/binanceInstrumentCatalog"
 import { AutonomousPaperRuntime } from "./src/server/paperRuntime";
 import { PlatformDatabase } from "./src/server/platformDatabase";
 import { PlatformRepository } from "./src/platform/platformRepository";
+import { BinanceSpotAccountAdapter } from "./src/platform/binanceSpotAccountAdapter";
 
 dotenv.config();
 
@@ -256,6 +257,10 @@ app.get("/api/health", (_req: Request, res: Response) => {
     },
     instrumentCatalog: binanceInstrumentCatalog.getHealth(),
     database: platformDatabase.getHealth(),
+    binanceSpotTestnetAccount: {
+      ...awaitHealth(binanceSpotTestnetAccount),
+      accountId: binanceSpotTestnetAccount.getAccountId(),
+    },
     autonomousPaper: {
       status: autonomousPaperRuntime.getStatus().status,
       symbol: autonomousPaperRuntime.getStatus().symbol,
@@ -337,6 +342,7 @@ const STOCK_UNIVERSE: Record<string, { name: string; category: "STOCK" | "INDEX"
 const binanceMarketData = new BinanceMarketDataService(SYMBOL_MAP);
 const platformDatabase = new PlatformDatabase();
 const platformRepository = new PlatformRepository(platformDatabase);
+const binanceSpotTestnetAccount = new BinanceSpotAccountAdapter();
 const binanceInstrumentCatalog = new BinanceInstrumentCatalog(
   platformDatabase.isConfigured()
     ? { persist: (instruments) => platformRepository.syncInstruments(instruments) }
@@ -787,6 +793,15 @@ app.get("/api/market/live-feed", async (req: Request, res: Response) => {
   }
 });
 
+function awaitHealth(adapter: BinanceSpotAccountAdapter) {
+  // Health is intentionally local/cached here; it never forces a credentialed
+  // network call on a public health request.
+  return {
+    provider: adapter.provider,
+    configured: adapter.isConfigured(),
+  };
+}
+
 function requireControlToken(req: Request, res: Response, next: () => void) {
   const configured = process.env.JARVIS_CONTROL_TOKEN;
   if (!configured) {
@@ -820,6 +835,42 @@ app.post("/api/runtime/paper/start", requireControlToken, (_req: Request, res: R
 app.post("/api/runtime/paper/stop", requireControlToken, (_req: Request, res: Response) => {
   autonomousPaperRuntime.stop("Paper runtime stopped by operator.");
   res.json(autonomousPaperRuntime.getStatus());
+});
+
+// Read-only Binance Spot testnet account inspection.
+// This endpoint is intentionally protected by the existing control token while
+// the full authenticated user session layer is still under construction.
+app.get("/api/runtime/binance-testnet/health", requireControlToken, async (_req: Request, res: Response) => {
+  res.json(await binanceSpotTestnetAccount.getHealth());
+});
+
+app.post("/api/runtime/binance-testnet/sync", requireControlToken, async (_req: Request, res: Response) => {
+  try {
+    const snapshot = await binanceSpotTestnetAccount.syncReadOnlyAccount();
+    res.json({
+      success: true,
+      provider: binanceSpotTestnetAccount.provider,
+      accountId: binanceSpotTestnetAccount.getAccountId(),
+      account: {
+        accountType: snapshot.account.accountType,
+        canTrade: snapshot.account.canTrade === true,
+        canWithdraw: snapshot.account.canWithdraw === true,
+        canDeposit: snapshot.account.canDeposit === true,
+        permissions: Array.isArray(snapshot.account.permissions) ? snapshot.account.permissions : [],
+        updateTime: snapshot.account.updateTime ?? null,
+      },
+      balances: snapshot.balances,
+      openOrders: snapshot.openOrders,
+      health: await binanceSpotTestnetAccount.getHealth(),
+    });
+  } catch (error: any) {
+    res.status(503).json({
+      success: false,
+      provider: binanceSpotTestnetAccount.provider,
+      error: error?.message || "Binance Spot testnet account sync failed.",
+      health: await binanceSpotTestnetAccount.getHealth(),
+    });
+  }
 });
 
 // Setup Vite/static serving and the long-lived WebSocket gateway only inside the async server bootstrap.
