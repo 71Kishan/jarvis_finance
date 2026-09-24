@@ -319,6 +319,7 @@ export class BinanceSpotAccountAdapter implements ExecutionAdapter {
         Number(row.executedQty ?? 0) > 0 && Number(row.cummulativeQuoteQty ?? 0) > 0
           ? divideDecimalStrings(String(row.cummulativeQuoteQty), String(row.executedQty))
           : undefined,
+      requestedAt: Number(row.time) > 0 ? Number(row.time) : Date.now(),
       submittedAt: Number(row.time) > 0 ? Number(row.time) : undefined,
       updatedAt: Number(row.updateTime) > 0 ? Number(row.updateTime) : Date.now(),
       externalOrderId: String(row.orderId),
