@@ -109,7 +109,8 @@ export type OrderStatus =
   | "CANCELLED"
   | "REJECTED"
   | "EXPIRED"
-  | "UNKNOWN_RECONCILIATION";
+  | "UNKNOWN_RECONCILIATION"
+  | "SUBMISSION_FAILED";
 
 export interface OrderIntent {
   clientOrderId: string;
