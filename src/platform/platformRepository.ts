@@ -723,6 +723,27 @@ export class PlatformRepository implements InstrumentPersistence {
     return result.rows[0] ? mapAccountConnectionRow(result.rows[0]) : null;
   }
 
+  public async listActiveOrdersForUser(userId: string): Promise<PersistedOrder[]> {
+    const result = await this.database.query<any>(
+      [
+        "SELECT o.client_order_id, o.account_id, o.instrument_id, o.external_order_id, o.side, o.order_type,",
+        "       o.quantity::text, o.limit_price::text, o.stop_price::text, o.time_in_force, o.reduce_only,",
+        "       o.strategy_id, o.strategy_version, o.reason, o.requested_at, o.status,",
+        "       o.filled_quantity::text, o.average_fill_price::text, o.submitted_at, o.updated_at,",
+        "       o.last_provider_event_at, o.idempotency_key, o.idempotency_fingerprint",
+        "FROM orders o",
+        "JOIN account_connections a ON a.id = o.account_id",
+        "WHERE a.user_id = $1",
+        "  AND a.provider = 'BINANCE_SPOT_TESTNET'",
+        "  AND o.status IN ('PENDING_SUBMIT','SUBMITTED','PARTIALLY_FILLED','CANCEL_PENDING','UNKNOWN_RECONCILIATION')",
+        "ORDER BY o.updated_at ASC",
+        "LIMIT 100",
+      ].join("\n"),
+      [userId],
+    );
+    return result.rows.map((row) => this.mapPersistedOrderRow(row));
+  }
+
   public async getUserOrder(userId: string, clientOrderId: string): Promise<PersistedOrder | null> {
     const result = await this.database.query<any>(
       [
