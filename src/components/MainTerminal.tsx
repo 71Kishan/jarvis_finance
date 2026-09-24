@@ -12,7 +12,7 @@ interface MainTerminalProps {
   formingCandle?: Candle | null;
   ticker: LiveExchangeTicker | null;
   currentPrice: number | null;
-  regime: "BULL_EXPANSION" | "BEAR_TREND" | "CHOPPY_RANGE" | "VOLATILITY_SPIKE";
+  regime?: "BULL_EXPANSION" | "BEAR_TREND" | "CHOPPY_RANGE" | "VOLATILITY_SPIKE" | null;
   onSelectAsset: (asset: string) => void;
   onOpenPortfolio: () => void;
   onOpenAutomation: () => void;
