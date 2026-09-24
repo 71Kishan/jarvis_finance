@@ -766,6 +766,49 @@ export const WorkspaceSurface: React.FC<WorkspaceSurfaceProps> = ({
           </div>
 
           <section className="mt-3 rounded-lg bg-neutral-950 border border-neutral-800 p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-neutral-600">Operational readiness</div>
+                <div className="text-xs text-neutral-400 mt-1">
+                  Server-side safety dependencies are evaluated independently from market PnL.
+                </div>
+              </div>
+              <span className={
+                platformHealth?.operational?.state === "HEALTHY"
+                  ? "rounded-full border border-emerald-900/60 bg-emerald-950/20 px-2.5 py-1 text-[10px] font-mono text-emerald-300"
+                  : platformHealth?.operational?.state === "HALTED"
+                    ? "rounded-full border border-rose-900/60 bg-rose-950/20 px-2.5 py-1 text-[10px] font-mono text-rose-300"
+                    : "rounded-full border border-amber-900/60 bg-amber-950/20 px-2.5 py-1 text-[10px] font-mono text-amber-200"
+              }>
+                {platformHealth?.operational?.state || "LOADING"}
+              </span>
+            </div>
+            {Array.isArray(platformHealth?.operational?.components) && (
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2 mt-4">
+                {platformHealth.operational.components.map((component: any) => (
+                  <div key={component.id} className="rounded-lg border border-neutral-800 bg-neutral-950 p-2.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[10px] text-neutral-300">{component.label}</span>
+                      <span className={
+                        component.state === "READY"
+                          ? "text-emerald-400"
+                          : component.state === "HALTED"
+                            ? "text-rose-400"
+                            : component.state === "DISABLED"
+                              ? "text-neutral-600"
+                              : "text-amber-300"
+                      }>
+                        {component.state}
+                      </span>
+                    </div>
+                    <div className="text-[9px] text-neutral-600 mt-1 leading-relaxed">{component.message}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <section className="mt-3 rounded-lg bg-neutral-950 border border-neutral-800 p-4">
             <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-2">
               <div>
                 <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-neutral-600">Forward evidence</div>
