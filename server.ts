@@ -16,6 +16,7 @@ import { BinanceHistoricalDataService } from "./src/server/binanceHistoricalData
 import { StrategyOptimizer } from "./src/engine/optimizer";
 import { attachIndicators } from "./src/engine/indicators";
 import { evaluateStrategyValidation } from "./src/engine/strategyValidation";
+import { evaluateForwardValidation } from "./src/engine/forwardValidation";
 import { PlatformDatabase } from "./src/server/platformDatabase";
 import { PlatformRepository } from "./src/platform/platformRepository";
 import { BinanceSpotAccountAdapter } from "./src/platform/binanceSpotAccountAdapter";
@@ -2116,8 +2117,11 @@ app.get("/api/runtime/shadow/evidence", requireSession, async (req: Authenticate
       strategyId,
       symbol,
     );
+    const forwardValidation = evidence
+      ? evaluateForwardValidation(evidence)
+      : null;
 
-    return res.json({ success: true, evidence });
+    return res.json({ success: true, evidence, forwardValidation });
   } catch (error: any) {
     return res.status(503).json({
       success: false,
