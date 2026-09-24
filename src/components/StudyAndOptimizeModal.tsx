@@ -15,6 +15,8 @@ import {
 } from "lucide-react";
 import { BacktestResult, Candle, StrategyConfig, Trade } from "../types/trading";
 import { StrategyOptimizer } from "../engine/optimizer";
+import { evaluateStrategyValidation } from "../engine/strategyValidation";
+import { strategyVaultInstance } from "../engine/strategyVault";
 
 interface StudyAndOptimizeModalProps {
   isOpen: boolean;
@@ -58,8 +60,10 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
       meanOosReturnPercent: number;
       medianOosReturnPercent: number;
       worstOosDrawdownPercent: number;
+      oosCalendarDays?: number;
       selectionCounts: Record<string, number>;
     };
+    validation?: ReturnType<typeof evaluateStrategyValidation>;
   } | null>(null);
 
   if (!isOpen) return null;
@@ -69,7 +73,9 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
     try {
       // 1. Run historical backtesting & genetic parameter search
       const opt = StrategyOptimizer.runOptimizationStudy(currentStrategy, candles);
-      setOptimizationData(opt);
+      const validation = evaluateStrategyValidation(opt);
+      strategyVaultInstance.recordValidationResult(opt.bestStrategy, validation);
+      setOptimizationData({ ...opt, validation });
 
       // 2. Call Gemini AI via server-side endpoint
       const res = await fetch("/api/bot/study", {
@@ -105,15 +111,8 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
   };
 
   const handleAdoptBestStrategy = () => {
-    if (aiAnalysis?.recommendedStrategy) {
-      onApplyStrategy({
-        ...currentStrategy,
-        ...aiAnalysis.recommendedStrategy,
-        id: `strat-evolved-v${(currentStrategy.version || 1) + 1}`,
-        version: (currentStrategy.version || 1) + 1,
-      });
-      onClose();
-    } else if (optimizationData?.bestStrategy) {
+    if (optimizationData?.bestStrategy && optimizationData.validation?.status === "PROVISIONALLY_VALIDATED") {
+      // The AI is advisory-only. It cannot bypass the deterministic promotion gate.
       onApplyStrategy(optimizationData.bestStrategy);
       onClose();
     }
@@ -343,6 +342,48 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
               )}
 
               {/* Insights */}
+              {optimizationData.validation && (
+                <div className={`rounded-xl border p-3 space-y-3 ${
+                  optimizationData.validation.status === "PROVISIONALLY_VALIDATED"
+                    ? "border-emerald-700/50 bg-emerald-950/10"
+                    : optimizationData.validation.status === "FAILED"
+                      ? "border-rose-900/50 bg-rose-950/10"
+                      : "border-amber-800/50 bg-amber-950/10"
+                }`}>
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-[10px] font-mono uppercase tracking-[0.16em] text-neutral-500">Deterministic promotion gate</div>
+                      <div className="text-xs text-neutral-200 mt-1">
+                        {optimizationData.validation.status === "PROVISIONALLY_VALIDATED"
+                          ? "Candidate is eligible for paper automation review."
+                          : optimizationData.validation.status === "FAILED"
+                            ? "Candidate is rejected by the current validation policy."
+                            : "Evidence is not sufficient for promotion yet."}
+                      </div>
+                    </div>
+                    <span className="px-2 py-1 rounded border border-neutral-700 bg-neutral-950 text-[10px] font-mono text-neutral-300">
+                      {optimizationData.validation.gates.filter((gate) => gate.passed).length}/{optimizationData.validation.gates.length} GATES
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                    {optimizationData.validation.gates.map((gate) => (
+                      <div key={gate.id} className="rounded-lg border border-neutral-800 bg-neutral-950/70 p-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-[10px] text-neutral-300">{gate.label}</span>
+                          <span className={gate.passed ? "text-emerald-400" : "text-rose-400"}>
+                            {gate.passed ? "PASS" : "FAIL"}
+                          </span>
+                        </div>
+                        <div className="text-[9px] text-neutral-600 mt-1">{gate.observed} • {gate.required}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="text-[10px] text-neutral-500">
+                    AI recommendations remain advisory and cannot bypass these deterministic gates. Historical evidence does not guarantee future performance; forward paper/shadow validation is still required.
+                  </div>
+                </div>
+              )}
+
               <div className="bg-neutral-900/50 border border-neutral-800 rounded-xl p-3 space-y-1.5 text-[11px]">
                 <div className="font-semibold text-neutral-300">Optimization Takeaways:</div>
                 {optimizationData.optimizationInsights.map((ins, i) => (
@@ -359,7 +400,7 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
         {/* Modal Footer */}
         <div className="px-5 py-3 border-t border-neutral-800 bg-neutral-900/70 flex items-center justify-between">
           <span className="text-neutral-500 text-[11px]">
-            Loading a candidate updates the paper terminal configuration and pauses automated paper execution.
+            Only candidates that pass every deterministic validation gate can be promoted to paper automation. Forward paper/shadow evidence remains a separate gate.
           </span>
 
           <div className="flex items-center gap-2">
@@ -372,11 +413,16 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
             <button
               id="adopt-strategy-btn"
               onClick={handleAdoptBestStrategy}
-              disabled={!optimizationData && !aiAnalysis}
+              disabled={optimizationData?.validation?.status !== "PROVISIONALLY_VALIDATED"}
+              title={
+                optimizationData?.validation?.status === "PROVISIONALLY_VALIDATED"
+                  ? "Apply the deterministic validated research candidate to paper automation."
+                  : "Candidate must pass every deterministic validation gate before promotion."
+              }
               className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition-all shadow-md disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
             >
               <CheckCircle2 className="w-3.5 h-3.5" />
-              <span>Load Research Candidate</span>
+              <span>Promote Validated Candidate</span>
             </button>
           </div>
         </div>

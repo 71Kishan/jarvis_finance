@@ -253,6 +253,10 @@ export interface StrategyVaultEntry {
   profitFactor: number;
   maxDrawdownPercent: number;
   status: "DRAFT" | "TESTING_PAPER" | "PROVISIONALLY_VALIDATED" | "DISCARDED_FAILED";
+  validationStatus?: "INSUFFICIENT_EVIDENCE" | "FAILED" | "PROVISIONALLY_VALIDATED";
+  validationEvaluatedAt?: number;
+  validationGatesPassed?: number;
+  validationGatesTotal?: number;
   failureReason?: string;
   successNotes?: string;
   lastTestedTime: number;

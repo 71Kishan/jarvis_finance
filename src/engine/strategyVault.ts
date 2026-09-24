@@ -1,4 +1,5 @@
 import { DailyPerformanceGoal, StrategyConfig, StrategyVaultEntry, Trade } from "../types/trading";
+import type { StrategyValidationResult } from "./strategyValidation";
 
 const STORAGE_KEY = "jarvis_strategy_vault_v2";
 const DAILY_GOAL_STORAGE_KEY = "jarvis_daily_process_v2";
@@ -93,14 +94,51 @@ export class StrategyVault {
       ? Number(((entry.grossProfitUsd || 0) / (entry.grossLossUsd || 0)).toFixed(2))
       : 0;
     entry.lastTestedTime = Date.now();
-    entry.status = "TESTING_PAPER";
+    if (entry.status !== "PROVISIONALLY_VALIDATED") {
+      entry.status = "TESTING_PAPER";
+    }
     entry.successNotes =
-      `Forward paper evidence: ${entry.totalTrades} trade(s), ${entry.winRate}% win rate, PF ${entry.profitFactor || "—"}. Validation remains pending out-of-sample and forward-paper checks.`;
+      `Forward paper evidence: ${entry.totalTrades} trade(s), ${entry.winRate}% win rate, PF ${entry.profitFactor || "—"}. Deterministic validation status: ${entry.validationStatus || "NOT_RUN"}.`;
 
     this.dailyGoal.currentDailyPnlUsd = Number((this.dailyGoal.currentDailyPnlUsd + trade.pnl).toFixed(2));
     this.dailyGoal.tradesCountToday += 1;
     this.dailyGoal.targetAchieved = false;
     this.saveToStorage();
+  }
+
+  public recordValidationResult(config: StrategyConfig, result: StrategyValidationResult): StrategyVaultEntry {
+    const entry = this.registerStrategy(config);
+    entry.validationStatus = result.status;
+    entry.validationEvaluatedAt = result.evaluatedAt;
+    entry.validationGatesPassed = result.gates.filter((gate) => gate.passed).length;
+    entry.validationGatesTotal = result.gates.length;
+    entry.lastTestedTime = result.evaluatedAt;
+
+    if (result.status === "PROVISIONALLY_VALIDATED") {
+      entry.status = "PROVISIONALLY_VALIDATED";
+      entry.failureReason = undefined;
+      entry.successNotes =
+        "Provisional promotion gate passed. Historical/OOS evidence is still not a guarantee of future performance; forward paper/shadow validation remains required.";
+    } else if (result.status === "FAILED") {
+      entry.status = "DISCARDED_FAILED";
+      const failed = result.gates.filter((gate) => !gate.passed).map((gate) => gate.label);
+      entry.failureReason = failed.length
+        ? "Validation gates failed: " + failed.join(", ") + "."
+        : "Strategy failed the deterministic validation policy.";
+      entry.successNotes = "Candidate is not eligible for automated promotion.";
+    } else {
+      if (entry.status !== "PROVISIONALLY_VALIDATED") entry.status = "DRAFT";
+      entry.failureReason = undefined;
+      entry.successNotes =
+        "Validation evidence is insufficient for promotion. Continue historical/OOS and forward-paper testing.";
+    }
+
+    this.saveToStorage();
+    return entry;
+  }
+
+  public getValidationStatus(config: StrategyConfig): StrategyVaultEntry["validationStatus"] {
+    return this.entries.get(this.computeSignature(config))?.validationStatus;
   }
 
   public getAllStrategies(): StrategyVaultEntry[] {
