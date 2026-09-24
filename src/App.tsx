@@ -50,6 +50,7 @@ export default function App() {
   const [isAutoTrading, setIsAutoTrading] = useState<boolean>(false);
   const [simulationSpeed, setSimulationSpeed] = useState<number>(2); // 2x default for simulator
   const [liveTicker, setLiveTicker] = useState<LiveExchangeTicker | null>(null);
+  const [formingCandle, setFormingCandle] = useState<Candle | null>(null);
   const [liveDataError, setLiveDataError] = useState<string | null>(null);
 
   // Engines refs
@@ -437,8 +438,12 @@ export default function App() {
     if (el) el.scrollIntoView({ behavior: "smooth" });
   };
 
-  const currentPrice = candles[candles.length - 1]?.close || 65000;
-  const currentRegime = simulatorRef.current ? simulatorRef.current.getRegime() : "BULL_EXPANSION";
+  const currentPrice =
+    liveTicker?.price ??
+    formingCandle?.close ??
+    candles[candles.length - 1]?.close ??
+    null;
+  const currentRegime = simulatorRef.current ? simulatorRef.current.getRegime() : "CHOPPY_RANGE";
 
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-100 flex flex-col font-sans selection:bg-emerald-500/30 selection:text-emerald-200">
