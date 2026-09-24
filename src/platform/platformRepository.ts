@@ -710,7 +710,7 @@ export class PlatformRepository implements InstrumentPersistence {
     idempotencyKey: string,
     idempotencyFingerprint: string,
     order: OrderIntent,
-  ): Promise<PersistedOrder> {
+  ): Promise<{ order: PersistedOrder; created: boolean }> {
     if (!this.database.isReady()) throw new Error("PostgreSQL is required for sandbox order persistence.");
 
     return this.database.transaction(async (client) => {
@@ -740,7 +740,9 @@ export class PlatformRepository implements InstrumentPersistence {
         ].join("\n"),
         [accountId, idempotencyKey],
       );
-      if (duplicate.rows[0]) return this.mapPersistedOrderRow(duplicate.rows[0]);
+      if (duplicate.rows[0]) {
+        return { order: this.mapPersistedOrderRow(duplicate.rows[0]), created: false };
+      }
 
       await client.query(
         [
@@ -782,7 +784,7 @@ export class PlatformRepository implements InstrumentPersistence {
         [order.clientOrderId],
       );
       if (!inserted.rows[0]) throw new Error("Sandbox order reservation could not be persisted.");
-      return this.mapPersistedOrderRow(inserted.rows[0]);
+      return { order: this.mapPersistedOrderRow(inserted.rows[0]), created: true };
     });
   }
 
