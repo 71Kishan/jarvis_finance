@@ -460,7 +460,7 @@ export class StrategyOptimizer {
       })),
       walkForwardReliable: (() => {
         if (folds.length < 3 || selectedFolds.length < 3) return false;
-        const firstOosStart = selectedFolds[0].validationEndBar;
+        const firstOosStart = selectedFolds[0].validationEnd;
         const lastOosEnd = selectedFolds[selectedFolds.length - 1].testEnd;
         const oosStartTimestamp = candles[firstOosStart]?.timestamp;
         const oosEndTimestamp = candles[Math.min(candles.length - 1, lastOosEnd - 1)]?.timestamp;
