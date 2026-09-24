@@ -98,7 +98,7 @@ export const MarketChart: React.FC<MarketChartProps> = ({
 
     let cancelled = false;
     const load = async () => {
-      if (!remoteCandles.length) setRemoteLoading(true);
+      setRemoteLoading(true);
       try {
         const url =
           "/api/market/live-feed?symbol=" +
@@ -131,7 +131,7 @@ export const MarketChart: React.FC<MarketChartProps> = ({
       cancelled = true;
       clearInterval(timer);
     };
-  }, [assetSymbol, timeframe, remoteCandles.length]);
+  }, [assetSymbol, timeframe]);
 
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
   const [showIndicators, setShowIndicators] = useState({
@@ -142,13 +142,7 @@ export const MarketChart: React.FC<MarketChartProps> = ({
   });
 
   const chartData = useMemo(() => {
-    const closedRaw = activeCandles
-      .filter((c) =>
-        [c.timestamp, c.open, c.high, c.low, c.close, c.volume].every(Number.isFinite),
-      )
-      .sort((a, b) => a.timestamp - b.timestamp);
-
-    const sortedClosed = closedRaw
+    const sortedClosed = activeCandles
       .filter((c) =>
         [c.timestamp, c.open, c.high, c.low, c.close, c.volume].every(Number.isFinite),
       )
