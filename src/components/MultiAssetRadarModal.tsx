@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { MultiAssetOpportunity, AssetCategory } from "../types/trading";
-import { AssetSymbol } from "../engine/marketSimulator";
+
 import {
   Radar,
   TrendingUp,
