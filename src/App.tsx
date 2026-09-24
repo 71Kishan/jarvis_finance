@@ -520,7 +520,7 @@ export default function App() {
             <div className="lg:col-span-8 xl:col-span-9">
               {vitality && (
                 <PaperTradingDeck
-                  currentPrice={currentPrice ?? (marketSource === "SIMULATED" ? simulatorRef.current?.getLastCandle()?.close ?? 0 : 0)}
+                  currentPrice={currentPrice}
                   asset={currentAsset}
                   botState={botState}
                   vitality={vitality}
