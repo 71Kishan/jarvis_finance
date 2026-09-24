@@ -32,6 +32,8 @@ function makeGateway() {
 describe("server-owned shadow runtime", () => {
   test("processes only trusted completed candles and persists state without a provider order path", async () => {
     const saved: any[] = [];
+    const observations: any[] = [];
+    const trades: any[] = [];
     const storedRepository = {
       isPersistenceReady: () => true,
       loadShadowRuntime: async () => null,
@@ -49,6 +51,12 @@ describe("server-owned shadow runtime", () => {
           startedAt: input.startedAt,
           updatedAt: Date.now(),
         } satisfies ShadowRuntimeRecord;
+      },
+      recordShadowObservation: async (input: any) => {
+        observations.push(input);
+      },
+      upsertShadowTrade: async (runtimeId: string, trade: any) => {
+        trades.push({ runtimeId, trade });
       },
     } as unknown as PlatformRepository;
 
@@ -68,6 +76,10 @@ describe("server-owned shadow runtime", () => {
     expect(running.status).toBe("RUNNING");
     expect(running.lastProcessedCandleAt).toBe(1_760_004_740_000);
     expect(saved.length).toBeGreaterThan(0);
+    expect(observations.length).toBe(1);
+    expect(observations[0]?.eventType).toBe("HEARTBEAT");
+    expect(observations[0]?.runtimeId).toBe("shadow-1");
+    expect(trades.length).toBe(0);
     expect(running.activeTrade).toBeNull();
 
     await runtime.stop();
