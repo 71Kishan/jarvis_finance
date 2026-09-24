@@ -142,6 +142,8 @@ export interface ShadowEvidenceSummary {
   winningTrades: number;
   losingTrades: number;
   winRatePercent: string;
+  profitFactor: string;
+  expectancyPerTrade: string;
   totalPnl: string;
   totalFees: string;
 }
