@@ -6,7 +6,7 @@ interface MarketChartProps {
   candles: Candle[];
   activeTrade: Trade | null;
   tradeHistory: Trade[];
-  assetSymbol: AssetSymbol;
+  assetSymbol: string;
   regime: MarketRegime;
 }
 
