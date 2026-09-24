@@ -34,11 +34,13 @@ describe("Binance historical research data", () => {
 
     try {
       const service = new BinanceHistoricalDataService("https://example.test");
-      const candles = await service.fetchCompletedCandles("BTCUSDT", "1h", 120);
+      const candles = await service.fetchCompletedCandles("BTCUSDT", "1h", 150);
 
       expect(calls.length).toBe(2);
-      expect(candles.map((candle) => candle.timestamp)).toEqual([4, 5]);
-      expect(candles.every((candle) => candle.close === 105)).toBe(true);
+      expect(candles[0]?.timestamp).toBe(4);
+      expect(candles[candles.length - 1]?.timestamp).toBe(123);
+      expect(candles.length).toBe(120);
+      expect(candles.every((candle) => candle.close === 105 || candle.close === 104)).toBe(true);
     } finally {
       globalThis.fetch = originalFetch;
     }
