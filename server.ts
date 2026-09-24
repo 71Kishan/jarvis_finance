@@ -903,7 +903,7 @@ app.post("/api/research/strategy-validation/recompute", requireSameOrigin, requi
       status: validation.status,
       evaluatedAt: validation.evaluatedAt,
       evidenceHash,
-      policy: validation.policy,
+      policy: validation.policy as unknown as Record<string, unknown>,
       strategy: optimization.bestStrategy as unknown as Record<string, unknown>,
       metrics: {
         backtest: validation.backtest,
