@@ -54,8 +54,22 @@ interface ShadowEvidenceView {
   winningTrades: number;
   losingTrades: number;
   winRatePercent: string;
+  profitFactor: string;
+  expectancyPerTrade: string;
   totalPnl: string;
   totalFees: string;
+}
+
+interface ForwardValidationView {
+  status: "INSUFFICIENT_EVIDENCE" | "FAILED" | "PROVISIONALLY_VALIDATED";
+  gates: Array<{
+    id: string;
+    label: string;
+    passed: boolean;
+    observed: string;
+    required: string;
+    reason: string;
+  }>;
 }
 
 interface AccountConnectionView {
@@ -159,6 +173,7 @@ export const WorkspaceSurface: React.FC<WorkspaceSurfaceProps> = ({
   const [accountOverview, setAccountOverview] = useState<AccountOverview | null>(null);
   const [portfolioValuation, setPortfolioValuation] = useState<PortfolioValuationView | null>(null);
   const [shadowEvidence, setShadowEvidence] = useState<ShadowEvidenceView | null>(null);
+  const [forwardValidation, setForwardValidation] = useState<ForwardValidationView | null>(null);
   const [accountBusy, setAccountBusy] = useState(false);
   const [accountMessage, setAccountMessage] = useState<string | null>(null);
   const [sandboxBusy, setSandboxBusy] = useState<string | null>(null);
@@ -211,8 +226,10 @@ export const WorkspaceSurface: React.FC<WorkspaceSurfaceProps> = ({
         throw new Error(payload?.error || "Shadow evidence unavailable.");
       }
       setShadowEvidence(payload?.evidence || null);
+      setForwardValidation(payload?.forwardValidation || null);
     } catch {
       setShadowEvidence(null);
+      setForwardValidation(null);
     }
   };
 
@@ -768,6 +785,8 @@ export const WorkspaceSurface: React.FC<WorkspaceSurfaceProps> = ({
                 {[
                   ["Closed trades", String(shadowEvidence.closedTrades)],
                   ["Win rate", shadowEvidence.winRatePercent + "%"],
+                  ["Profit factor", shadowEvidence.profitFactor],
+                  ["Expectancy", shadowEvidence.expectancyPerTrade],
                   ["Total PnL", shadowEvidence.totalPnl],
                   ["Fees", shadowEvidence.totalFees],
                   ["Max DD", shadowEvidence.maxDrawdownPercent + "%"],
@@ -785,6 +804,50 @@ export const WorkspaceSurface: React.FC<WorkspaceSurfaceProps> = ({
               <div className="mt-4 rounded-lg border border-dashed border-neutral-800 px-4 py-5 text-center text-[10px] font-mono text-neutral-600">
                 NO PERSISTED SHADOW EVIDENCE FOR THE SELECTED STRATEGY
               </div>
+            )}
+
+            {forwardValidation && (
+              <section className="mt-4 rounded-lg border border-neutral-800 bg-neutral-950/70 p-4">
+                <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-2">
+                  <div>
+                    <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-neutral-600">Forward promotion gate</div>
+                    <div className="text-xs text-neutral-300 mt-1">
+                      {forwardValidation.status === "PROVISIONALLY_VALIDATED"
+                        ? "All forward evidence gates currently pass. This is a research-status result, not a profitability guarantee."
+                        : forwardValidation.status === "FAILED"
+                          ? "Forward evidence is sufficient to evaluate, but at least one required gate currently fails."
+                          : "Forward sample is still insufficient for a promotion decision."}
+                    </div>
+                  </div>
+                  <span className={`rounded-full border px-2.5 py-1 text-[10px] font-mono ${
+                    forwardValidation.status === "PROVISIONALLY_VALIDATED"
+                      ? "border-emerald-900/60 bg-emerald-950/20 text-emerald-300"
+                      : forwardValidation.status === "FAILED"
+                        ? "border-rose-900/60 bg-rose-950/20 text-rose-300"
+                        : "border-amber-900/60 bg-amber-950/20 text-amber-200"
+                  }`}>
+                    {forwardValidation.status.replaceAll("_", " ")}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mt-4">
+                  {forwardValidation.gates.map((gate) => (
+                    <div key={gate.id} className="rounded-lg border border-neutral-800 bg-neutral-950 p-2.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[10px] text-neutral-300">{gate.label}</span>
+                        <span className={gate.passed ? "text-emerald-400" : "text-rose-400"}>
+                          {gate.passed ? "PASS" : "FAIL"}
+                        </span>
+                      </div>
+                      <div className="text-[9px] text-neutral-600 mt-1">{gate.observed} • {gate.required}</div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="text-[10px] text-neutral-600 mt-3">
+                  Forward validation never authorizes provider orders. It only determines whether the current shadow evidence meets the research policy.
+                </div>
+              </section>
             )}
           </section>
 
