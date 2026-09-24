@@ -205,7 +205,7 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
         <div>
           <div className="text-[10px] text-neutral-400 font-sans">Asset Price</div>
           <div className="text-neutral-100 font-bold text-sm">
-            ${currentPrice.toFixed(2)}
+            {hasTrustedPrice ? "$" + Number(currentPrice).toFixed(2) : "—"}
           </div>
         </div>
         <div>
