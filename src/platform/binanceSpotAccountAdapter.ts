@@ -155,6 +155,10 @@ export class BinanceSpotAccountAdapter implements ExecutionAdapter {
     return this.accountId;
   }
 
+  public isOrderExecutionEnabled(): boolean {
+    return this.testnetOnly && this.ordersEnabled;
+  }
+
   public getHealth(): Promise<AdapterHealth> {
     return Promise.resolve({
       provider: this.provider,
