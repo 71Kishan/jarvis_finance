@@ -33,8 +33,10 @@ The AI layer remains outside the execution adapter and cannot directly send mone
 
 ## Persistence
 
-The SQL migration is the first production-oriented persistence contract. It is not yet wired into server startup. Before live capital, migrations, connection pooling, transaction boundaries, backups, access controls, reconciliation and incident recovery must be implemented and tested against an actual PostgreSQL deployment.
+PostgreSQL is now a runtime component when DATABASE_URL is configured. The server initializes the pool, applies ordered/checksummed migrations under a PostgreSQL advisory lock, and persists the canonical Binance Spot instrument catalog transactionally. Financial amounts remain NUMERIC in storage rather than being converted to JavaScript numbers.
+
+The paper runtime deliberately keeps its own atomic snapshot while the app remains in research/paper mode. This avoids silently turning the existing practice engine into a financial ledger before the provider reconciliation model is ready.
 
 ## Next phase
 
-Wire the instrument registry into the terminal UI, add provider-neutral market-data interfaces, build the Binance Spot authenticated account/order adapter, then add a controlled database repository and reconciliation service.
+The remaining gate is authenticated identity/session handling followed by the first provider account adapter in sandbox/testnet mode. That adapter must support read-only balances and open orders first, then idempotent order submission/cancellation and fill reconciliation. No live-capital path is enabled by this phase.
