@@ -22,7 +22,7 @@ describe("Binance historical research data", () => {
               "103",
               "105",
               "11",
-              index === 119 ? Date.now() + 60_000 : index + 5_999,
+              index === 999 ? Date.now() + 60_000 : index + 5_999,
             ]),
           ];
 
