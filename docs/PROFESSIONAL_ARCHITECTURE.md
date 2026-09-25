@@ -105,3 +105,12 @@ Sandbox order intents are now designed as durable server-owned records. Each req
 The sandbox policy is intentionally narrow: Binance Spot Testnet only, connected/readable/trade-capable account, active provider instrument, fresh trusted quote when required, venue quantity/price rules, bounded notional, and bounded open-order count. Withdrawal permission is rejected for this first sandbox path because order placement does not need custody-transfer authority.
 
 The provider execution adapter remains a separately gated boundary. The current implementation has the persistent intent store and safety policy in place; provider money-moving/testnet order submission is not enabled by default and must remain behind explicit testnet-only flags and a separately reviewed execution path.
+
+
+### Binance Spot Testnet execution boundary
+
+The sandbox execution path now has an authenticated server route for creating and cancelling Binance Spot Testnet orders. Durable Jarvis order records are created before provider submission, with a deterministic client order identifier derived from the authenticated user, internal account connection, and idempotency key. Provider account identity is kept separate from the internal Jarvis account ID.
+
+Submission is protected by two independent configuration gates and the adapter remains locked to the Binance Spot Testnet hostname in testnet-only mode. The provider adapter classifies authentication, balance, invalid-order, duplicate-order, unknown-order, timestamp, rate-limit, network, and server failures. Network or other ambiguous outcomes are recorded as UNKNOWN_RECONCILIATION and are not treated as cancellation.
+
+A server-side reconciliation worker queries persisted active orders, retrieves provider order state by symbol/client ID, retrieves account trades for known provider order IDs, and deduplicates fills in PostgreSQL. The execution API is therefore testnet-capable while the default configuration remains disabled and no real-money provider endpoint is exposed by this branch.
