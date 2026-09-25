@@ -87,6 +87,9 @@ export default function App() {
   const [equityCurve, setEquityCurve] = useState<EquityCurvePoint[]>(() =>
     tradingEngineRef.current!.getEquityCurve()
   );
+  const [learningRecords, setLearningRecords] = useState(() =>
+    tradingEngineRef.current!.getLearningRecords(200)
+  );
 
   // Modals state
   const [isStudyModalOpen, setIsStudyModalOpen] = useState(false);
@@ -150,6 +153,7 @@ export default function App() {
     setDailyGoal(strategyVaultInstance.getDailyGoal());
     setNotifications([...engine.getNotifications()]);
     setEquityCurve([...engine.getEquityCurve()]);
+    setLearningRecords([...engine.getLearningRecords(200)]);
 
     if (newState === "HALTED_DEAD") {
       setIsEmergencyModalOpen(true);
@@ -648,6 +652,7 @@ export default function App() {
         currentStrategy={strategy}
         candles={candles}
         recentTrades={tradeHistory}
+        learningRecords={learningRecords}
         drawdownPercent={vitality?.currentDrawdownPercent || 0}
         onApplyStrategy={handleApplyStrategy}
       />
