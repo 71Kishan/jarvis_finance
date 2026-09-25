@@ -190,7 +190,35 @@ export class AutonomousPaperRuntime {
           : [];
 
       for (const candle of toProcess) {
+        await this.learningShadow.refresh(
+          this.engine.getStrategy(),
+          candles,
+          this.engine.getLearningRecords(2000),
+          Date.now(),
+          false,
+        );
+
+        const historyBefore = this.engine.getTradeHistory().length;
+        const activeBefore = this.engine.getActiveTrade()?.id || null;
         this.engine.onTick(candle, candles);
+
+        const decisionFeatures = this.engine.getLastDecisionFeatures();
+        if (decisionFeatures) {
+          const activeAfter = this.engine.getActiveTrade();
+          const tradeId =
+            activeAfter &&
+            activeAfter.id !== activeBefore &&
+            activeAfter.learningFeatures?.decisionTimestamp === decisionFeatures.decisionTimestamp
+              ? activeAfter.id
+              : null;
+          this.learningShadow.recordDecision(decisionFeatures, tradeId, Date.now());
+        }
+
+        const historyAfter = this.engine.getTradeHistory();
+        if (historyAfter.length > historyBefore && historyAfter[0]) {
+          this.learningShadow.resolveTrade(historyAfter[0], Date.now());
+        }
+
         this.lastProcessedCandleAt = this.engine.getLastProcessedCandleTimestamp();
         this.stateStore.save(this.engine);
 
