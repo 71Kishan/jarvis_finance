@@ -76,3 +76,7 @@ The learning dataset now has an explicit preparation/audit stage before any ML e
 ### First controlled ML experiment
 
 The first machine-learning experiment is intentionally narrow: a deterministic logistic-regression meta-labeler predicts WIN versus non-WIN for an already eligible deterministic signal. It does not generate direction, sizing, exits, orders, or capital decisions. The implementation uses TRAIN-only missing-value imputation and normalization, validation-only selection of regularization and the filter threshold, and a held-out TEST evaluation. The experiment reports classification metrics and a test P&L overlay against taking every deterministic signal. A successful experiment is evidence for further research only; it does not promote or deploy a model.
+
+### Combined ML robustness gate
+
+The first ML path now combines balanced-class training, train-only Platt probability calibration, explicit classification/trading baselines, and three chronological rolling 90/30/30 experiments once at least 210 valid live-market feature rows exist. Each rolling period repeats model selection without using its future test rows. These results remain research evidence only.

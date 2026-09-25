@@ -4,6 +4,7 @@ import { StrategyOptimizer } from "../engine/optimizer";
 import { generateResearchCandidates } from "./candidateGenerator";
 import { LearningFeatureResearchPreparation, prepareLearningFeatureResearch } from "./researchDataset";
 import { FirstMlExperiment, MlExperimentResult } from "./mlBaseline";
+import { MlRollingRobustness, MlRobustnessResult } from "./mlRobustness";
 
 export type ResearchStatus =
   | "INSUFFICIENT_HISTORY"
@@ -35,6 +36,7 @@ export interface LearningResearchResult {
   dataset: LearningDatasetSummary;
   featureResearch: LearningFeatureResearchPreparation;
   mlExperiment: MlExperimentResult;
+  mlRobustness: MlRobustnessResult;
   historyBars: number;
   candidates: ResearchCandidateResult[];
   proposedCandidate: StrategyConfig | null;
@@ -87,6 +89,7 @@ export class LearningResearchLoop {
     const minimumHistoryBars = candles.length >= 360;
     const minimumLearningTrades = dataset.tradeRecords >= 30;
     const mlExperiment = FirstMlExperiment.run(learningRecords);
+    const mlRobustness = MlRollingRobustness.run(learningRecords);
 
     if (!minimumHistoryBars) {
       return {
@@ -94,6 +97,7 @@ export class LearningResearchLoop {
         dataset,
         featureResearch,
         mlExperiment,
+        mlRobustness,
         historyBars: candles.length,
         candidates: [],
         proposedCandidate: null,
@@ -181,6 +185,7 @@ export class LearningResearchLoop {
           : "Historical backtest candidates are shown, but no learning-driven proposal is allowed until at least 30 closed-trade records exist.",
         `Feature dataset readiness: ${featureResearch.readyForFirstExperiment ? "ready for first controlled experiment" : featureResearch.blockedReasons.join(" ")}`,
         `First ML experiment: ${mlExperiment.status === "READY" ? "completed on held-out test data" : mlExperiment.blockedReasons.join(" ")}`,
+        `Rolling ML robustness: ${mlRobustness.status === "READY" ? mlRobustness.foldsCompleted + " chronological folds completed" : "insufficient rolling history"}`,
         "Forward paper, shadow testing, and independent review remain required before any deployment gate.",
       ],
     };

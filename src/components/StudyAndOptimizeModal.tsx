@@ -267,6 +267,26 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
             </div>
           )}
 
+          {researchData && (
+            <div className="bg-neutral-900/50 border border-neutral-800 rounded-xl p-3 space-y-2 text-[11px]">
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-neutral-300">Robustness & Baseline Checks</span>
+                <span className={researchData.mlRobustness.status === "READY" ? "text-indigo-300" : "text-amber-400"}>
+                  {researchData.mlRobustness.status === "READY" ? "ROLLING EVALUATION COMPLETE" : "MORE HISTORY REQUIRED"}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-neutral-400">
+                <span>Rolling folds <strong className="text-neutral-200">{researchData.mlRobustness.foldsCompleted}/{researchData.mlRobustness.foldsRequired}</strong></span>
+                <span>Test rows <strong className="text-neutral-200">{researchData.mlRobustness.totalTestRows}</strong></span>
+                <span>Mean Brier <strong className="text-neutral-200">{researchData.mlRobustness.meanTestBrierScore || "N/A"}</strong></span>
+                <span>Positive-P&L folds <strong className="text-neutral-200">{Math.round(researchData.mlRobustness.positiveFilteredPnlFoldRate * 100)}%</strong></span>
+              </div>
+              <div className="text-[10px] text-neutral-500">
+                Classification baseline uses training-set class prevalence. Trading baseline is the deterministic all-trades test path. TEST observations are never used for tuning.
+              </div>
+            </div>
+          )}
+
           {/* Backtest Results of Candidates */}
           {researchData && (
             <div className="space-y-3">
