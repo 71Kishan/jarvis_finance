@@ -17,6 +17,10 @@ Live market data, simulated fills, full cost model, zero real capital, complete 
 ## Gate 4 — Shadow trading
 Generate decisions without sending orders. Compare expected fills, timing, spread, slippage, signal stability, and opportunity cost.
 
+### Sandbox order lifecycle requirement
+
+Before a broker sandbox is allowed to receive test orders, Jarvis must have durable order intents, account ownership enforcement, mandatory idempotency keys/fingerprints, deterministic client-order identifiers, explicit server-side notional/open-order caps, conservative provider-error classification, fill deduplication, and reconciliation that never assumes an order disappeared because a request timed out.
+
 ## Gate 5 — Production controls
 Authentication, durable database, secret management, idempotent orders, broker reconciliation, duplicate-order protection, stale-data protection, kill switch, loss/exposure/position limits, alerting, incident logs, and recovery procedure.
 
