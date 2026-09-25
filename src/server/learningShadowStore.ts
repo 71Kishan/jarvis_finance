@@ -1,6 +1,6 @@
 import fs from "fs";
 import path from "path";
-import type { Trade, LearningShadowSnapshot } from "../types/learningShadow";
+import type { Trade } from "../types/trading";
 import type { DecisionFeatureSnapshot } from "../learn/features";
 import type { MlShadowModelArtifact, MlShadowPrediction } from "../learn/mlBaseline";
 
