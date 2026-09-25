@@ -394,12 +394,12 @@ export class TradingEngine {
     const maxNotional = this.vitality.currentEquity * this.riskPolicy.maxPositionNotionalPercent / 100;
     const notional = Math.min(riskSize, maxNotional, this.vitality.cash);
     if (notional < 10) { this.logThought("DEFENSE", "Signal rejected: position too small", "Risk budget cannot support a meaningful paper order.", signalScore); return false; }
-    const fill = paperExecutionAdapter.entryFill({ expectedPrice: expectedPrice, type, notional, this.paperSettings);
+    const fill = paperExecutionAdapter.entryFill({ expectedPrice, side: type, notionalUsd: notional, settings: this.paperSettings });
     this.openPaperPosition(type, fill.fillPrice, notional, this.strategy.stopLossPercent, this.strategy.takeProfitPercent, this.strategy.trailingStop, rationale, signalScore, fill.feeUsd, fill.slippageUsd);
     return Boolean(this.activeTrade);
   }
   private openPaperPosition(type: "LONG" | "SHORT", expectedPrice: number, notional: number, stopLossPercent: number, takeProfitPercent: number, trailingStop: boolean, rationale?: string, signalScore = 0, feeOverride?: number, slippageOverride?: number) {
-    const fill = feeOverride === undefined ? paperExecutionAdapter.entryFill({ expectedPrice: expectedPrice, type, notional, this.paperSettings) : { expectedPrice, fillPrice: expectedPrice, feeUsd: feeOverride, slippageUsd: slippageOverride || 0 };
+    const fill = feeOverride === undefined\n      ? paperExecutionAdapter.entryFill({ expectedPrice, side: type, notionalUsd: notional, settings: this.paperSettings })\n      : { expectedPrice, fillPrice: expectedPrice, feeUsd: feeOverride, slippageUsd: slippageOverride || 0 };
     if (notional + fill.feeUsd > this.vitality.cash) return;
     const amount = notional / fill.fillPrice;
     this.vitality.cash = Number((this.vitality.cash - notional - fill.feeUsd).toFixed(2));
@@ -416,7 +416,7 @@ export class TradingEngine {
   public closeTrade(requestedExitPrice: number, status: "CLOSED_TAKE_PROFIT" | "CLOSED_STOP_LOSS" | "CLOSED_MANUAL" | "EMERGENCY_LIQUIDATED", reason: string) {
     const trade = this.activeTrade; if (!trade) return;
     const exitEstimate = Math.abs(trade.amount * requestedExitPrice);
-    const fill = paperExecutionAdapter.exitFill({ expectedPrice: requestedExitPrice, trade.type, exitEstimate, this.paperSettings);
+    const fill = paperExecutionAdapter.exitFill({ expectedPrice: requestedExitPrice, side: trade.type, notionalUsd: exitEstimate, settings: this.paperSettings });
     trade.exitPrice = Number(fill.fillPrice.toFixed(4)); trade.exitTime = Date.now(); trade.status = status;
     const entryFee = trade.feesUsd || 0;
     const gross = paperExecutionAdapter.grossPnL(trade.type, trade.entryPrice, fill.fillPrice, trade.amount);
