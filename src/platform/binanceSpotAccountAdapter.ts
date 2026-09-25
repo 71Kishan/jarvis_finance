@@ -299,22 +299,19 @@ export class BinanceSpotAccountAdapter implements ExecutionAdapter {
   public async cancelOrder(accountId: string, clientOrderId: string): Promise<BrokerOrder> {
     this.assertAccount(accountId);
     this.assertOrderSubmissionAllowed();
-    const existing = await this.getOrder(accountId, clientOrderId);
+
+    const openOrders = await this.getOpenOrders(accountId);
+    const existing = openOrders.find((order) => order.clientOrderId === clientOrderId);
+    if (!existing) {
+      throw new BinanceProviderError(
+        "Binance did not expose an open order for cancellation.",
+        "UNKNOWN_ORDER",
+        { code: -2013 },
+      );
+    }
+
     const symbol = this.extractProviderSymbol(existing.instrumentId);
     const response = await this.signedRequest<BinanceOrderResponse>("DELETE", "/api/v3/order", [
-      ["symbol", symbol],
-      ["origClientOrderId", clientOrderId],
-    ]);
-    return this.mapOrder(response);
-  }
-
-  public async getOrder(accountId: string, clientOrderId: string): Promise<BrokerOrder> {
-    this.assertAccount(accountId);
-    const symbol = this.extractProviderSymbolFromClientOrderIdHint(clientOrderId);
-    if (!symbol) {
-      throw new Error("Binance reconciliation requires the provider symbol to be supplied through getOrderBySymbol.");
-    }
-    const response = await this.signedRequest<BinanceOrderResponse>("GET", "/api/v3/order", [
       ["symbol", symbol],
       ["origClientOrderId", clientOrderId],
     ]);
@@ -475,10 +472,6 @@ export class BinanceSpotAccountAdapter implements ExecutionAdapter {
     const match = String(instrumentId || "").match(/^BINANCE_SPOT:BINANCE:([A-Z0-9_]+)$/i);
     if (!match) throw new Error("Order instrument is not a supported Binance Spot instrument.");
     return match[1].toUpperCase();
-  }
-
-  private extractProviderSymbolFromClientOrderIdHint(_clientOrderId: string): string | null {
-    return null;
   }
 
   private toBinanceOrderType(type: OrderIntent["type"]): string {
