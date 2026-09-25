@@ -72,6 +72,7 @@ export class BinanceSandboxReconciler {
     this.running = true;
     this.lastRunAt = Date.now();
     let processed = 0;
+    let runHadErrors = false;
 
     try {
       const active = await this.store.listActiveOrders();
@@ -143,6 +144,7 @@ export class BinanceSandboxReconciler {
             continue;
           }
 
+          runHadErrors = true;
           this.lastErrorAt = Date.now();
           this.lastError = error?.message || "Sandbox reconciliation failed.";
         }
@@ -150,7 +152,7 @@ export class BinanceSandboxReconciler {
 
       this.lastProcessedCount = processed;
       this.lastSuccessAt = Date.now();
-      this.lastError = null;
+      if (!runHadErrors) this.lastError = null;
       return this.getStatus();
     } catch (error: any) {
       this.lastErrorAt = Date.now();
