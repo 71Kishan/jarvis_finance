@@ -202,16 +202,25 @@ export class AutonomousPaperRuntime {
         const activeBefore = this.engine.getActiveTrade()?.id || null;
         this.engine.onTick(candle, candles);
 
+        const activeAfter = this.engine.getActiveTrade();
+        if (
+          activeAfter &&
+          activeAfter.id !== activeBefore &&
+          activeAfter.learningFeatures
+        ) {
+          this.learningShadow.recordDecision(
+            activeAfter.learningFeatures,
+            activeAfter.id,
+            Date.now(),
+          );
+        }
+
         const decisionFeatures = this.engine.getLastDecisionFeatures();
-        if (decisionFeatures) {
-          const activeAfter = this.engine.getActiveTrade();
-          const tradeId =
-            activeAfter &&
-            activeAfter.id !== activeBefore &&
-            activeAfter.learningFeatures?.decisionTimestamp === decisionFeatures.decisionTimestamp
-              ? activeAfter.id
-              : null;
-          this.learningShadow.recordDecision(decisionFeatures, tradeId, Date.now());
+        if (
+          decisionFeatures &&
+          decisionFeatures.decisionTimestamp !== activeAfter?.learningFeatures?.decisionTimestamp
+        ) {
+          this.learningShadow.recordDecision(decisionFeatures, null, Date.now());
         }
 
         const historyAfter = this.engine.getTradeHistory();
