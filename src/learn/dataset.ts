@@ -7,6 +7,10 @@ import {
 export interface LearningFeatureDatasetRow {
   tradeId: string;
   recordedAt: number;
+  decisionTimestamp: number;
+  entryTime: number;
+  exitTime: number;
+  holdingPeriodMs: number;
   asset: string;
   strategyId: string;
   strategyVersion: number;
@@ -112,6 +116,10 @@ export function buildLearningFeatureDataset(
     .map((record) => ({
       tradeId: record.tradeId,
       recordedAt: record.recordedAt,
+      decisionTimestamp: record.features!.decisionTimestamp,
+      entryTime: record.entryTime,
+      exitTime: record.exitTime,
+      holdingPeriodMs: record.holdingPeriodMs,
       asset: record.asset,
       strategyId: record.strategyId,
       strategyVersion: record.strategyVersion,
