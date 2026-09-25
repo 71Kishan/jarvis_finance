@@ -167,6 +167,7 @@ export class LearningResearchLoop {
       dataset,
       featureResearch,
       mlExperiment,
+      mlRobustness,
       historyBars: candles.length,
       candidates: ordered,
       proposedCandidate: proposed?.strategy ?? null,
