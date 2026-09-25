@@ -43,6 +43,8 @@ These controls reduce modeled risk; they do not guarantee protection from real-m
 ## Execution model
 Paper execution models adverse entry and exit slippage, entry and exit fees, conservative stop-first resolution for ambiguous OHLC bars, and next-bar-open entry for backtests.
 
+The execution layer now has two explicit contracts: a fill-execution model for deterministic simulated costs and a provider-neutral broker execution adapter for canonical order intents. The paper broker adapter proves idempotent market/limit order handling, balance reservation/cancellation, and trusted-price requirements without enabling real-money routing.
+
 ## Strategy lifecycle
 DRAFT -> BACKTEST -> OUT-OF-SAMPLE -> PAPER -> SHADOW -> VALIDATION -> LIVE-GATE
 The Strategy Vault records evidence. It must not auto-promote a strategy after a small number of trades.
