@@ -48,7 +48,7 @@ The execution layer now has two explicit contracts: a fill-execution model for d
 ## Strategy lifecycle
 DRAFT -> BACKTEST -> OUT-OF-SAMPLE -> PAPER -> SHADOW -> VALIDATION -> LIVE-GATE
 
-The learning layer now records each closed paper trade as a structured, strategy-versioned outcome record containing signal score, execution costs, holding period, exit status, rationale, and realized P&L. The journal is bounded and idempotent by trade ID. This is a dataset foundation, not automatic model retraining or strategy promotion.
+The learning layer now records each closed paper trade as a structured, strategy-versioned outcome record containing signal score, execution costs, holding period, exit status, rationale, and realized P&L. The journal is bounded and idempotent by trade ID. This is a dataset foundation, not automatic model retraining or strategy promotion. The research loop now consumes that journal alongside historical candles, generates deterministic small perturbation candidates, evaluates train/validation/held-out test windows, and requires a minimum learning dataset before exposing a candidate for review. Historical backtests remain available before that learning-data gate is met.
 The Strategy Vault records evidence. It must not auto-promote a strategy after a small number of trades.
 
 ## AI lifecycle
