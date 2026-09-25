@@ -5,7 +5,7 @@ import { cryptoSecurityService } from "../utils/cryptoSecurity";
 import { strategyVaultInstance } from "./strategyVault";
 import { DEFAULT_RISK_POLICY, evaluateRisk, RiskPolicyConfig } from "./riskPolicy";
 import { evaluateSignal, SignalResult } from "./signalEngine";
-import { grossPnL, modelEntryFill, modelExitFill, resolveStopTarget } from "./executionModel";
+import { paperExecutionAdapter } from "../execution/paperExecutionAdapter";
 
 export const DEFAULT_STRATEGY: StrategyConfig = {
   id: "jarvis-base-v1", name: "Jarvis Base Confluence V1", version: 1, asset: "BTC/USD",
@@ -138,7 +138,7 @@ export class TradingEngine {
 
   public recordEquitySnapshot(currentPrice?: number, tradeEvent?: string, pnlDelta = 0) {
     const mark = currentPrice || this.activeTrade?.entryPrice || 0;
-    const openPnl = this.activeTrade ? grossPnL(this.activeTrade.type, this.activeTrade.entryPrice, mark, this.activeTrade.amount) : 0;
+    const openPnl = this.activeTrade ? paperExecutionAdapter.grossPnL(this.activeTrade.type, this.activeTrade.entryPrice, mark, this.activeTrade.amount) : 0;
     const equity = this.activeTrade ? this.vitality.cash + (this.activeTrade.marginUsd || 0) + openPnl : this.vitality.cash;
     this.equityCurve.push({ timestamp: Date.now(), timeLabel: new Date().toLocaleTimeString(), equity: Number(equity.toFixed(2)), cash: Number(this.vitality.cash.toFixed(2)), drawdownPercent: Number(this.vitality.currentDrawdownPercent.toFixed(2)), pnlDelta: Number(pnlDelta.toFixed(2)), cumulativePnl: Number(this.vitality.totalPnl.toFixed(2)), tradeEvent });
     if (this.equityCurve.length > 500) this.equityCurve.shift();
@@ -282,7 +282,7 @@ export class TradingEngine {
   }
 
   private updateEquityAndHealth(currentPrice: number) {
-    const openPnl = this.activeTrade ? grossPnL(this.activeTrade.type, this.activeTrade.entryPrice, currentPrice, this.activeTrade.amount) : 0;
+    const openPnl = this.activeTrade ? paperExecutionAdapter.grossPnL(this.activeTrade.type, this.activeTrade.entryPrice, currentPrice, this.activeTrade.amount) : 0;
     const margin = this.activeTrade?.marginUsd || 0;
     this.vitality.currentEquity = Number((this.vitality.cash + margin + openPnl).toFixed(2));
     this.vitality.peakEquity = Math.max(this.vitality.peakEquity, this.vitality.currentEquity);
@@ -305,7 +305,7 @@ export class TradingEngine {
     // before this bar began. Updating a trailing stop from the same bar's high/low
     // before resolving that bar would introduce intrabar look-ahead bias.
     const priorStop = trade.stopLoss;
-    const result = resolveStopTarget(trade.type, candle, priorStop, trade.takeProfit);
+    const result = paperExecutionAdapter.resolveStopTarget(trade.type, candle, priorStop, trade.takeProfit);
 
     if (result.kind !== "NONE") {
       const status = result.kind === "TARGET" ? "CLOSED_TAKE_PROFIT" : "CLOSED_STOP_LOSS";
@@ -336,7 +336,7 @@ export class TradingEngine {
       }
     }
 
-    trade.pnl = Number(grossPnL(trade.type, trade.entryPrice, candle.close, trade.amount).toFixed(2));
+    trade.pnl = Number(paperExecutionAdapter.grossPnL(trade.type, trade.entryPrice, candle.close, trade.amount).toFixed(2));
     trade.pnlPercent = Number((trade.pnl / Math.max(1, trade.sizeUsd) * 100).toFixed(2));
   }
 
@@ -394,12 +394,12 @@ export class TradingEngine {
     const maxNotional = this.vitality.currentEquity * this.riskPolicy.maxPositionNotionalPercent / 100;
     const notional = Math.min(riskSize, maxNotional, this.vitality.cash);
     if (notional < 10) { this.logThought("DEFENSE", "Signal rejected: position too small", "Risk budget cannot support a meaningful paper order.", signalScore); return false; }
-    const fill = modelEntryFill(expectedPrice, type, notional, this.paperSettings);
+    const fill = paperExecutionAdapter.entryFill({ expectedPrice: expectedPrice, type, notional, this.paperSettings);
     this.openPaperPosition(type, fill.fillPrice, notional, this.strategy.stopLossPercent, this.strategy.takeProfitPercent, this.strategy.trailingStop, rationale, signalScore, fill.feeUsd, fill.slippageUsd);
     return Boolean(this.activeTrade);
   }
   private openPaperPosition(type: "LONG" | "SHORT", expectedPrice: number, notional: number, stopLossPercent: number, takeProfitPercent: number, trailingStop: boolean, rationale?: string, signalScore = 0, feeOverride?: number, slippageOverride?: number) {
-    const fill = feeOverride === undefined ? modelEntryFill(expectedPrice, type, notional, this.paperSettings) : { expectedPrice, fillPrice: expectedPrice, feeUsd: feeOverride, slippageUsd: slippageOverride || 0 };
+    const fill = feeOverride === undefined ? paperExecutionAdapter.entryFill({ expectedPrice: expectedPrice, type, notional, this.paperSettings) : { expectedPrice, fillPrice: expectedPrice, feeUsd: feeOverride, slippageUsd: slippageOverride || 0 };
     if (notional + fill.feeUsd > this.vitality.cash) return;
     const amount = notional / fill.fillPrice;
     this.vitality.cash = Number((this.vitality.cash - notional - fill.feeUsd).toFixed(2));
@@ -416,10 +416,10 @@ export class TradingEngine {
   public closeTrade(requestedExitPrice: number, status: "CLOSED_TAKE_PROFIT" | "CLOSED_STOP_LOSS" | "CLOSED_MANUAL" | "EMERGENCY_LIQUIDATED", reason: string) {
     const trade = this.activeTrade; if (!trade) return;
     const exitEstimate = Math.abs(trade.amount * requestedExitPrice);
-    const fill = modelExitFill(requestedExitPrice, trade.type, exitEstimate, this.paperSettings);
+    const fill = paperExecutionAdapter.exitFill({ expectedPrice: requestedExitPrice, trade.type, exitEstimate, this.paperSettings);
     trade.exitPrice = Number(fill.fillPrice.toFixed(4)); trade.exitTime = Date.now(); trade.status = status;
     const entryFee = trade.feesUsd || 0;
-    const gross = grossPnL(trade.type, trade.entryPrice, fill.fillPrice, trade.amount);
+    const gross = paperExecutionAdapter.grossPnL(trade.type, trade.entryPrice, fill.fillPrice, trade.amount);
     const totalTradeFees = entryFee + fill.feeUsd;
     const economicNet = gross - totalTradeFees;
     trade.feesUsd = Number(totalTradeFees.toFixed(2));
