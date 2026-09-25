@@ -109,7 +109,7 @@ export function classifyBinanceError(code: number | undefined, httpStatus: numbe
   if (code === -2018 || /duplicate.*client|client.*order.*id/i.test(message)) return "DUPLICATE_CLIENT_ORDER";
   if (code === -1021 || /timestamp|recvwindow/i.test(message)) return "TIMESTAMP";
   if (httpStatus === 418 || httpStatus === 429 || code === -1003) return "RATE_LIMIT";
-  if (httpStatus >= 500 || (code !== undefined && code <= -1000 && code !== -1003)) return "SERVER";
+  if ((httpStatus !== undefined && httpStatus >= 500) || (code !== undefined && code <= -1000 && code !== -1003)) return "SERVER";
   return "UNKNOWN";
 }
 
