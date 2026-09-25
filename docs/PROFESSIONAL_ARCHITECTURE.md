@@ -85,3 +85,14 @@ The first ML path now combines balanced-class training, train-only Platt probabi
 ### Forward shadow validation
 
 The server now keeps bounded experiment records with model fingerprints. A versioned ML artifact can be restored for forward shadow scoring without execution access. The paper runtime records shadow predictions around paper decisions, resolves them against paper outcomes, and monitors log loss, Brier score, sample size, and recent feature drift. A separate review gate requires a ready experiment, rolling robustness, enough shadow evidence, baseline-level or better resolved-sample metrics, and clear drift. Passing this gate is review status only and never activates live trading.
+
+
+## Authenticated control plane
+
+Authenticated account surfaces use a PostgreSQL-backed operator identity and opaque 8-hour session cookie. The raw session token is never persisted; only its SHA-256 hash is stored. Passwords are stored only as parameterized salted scrypt verifiers.
+
+Login attempts are throttled per IP/email combination and repeated failures temporarily lock the account. State-changing authenticated requests enforce same-origin checks. Account overview and provider synchronization are scoped to the authenticated user.
+
+The Binance Spot Testnet account adapter remains server-side. Browser clients never receive exchange API credentials. Read-only account synchronization persists provider-owned balances and open orders and marks locally active orders missing from the provider response as UNKNOWN_RECONCILIATION rather than assuming cancellation.
+
+The authenticated browser session controls the user-facing account plane. Runtime control-token endpoints remain a separate operator interface for unattended paper/shadow infrastructure until a dedicated authorization and service-identity model is introduced.
