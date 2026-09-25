@@ -1,7 +1,6 @@
 import type { PoolClient } from "pg";
 import type { BrokerOrder, OrderIntent, OrderStatus } from "../platform/types";
 import { PlatformDatabase } from "./platformDatabase";
-import { canTransitionOrderStatus } from "../platform/orderStateMachine";
 
 export interface PersistedSandboxOrder extends OrderIntent {
   status: OrderStatus;
@@ -48,6 +47,22 @@ interface OrderRow {
   idempotency_key: string;
   idempotency_fingerprint: string;
   failure_reason: string | null;
+}
+
+function canTransitionOrderStatus(current: OrderStatus, incoming: OrderStatus): boolean {
+  const allowed: Record<OrderStatus, ReadonlySet<OrderStatus>> = {
+    PENDING_SUBMIT: new Set(["PENDING_SUBMIT", "SUBMITTED", "PARTIALLY_FILLED", "FILLED", "CANCEL_PENDING", "CANCELLED", "REJECTED", "EXPIRED", "UNKNOWN_RECONCILIATION", "SUBMISSION_FAILED"]),
+    SUBMITTED: new Set(["SUBMITTED", "PARTIALLY_FILLED", "FILLED", "CANCEL_PENDING", "CANCELLED", "REJECTED", "EXPIRED", "UNKNOWN_RECONCILIATION"]),
+    PARTIALLY_FILLED: new Set(["PARTIALLY_FILLED", "FILLED", "CANCEL_PENDING", "CANCELLED", "EXPIRED", "UNKNOWN_RECONCILIATION"]),
+    CANCEL_PENDING: new Set(["CANCEL_PENDING", "SUBMITTED", "PARTIALLY_FILLED", "FILLED", "CANCELLED", "EXPIRED", "UNKNOWN_RECONCILIATION"]),
+    FILLED: new Set(["FILLED"]),
+    CANCELLED: new Set(["CANCELLED"]),
+    REJECTED: new Set(["REJECTED"]),
+    EXPIRED: new Set(["EXPIRED"]),
+    UNKNOWN_RECONCILIATION: new Set(["UNKNOWN_RECONCILIATION", "SUBMITTED", "PARTIALLY_FILLED", "FILLED", "CANCEL_PENDING", "CANCELLED", "REJECTED", "EXPIRED"]),
+    SUBMISSION_FAILED: new Set(["SUBMISSION_FAILED"]),
+  };
+  return allowed[current]?.has(incoming) ?? false;
 }
 
 function mapOrder(row: OrderRow): PersistedSandboxOrder {
