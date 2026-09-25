@@ -143,6 +143,7 @@ export interface Fill {
   accountId: string;
   orderClientId: string;
   externalOrderId?: string;
+  externalTradeId?: string;
   instrumentId: string;
   side: OrderSide;
   quantity: string;
