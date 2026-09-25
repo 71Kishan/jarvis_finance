@@ -1,3 +1,5 @@
+import type { DecisionFeatureSnapshot } from "./features";
+import { toNumericFeatureVector } from "./dataset";
 import type { LearningFeatureDatasetRow } from "./dataset";
 import { LEARNING_FEATURE_NAMES } from "./dataset";
 import { LEARNING_RESEARCH_MIN_ROWS, prepareLearningFeatureResearch } from "./researchDataset";
@@ -43,6 +45,28 @@ export interface MlTradingOverlayMetrics {
   profitFactor: number;
   maxDrawdownUsd: number;
   averagePnlUsd: number;
+}
+
+export interface MlShadowModelArtifact {
+  schemaVersion: 1;
+  modelType: "LOGISTIC_META_LABELER";
+  featureNames: string[];
+  means: number[];
+  scales: number[];
+  weights: number[];
+  bias: number;
+  calibrationSlope: number;
+  calibrationIntercept: number;
+  threshold: number;
+  config: LogisticModelConfig;
+  trainedThrough: number;
+  fingerprint: string;
+}
+
+export interface MlShadowPrediction {
+  modelFingerprint: string;
+  probability: number;
+  accepted: boolean;
 }
 
 export interface MlExperimentResult {
@@ -267,6 +291,27 @@ function calibratedPredict(
   );
 }
 
+function deterministicHash(value: string): string {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
+function shadowVector(
+  artifact: MlShadowModelArtifact,
+  snapshot: DecisionFeatureSnapshot,
+): number[] {
+  const numeric = toNumericFeatureVector(snapshot);
+  return artifact.featureNames.map((name, index) => {
+    const raw = numeric[name];
+    const value = raw !== null && Number.isFinite(raw) ? raw : artifact.means[index];
+    return (value - artifact.means[index]) / artifact.scales[index];
+  });
+}
+
 function logLoss(y: number[], p: number[]): number {
   if (!y.length) return 0;
   const loss = mean(y.map((actual, index) => {
@@ -469,6 +514,64 @@ function selectModel(
 }
 
 export class FirstMlExperiment {
+  public static createShadowModel(records: LearningTradeRecord[]): MlShadowModelArtifact | null {
+    const preparation = prepareLearningFeatureResearch(records);
+    if (!preparation.readyForFirstExperiment || preparation.split.validation.length === 0) return null;
+
+    const result = FirstMlExperiment.run(records);
+    if (result.status !== "READY" || !result.model || !result.selectedThreshold || !result.selectedFeatures.length) {
+      return null;
+    }
+
+    const historyRows = preparation.split.train.concat(preparation.split.validation);
+    if (historyRows.length < 30 || new Set(historyRows.map(targetFor)).size < 2) return null;
+
+    const names = result.selectedFeatures;
+    const matrix = buildMatrix(names, historyRows, [], []);
+    const innerFitCount = Math.max(2, Math.floor(historyRows.length * 0.8));
+    const yFit = historyRows.slice(0, innerFitCount).map(targetFor);
+    const yCalibration = historyRows.slice(innerFitCount).map(targetFor);
+    const model = fit(matrix.train.slice(0, innerFitCount), yFit, names, result.model);
+    const calibrator = fitPlattCalibration(
+      rawLogits(model, matrix.train.slice(innerFitCount)),
+      yCalibration,
+    );
+
+    const artifactBase = {
+      schemaVersion: 1 as const,
+      modelType: "LOGISTIC_META_LABELER" as const,
+      featureNames: names,
+      means: matrix.means,
+      scales: matrix.scales,
+      weights: model.weights,
+      bias: model.bias,
+      calibrationSlope: calibrator.slope,
+      calibrationIntercept: calibrator.intercept,
+      threshold: result.selectedThreshold,
+      config: result.model,
+      trainedThrough: Math.max(...historyRows.map((row) => row.decisionTimestamp)),
+    };
+    const fingerprint = deterministicHash(JSON.stringify(artifactBase));
+
+    return { ...artifactBase, fingerprint };
+  }
+
+  public static predictShadow(
+    artifact: MlShadowModelArtifact,
+    snapshot: DecisionFeatureSnapshot,
+  ): MlShadowPrediction {
+    const vector = shadowVector(artifact, snapshot);
+    const logit = artifact.bias + artifact.weights.reduce((sum, weight, index) => sum + weight * vector[index], 0);
+    const probability = clampProbability(
+      sigmoid(artifact.calibrationSlope * logit + artifact.calibrationIntercept),
+    );
+    return {
+      modelFingerprint: artifact.fingerprint,
+      probability,
+      accepted: probability >= artifact.threshold,
+    };
+  }
+
   public static run(records: LearningTradeRecord[]): MlExperimentResult {
     const preparation = prepareLearningFeatureResearch(records);
 
