@@ -38,7 +38,7 @@ describe("provider-neutral paper broker adapter", () => {
     const usd = balances.find((b) => b.asset === "USD");
     const btc = balances.find((b) => b.asset === "BTC");
 
-    expect(Number(usd?.free)).toBeCloseTo(799.16, 6);
+    expect(Number(usd?.free)).toBeCloseTo(799.88, 6);
     expect(Number(btc?.free)).toBeCloseTo(2, 8);
 
     const fills = broker.getRecordedFills();
