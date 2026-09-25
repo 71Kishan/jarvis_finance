@@ -77,9 +77,7 @@ export class LearningShadowStore {
 
   public setModel(model: MlShadowModelArtifact): void {
     this.state.model = JSON.parse(JSON.stringify(model));
-    this.state.predictions = this.state.predictions.filter(
-      (record) => record.modelFingerprint === model.fingerprint,
-    ).slice(0, MAX_PREDICTIONS);
+    this.state.predictions = this.state.predictions.slice(0, MAX_PREDICTIONS);
     this.save();
   }
 
@@ -130,7 +128,11 @@ export class LearningShadowStore {
   }
 
   public getSummary(now = Date.now()): ShadowPerformanceSummary {
-    const resolved = this.state.predictions.filter((record) => record.outcome !== null);
+    const model = this.state.model;
+    const relevantPredictions = model
+      ? this.state.predictions.filter((record) => record.modelFingerprint === model.fingerprint)
+      : [];
+    const resolved = relevantPredictions.filter((record) => record.outcome !== null);
     const wins = resolved.filter((record) => record.outcome === "WIN").length;
     const losses = resolved.filter((record) => record.outcome === "LOSS").length;
     const flats = resolved.filter((record) => record.outcome === "FLAT").length;
@@ -169,8 +171,7 @@ export class LearningShadowStore {
       }, 0) / resolved.length).toFixed(6))
       : null;
 
-    const model = this.state.model;
-    const recent = this.state.predictions.slice(0, DRIFT_WINDOW);
+    const recent = relevantPredictions.slice(0, DRIFT_WINDOW);
     let driftScore: number | null = null;
     let missingRate = 0;
     if (model && recent.length) {
@@ -198,7 +199,7 @@ export class LearningShadowStore {
     }
 
     return {
-      predictions: this.state.predictions.length,
+      predictions: relevantPredictions.length,
       resolvedPredictions: resolved.length,
       wins,
       losses,
