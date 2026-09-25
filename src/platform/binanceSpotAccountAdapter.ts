@@ -103,12 +103,12 @@ export class BinanceProviderError extends Error {
 export function classifyBinanceError(code: number | undefined, httpStatus: number | undefined, message: string, network = false): BinanceProviderErrorKind {
   if (network) return "NETWORK";
   if (code === -2015 || httpStatus === 401 || httpStatus === 403) return "AUTHENTICATION";
-  if (code === -2010 || code === -1013 || code === -1100 || code === -1101 || code === -1102 || code === -1111 || code === -1116 || code === -1121) return "INVALID_ORDER";
-  if (code === -2019 || /insufficient|balance/i.test(message)) return "INSUFFICIENT_BALANCE";
+  if (code === -2018 || code === -2019 || /insufficient|balance is insufficient/i.test(message)) return "INSUFFICIENT_BALANCE";
   if (code === -2013 || /order does not exist|unknown order/i.test(message)) return "UNKNOWN_ORDER";
-  if (code === -2018 || /duplicate.*client|client.*order.*id/i.test(message)) return "DUPLICATE_CLIENT_ORDER";
+  if (/duplicate.*client|client.*order.*id/i.test(message)) return "DUPLICATE_CLIENT_ORDER";
   if (code === -1021 || /timestamp|recvwindow/i.test(message)) return "TIMESTAMP";
   if (httpStatus === 418 || httpStatus === 429 || code === -1003) return "RATE_LIMIT";
+  if (code === -2010 || code === -1013 || code === -1100 || code === -1101 || code === -1102 || code === -1111 || code === -1116 || code === -1121) return "INVALID_ORDER";
   if ((httpStatus !== undefined && httpStatus >= 500) || (code !== undefined && code <= -1000 && code !== -1003)) return "SERVER";
   return "UNKNOWN";
 }
