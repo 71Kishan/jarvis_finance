@@ -108,6 +108,7 @@ export type OrderStatus =
   | "CANCEL_PENDING"
   | "CANCELLED"
   | "REJECTED"
+  | "SUBMISSION_FAILED"
   | "EXPIRED"
   | "UNKNOWN_RECONCILIATION";
 
