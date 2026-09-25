@@ -40,3 +40,9 @@ Only after every prior gate passes should live capital be considered. Start with
 Pause when market data is stale, provider identity changes unexpectedly, reconciliation fails, strategy version is unknown, risk state is inconsistent, unexpected code/configuration changed, material model/data drift appears, or risk limits are breached.
 
 A safety-triggered pause is a success condition for the safety system.
+
+### Gate 6 implementation — Binance Spot Testnet lifecycle
+
+The current sandbox branch implements the first broker-connected lifecycle behind the existing authenticated control plane: persist the order intent first, submit to Binance Spot Testnet, persist the provider order ID/status, retrieve fills, deduplicate provider trades, support cancellation, and reconcile uncertain state after timeouts or restarts. The provider adapter is locked to the Binance Spot Testnet endpoint when testnet-only mode is enabled.
+
+The default configuration keeps provider order submission disabled. Enabling testnet orders requires both the Jarvis sandbox-order flag and the Binance testnet-order flag; this branch does not contain a real-money order route. A testnet lifecycle pass is evidence that execution plumbing works, not evidence that a strategy is profitable or ready for live capital.
