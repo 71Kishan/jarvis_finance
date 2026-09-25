@@ -11,8 +11,11 @@ import { BinanceInstrumentCatalog } from "./src/server/binanceInstrumentCatalog"
 import { AutonomousPaperRuntime } from "./src/server/paperRuntime";
 import { PlatformDatabase } from "./src/server/platformDatabase";
 import { PlatformRepository } from "./src/platform/platformRepository";
-import { BinanceSpotAccountAdapter } from "./src/platform/binanceSpotAccountAdapter";
+import { BinanceProviderError, BinanceSpotAccountAdapter } from "./src/platform/binanceSpotAccountAdapter";
 import { AuthControlStore } from "./src/server/authControlStore";
+import { SandboxOrderStore } from "./src/server/sandboxOrderStore";
+import { BinanceSandboxReconciler } from "./src/server/binanceSandboxReconciler";
+import { deriveClientOrderId, evaluateSandboxOrderPolicy, fingerprintOrderIntent, isSandboxOrderSubmissionEnabled } from "./src/server/sandboxOrderPolicy";
 import {
   JARVIS_SESSION_COOKIE,
   SESSION_TTL_MS,
@@ -470,6 +473,343 @@ app.post("/api/account/binance-testnet/sync", requireSession, requireSameOrigin,
   }
 });
 
+function isNonEmptyString(value: unknown, maxLength: number): value is string {
+  return typeof value === "string" && value.trim().length > 0 && value.trim().length <= maxLength;
+}
+
+function normalizeOrderBody(body: any): {
+  side: "BUY" | "SELL";
+  type: "MARKET" | "LIMIT" | "LIMIT_MAKER" | "STOP" | "STOP_LIMIT" | "TAKE_PROFIT" | "TAKE_PROFIT_LIMIT";
+  quantity: string;
+  limitPrice?: string;
+  stopPrice?: string;
+  timeInForce?: "DAY" | "GTC" | "IOC" | "FOK" | "GTX";
+  reduceOnly: boolean;
+  strategyId?: string;
+  strategyVersion?: number;
+  reason?: string;
+} {
+  const sides = new Set(["BUY", "SELL"]);
+  const types = new Set(["MARKET", "LIMIT", "LIMIT_MAKER", "STOP", "STOP_LIMIT", "TAKE_PROFIT", "TAKE_PROFIT_LIMIT"]);
+  const timeInForce = body?.timeInForce == null ? undefined : String(body.timeInForce).toUpperCase();
+
+  if (!sides.has(String(body?.side || "").toUpperCase())) throw new Error("Invalid order side.");
+  if (!types.has(String(body?.type || "").toUpperCase())) throw new Error("Invalid order type.");
+  if (!isNonEmptyString(body?.quantity, 64)) throw new Error("A valid order quantity is required.");
+  if (timeInForce !== undefined && !new Set(["DAY", "GTC", "IOC", "FOK", "GTX"]).has(timeInForce)) {
+    throw new Error("Invalid time-in-force.");
+  }
+
+  const strategyVersion = body?.strategyVersion == null ? undefined : Number(body.strategyVersion);
+  if (strategyVersion !== undefined && (!Number.isInteger(strategyVersion) || strategyVersion < 0)) {
+    throw new Error("Strategy version must be a non-negative integer.");
+  }
+
+  return {
+    side: String(body.side).toUpperCase() as any,
+    type: String(body.type).toUpperCase() as any,
+    quantity: body.quantity.trim(),
+    limitPrice: isNonEmptyString(body?.limitPrice, 64) ? body.limitPrice.trim() : undefined,
+    stopPrice: isNonEmptyString(body?.stopPrice, 64) ? body.stopPrice.trim() : undefined,
+    timeInForce: timeInForce as any,
+    reduceOnly: body?.reduceOnly === true,
+    strategyId: isNonEmptyString(body?.strategyId, 128) ? body.strategyId.trim() : undefined,
+    strategyVersion,
+    reason: isNonEmptyString(body?.reason, 500) ? body.reason.trim() : undefined,
+  };
+}
+
+app.post("/api/account/binance-testnet/orders", requireSession, requireSameOrigin, async (req: AuthenticatedRequest, res: Response) => {
+  if (!isSandboxOrderSubmissionEnabled()) {
+    return res.status(503).json({
+      success: false,
+      status: "ORDER_SUBMISSION_DISABLED",
+      error: "Binance Spot Testnet order submission is disabled by server safety gates.",
+    });
+  }
+
+  if (!binanceSpotTestnetAccount.isConfigured()) {
+    return res.status(503).json({
+      success: false,
+      status: "PROVIDER_UNAVAILABLE",
+      error: "Binance Spot testnet credentials are not configured on the server.",
+    });
+  }
+
+  const accountId = isNonEmptyString(req.body?.accountId, 80) ? req.body.accountId.trim() : "";
+  const instrumentId = isNonEmptyString(req.body?.instrumentId, 160) ? req.body.instrumentId.trim() : "";
+  const idempotencyKey = isNonEmptyString(req.body?.idempotencyKey, 128) ? req.body.idempotencyKey.trim() : "";
+
+  if (!accountId) return res.status(400).json({ success: false, error: "accountId is required." });
+  if (!instrumentId) return res.status(400).json({ success: false, error: "instrumentId is required." });
+  if (!idempotencyKey) return res.status(400).json({ success: false, error: "idempotencyKey is required." });
+
+  try {
+    const body = normalizeOrderBody(req.body);
+    const overview = await authControlStore.getAccountOverview(req.jarvisUser!.id);
+    const connection = overview.connections.find((item) => item.id === accountId);
+
+    if (!connection) return res.status(404).json({ success: false, error: "Trading account connection not found." });
+
+    const instrument = binanceInstrumentCatalog.get(instrumentId);
+    if (!instrument) return res.status(404).json({ success: false, error: "Trading instrument is not present in the server catalog." });
+
+    if (connection.externalAccountId !== binanceSpotTestnetAccount.getAccountId()) {
+      return res.status(409).json({ success: false, error: "The selected account is not the configured Binance Spot Testnet account." });
+    }
+
+    await binanceMarketData.ensureSymbol(instrument.symbol, instrument.providerSymbol);
+    const ticker = binanceMarketData.getTicker(instrument.symbol);
+
+    const intentWithoutClientId = {
+      accountId: connection.id,
+      instrumentId: instrument.instrumentId,
+      ...body,
+      requestedAt: Date.now(),
+    } satisfies Omit<import("./src/platform/types").OrderIntent, "clientOrderId">;
+
+    const order: import("./src/platform/types").OrderIntent = {
+      clientOrderId: deriveClientOrderId(req.jarvisUser!.id, connection.id, idempotencyKey),
+      ...intentWithoutClientId,
+    };
+
+    const policy = evaluateSandboxOrderPolicy({
+      order,
+      account: connection,
+      instrument,
+      balances: overview.balances.filter((balance) => balance.accountId === connection.id),
+      quote: ticker
+        ? { bid: String(ticker.bid), ask: String(ticker.ask), updatedAt: ticker.lastUpdated }
+        : undefined,
+      openOrderCount: overview.openOrders.filter((open) => open.accountId === connection.id).length,
+    });
+
+    if (!policy.allowed) {
+      await authControlStore.recordAuditEvent({
+        userId: req.jarvisUser!.id,
+        accountId: connection.id,
+        eventType: "SANDBOX_ORDER_REJECTED_POLICY",
+        requestId: req.get("X-Request-Id") || undefined,
+        idempotencyKey,
+        payload: { instrumentId, side: order.side, type: order.type, quantity: order.quantity, reasons: policy.reasons },
+      });
+      return res.status(422).json({ success: false, status: "POLICY_REJECTED", reasons: policy.reasons, risk: policy.risk });
+    }
+
+    const fingerprint = fingerprintOrderIntent(order);
+    const pending = await sandboxOrderStore.createOrGetPendingIntent({
+      userId: req.jarvisUser!.id,
+      accountId: connection.id,
+      instrumentId: instrument.instrumentId,
+      idempotencyKey,
+      clientOrderId: order.clientOrderId,
+      idempotencyFingerprint: fingerprint,
+    }, order);
+
+    if (!pending.created) {
+      return res.json({
+        success: true,
+        idempotent: true,
+        order: pending.order,
+        fills: await sandboxOrderStore.getStoredFills(req.jarvisUser!.id, pending.order.clientOrderId),
+      });
+    }
+
+    try {
+      // The provider adapter operates on the provider's external account identity;
+      // the durable Jarvis order remains owned by the internal account connection.
+      const providerOrder = await binanceSpotTestnetAccount.submitOrder({
+        ...order,
+        accountId: connection.externalAccountId!,
+      });
+
+      let persisted = await sandboxOrderStore.markStatus(
+        req.jarvisUser!.id,
+        order.clientOrderId,
+        providerOrder.status,
+        {
+          externalOrderId: providerOrder.externalOrderId,
+          filledQuantity: providerOrder.filledQuantity,
+          averageFillPrice: providerOrder.averageFillPrice,
+          submittedAt: providerOrder.submittedAt,
+        },
+      );
+
+      if (providerOrder.externalOrderId) {
+        const fills = await binanceSpotTestnetAccount.getFills(
+          connection.externalAccountId!,
+          instrument.providerSymbol,
+          providerOrder.externalOrderId,
+        );
+        for (const fill of fills) {
+          await sandboxOrderStore.recordFill(req.jarvisUser!.id, {
+            ...fill,
+            accountId: connection.id,
+            orderClientId: order.clientOrderId,
+          });
+        }
+        persisted = await sandboxOrderStore.getOwnedOrder(req.jarvisUser!.id, order.clientOrderId);
+      }
+
+      await authControlStore.recordAuditEvent({
+        userId: req.jarvisUser!.id,
+        accountId: connection.id,
+        eventType: "SANDBOX_ORDER_SUBMITTED",
+        requestId: req.get("X-Request-Id") || undefined,
+        idempotencyKey,
+        payload: {
+          clientOrderId: order.clientOrderId,
+          externalOrderId: providerOrder.externalOrderId,
+          status: providerOrder.status,
+          filledQuantity: providerOrder.filledQuantity,
+        },
+      });
+
+      return res.status(201).json({
+        success: true,
+        idempotent: false,
+        order: persisted || providerOrder,
+        fills: await sandboxOrderStore.getStoredFills(req.jarvisUser!.id, order.clientOrderId),
+      });
+    } catch (error: any) {
+      const ambiguous = error instanceof BinanceProviderError &&
+        ["NETWORK", "SERVER", "UNKNOWN", "TIMESTAMP", "DUPLICATE_CLIENT_ORDER", "UNKNOWN_ORDER"].includes(error.kind);
+
+      const failureReason = error?.message || "Binance Spot testnet order submission failed.";
+      await sandboxOrderStore.markStatus(
+        req.jarvisUser!.id,
+        order.clientOrderId,
+        ambiguous ? "UNKNOWN_RECONCILIATION" : "REJECTED",
+        { failureReason },
+      );
+
+      await authControlStore.recordAuditEvent({
+        userId: req.jarvisUser!.id,
+        accountId: connection.id,
+        eventType: ambiguous ? "SANDBOX_ORDER_SUBMISSION_AMBIGUOUS" : "SANDBOX_ORDER_REJECTED_PROVIDER",
+        requestId: req.get("X-Request-Id") || undefined,
+        idempotencyKey,
+        payload: { clientOrderId: order.clientOrderId, error: failureReason, ambiguous },
+      });
+
+      return res.status(ambiguous ? 202 : 502).json({
+        success: ambiguous ? false : false,
+        status: ambiguous ? "UNKNOWN_RECONCILIATION" : "REJECTED",
+        error: failureReason,
+        clientOrderId: order.clientOrderId,
+      });
+    }
+  } catch (error: any) {
+    const status = /IDEMPOTENCY_KEY_REUSED/.test(String(error?.message)) ? 409 : 400;
+    return res.status(status).json({ success: false, error: error?.message || "Sandbox order request failed." });
+  }
+});
+
+app.get("/api/account/binance-testnet/orders/:clientOrderId", requireSession, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const order = await sandboxOrderStore.getOwnedOrder(req.jarvisUser!.id, String(req.params.clientOrderId || ""));
+    if (!order) return res.status(404).json({ success: false, error: "Order not found." });
+    return res.json({
+      success: true,
+      order,
+      fills: await sandboxOrderStore.getStoredFills(req.jarvisUser!.id, order.clientOrderId),
+    });
+  } catch (error: any) {
+    return res.status(503).json({ success: false, error: error?.message || "Order lookup unavailable." });
+  }
+});
+
+app.post("/api/account/binance-testnet/orders/:clientOrderId/cancel", requireSession, requireSameOrigin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!isSandboxOrderSubmissionEnabled()) {
+      return res.status(503).json({ success: false, status: "ORDER_SUBMISSION_DISABLED", error: "Binance Spot Testnet order submission is disabled by server safety gates." });
+    }
+
+    const clientOrderId = String(req.params.clientOrderId || "");
+    const order = await sandboxOrderStore.getOwnedOrder(req.jarvisUser!.id, clientOrderId);
+    if (!order) return res.status(404).json({ success: false, error: "Order not found." });
+
+    if (["FILLED","CANCELLED","REJECTED","EXPIRED","SUBMISSION_FAILED"].includes(order.status)) {
+      return res.json({ success: true, idempotent: true, order, fills: await sandboxOrderStore.getStoredFills(req.jarvisUser!.id, clientOrderId) });
+    }
+
+    const overview = await authControlStore.getAccountOverview(req.jarvisUser!.id);
+    const connection = overview.connections.find((item) => item.id === order.accountId);
+    if (!connection || !connection.externalAccountId) {
+      return res.status(409).json({ success: false, error: "Order account connection is unavailable." });
+    }
+
+    await sandboxOrderStore.markStatus(req.jarvisUser!.id, clientOrderId, "CANCEL_PENDING");
+
+    try {
+      const providerOrder = await binanceSpotTestnetAccount.cancelOrder(connection.externalAccountId, clientOrderId);
+      const persisted = await sandboxOrderStore.markStatus(req.jarvisUser!.id, clientOrderId, providerOrder.status, {
+        externalOrderId: providerOrder.externalOrderId,
+        filledQuantity: providerOrder.filledQuantity,
+        averageFillPrice: providerOrder.averageFillPrice,
+        submittedAt: providerOrder.submittedAt,
+      });
+
+      if (providerOrder.externalOrderId) {
+        const fills = await binanceSpotTestnetAccount.getFills(
+          connection.externalAccountId,
+          extractProviderSymbolFromInstrumentId(order.instrumentId),
+          providerOrder.externalOrderId,
+        );
+        for (const fill of fills) {
+          await sandboxOrderStore.recordFill(req.jarvisUser!.id, {
+            ...fill,
+            accountId: order.accountId,
+            orderClientId: order.clientOrderId,
+          });
+        }
+      }
+
+      return res.json({
+        success: true,
+        order: persisted || providerOrder,
+        fills: await sandboxOrderStore.getStoredFills(req.jarvisUser!.id, clientOrderId),
+      });
+    } catch (error: any) {
+      const ambiguous = error instanceof BinanceProviderError &&
+        ["NETWORK", "SERVER", "UNKNOWN", "TIMESTAMP", "DUPLICATE_CLIENT_ORDER", "UNKNOWN_ORDER"].includes(error.kind);
+      await sandboxOrderStore.markStatus(
+        req.jarvisUser!.id,
+        clientOrderId,
+        ambiguous ? "UNKNOWN_RECONCILIATION" : "REJECTED",
+        { failureReason: error?.message || "Binance cancellation failed." },
+      );
+      return res.status(ambiguous ? 202 : 502).json({
+        success: false,
+        status: ambiguous ? "UNKNOWN_RECONCILIATION" : "REJECTED",
+        error: error?.message || "Binance cancellation failed.",
+      });
+    }
+  } catch (error: any) {
+    return res.status(400).json({ success: false, error: error?.message || "Sandbox cancellation request failed." });
+  }
+});
+
+function extractProviderSymbolFromInstrumentId(instrumentId: string): string {
+  const match = String(instrumentId || "").match(/^BINANCE_SPOT:BINANCE:([A-Z0-9_]+)$/i);
+  if (!match) throw new Error("Order instrument is not a supported Binance Spot instrument.");
+  return match[1].toUpperCase();
+}
+
+app.get("/api/account/binance-testnet/execution-status", requireSession, (_req: AuthenticatedRequest, res: Response) => {
+  res.json({
+    success: true,
+    submissionEnabled: isSandboxOrderSubmissionEnabled(),
+    adapter: awaitHealth(binanceSpotTestnetAccount),
+    reconciler: binanceSandboxReconciler.getStatus(),
+  });
+});
+
+app.post("/api/account/binance-testnet/reconcile", requireSession, requireSameOrigin, async (_req: AuthenticatedRequest, res: Response) => {
+  const status = await binanceSandboxReconciler.runOnce();
+  res.json({ success: true, reconciler: status });
+});
+
 // Health Check
 app.get("/api/health", (_req: Request, res: Response) => {
   const market = binanceMarketData.getHealth();
@@ -571,6 +911,12 @@ const platformDatabase = new PlatformDatabase();
 const platformRepository = new PlatformRepository(platformDatabase);
 const authControlStore = new AuthControlStore(platformDatabase);
 const binanceSpotTestnetAccount = new BinanceSpotAccountAdapter();
+const sandboxOrderStore = new SandboxOrderStore(platformDatabase);
+const binanceSandboxReconciler = new BinanceSandboxReconciler(
+  sandboxOrderStore,
+  binanceSpotTestnetAccount,
+  Number(process.env.JARVIS_SANDBOX_RECONCILIATION_POLL_MS) || 15_000,
+);
 const binanceInstrumentCatalog = new BinanceInstrumentCatalog(
   platformDatabase.isConfigured()
     ? { persist: (instruments) => platformRepository.syncInstruments(instruments) }
@@ -1219,6 +1565,10 @@ async function startServer() {
   }
   await binanceInstrumentCatalog.start();
 
+  if (platformDatabase.isReady() && binanceSpotTestnetAccount.isConfigured()) {
+    binanceSandboxReconciler.start();
+  }
+
   // Live API WebSocket Voice Gateway
   const wss = new WebSocketServer({ server: httpServer, path: "/api/live-voice" });
   wss.on("connection", async (clientWs: WebSocket) => {
@@ -1334,6 +1684,7 @@ async function startServer() {
     binanceInstrumentCatalog.stop();
     binanceMarketData.stop();
     autonomousPaperRuntime.stop("Server shutdown.");
+    binanceSandboxReconciler.stop();
     await new Promise<void>((resolve) => httpServer.close(() => resolve()));
   };
 
