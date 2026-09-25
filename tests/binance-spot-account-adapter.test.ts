@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import {
   BinanceProviderError,
   BinanceSpotAccountAdapter,
+  classifyBinanceError,
 } from "../src/platform/binanceSpotAccountAdapter";
 import type { OrderIntent } from "../src/platform/types";
 
@@ -151,5 +152,11 @@ describe("Binance Spot Testnet execution adapter", () => {
     expect(caught).toBeInstanceOf(BinanceProviderError);
     expect((caught as BinanceProviderError).kind).toBe("INSUFFICIENT_BALANCE");
     expect(calls[1]?.method).toBe("POST");
+  });
+
+  test("prefers message-level duplicate detection over the generic new-order rejection code", () => {
+    expect(classifyBinanceError(-2010, 400, "Duplicate client order ID.")).toBe("DUPLICATE_CLIENT_ORDER");
+    expect(classifyBinanceError(-2010, 400, "Account has insufficient balance.")).toBe("INSUFFICIENT_BALANCE");
+    expect(classifyBinanceError(-2018, 400, "Balance is insufficient.")).toBe("INSUFFICIENT_BALANCE");
   });
 });
