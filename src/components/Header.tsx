@@ -27,13 +27,17 @@ import {
   Mic,
 } from "lucide-react";
 import { BotState, MarketDataSource, ActionNotification } from "../types/trading";
-import { AssetSymbol, SUPPORTED_ASSETS } from "../engine/marketSimulator";
 import { soundFx } from "../utils/soundEffects";
 import { NotificationCenter } from "./NotificationCenter";
+import { InstrumentSearch } from "./InstrumentSearch";
+import type { Instrument } from "../platform/types";
+import { WORKSPACE_LABELS, WorkspaceView } from "../platform/workspace";
 
 interface HeaderProps {
-  currentAsset: AssetSymbol;
-  onSelectAsset: (asset: AssetSymbol) => void;
+  currentAsset: string;
+  onSelectAsset: (asset: string) => void;
+  currentView: WorkspaceView;
+  onChangeView: (view: WorkspaceView) => void;
   botState: BotState;
   marketSource: MarketDataSource;
   isAutoTrading: boolean;
@@ -61,6 +65,8 @@ interface HeaderProps {
 export const Header: React.FC<HeaderProps> = ({
   currentAsset,
   onSelectAsset,
+  currentView,
+  onChangeView,
   botState,
   marketSource,
   isAutoTrading,
@@ -84,27 +90,33 @@ export const Header: React.FC<HeaderProps> = ({
   onClearNotifications,
   onScrollToAnalytics,
 }) => {
-  const assetInfo = SUPPORTED_ASSETS[currentAsset];
-
   const getStateBadge = () => {
+    if (currentView !== "PRACTICE") {
+      return {
+        label: currentView === "TERMINAL" ? "MARKET TERMINAL" : WORKSPACE_LABELS[currentView].toUpperCase(),
+        color: "bg-emerald-500/10 text-emerald-400 border-emerald-500/30",
+        icon: Radio,
+        pulse: "bg-emerald-400",
+      };
+    }
     switch (botState) {
       case "THRIVING":
         return {
-          label: "OPTIMAL (ALPHA ACCELERATION)",
+          label: "PAPER SYSTEM STABLE",
           color: "bg-emerald-500/10 text-emerald-400 border-emerald-500/30",
           icon: Flame,
           pulse: "bg-emerald-400",
         };
       case "HUNTING":
         return {
-          label: "SCANNING HIGH-CONFIDENCE SIGNALS",
+          label: "SCANNING QUALIFIED SIGNALS",
           color: "bg-blue-500/10 text-blue-400 border-blue-500/30",
           icon: Zap,
           pulse: "bg-blue-400",
         };
       case "IN_POSITION":
         return {
-          label: "POSITION ACTIVE (RISK-HEDGED)",
+          label: "POSITION ACTIVE (RISK MONITORED)",
           color: "bg-violet-500/10 text-violet-300 border-violet-500/30",
           icon: Activity,
           pulse: "bg-violet-400",
@@ -155,14 +167,14 @@ export const Header: React.FC<HeaderProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <span className="font-bold text-neutral-100 tracking-tight text-sm md:text-base">
-                  AEGIS QUANTITATIVE TERMINAL
+                  JARVIS FINANCE
                 </span>
                 <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-neutral-800 text-neutral-400 border border-neutral-700">
-                  Self-Optimizing
+                  Research + Controlled Optimization
                 </span>
               </div>
               <p className="text-xs text-neutral-400 font-mono">
-                Autonomous Algorithmic Execution &bull; Dynamic Risk Parity
+                Research & Paper Trading &bull; Evidence-Driven Risk Controls
               </p>
             </div>
           </div>
@@ -188,25 +200,15 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Right: Controls, Asset Switcher & Speed */}
         <div className="flex flex-wrap items-center gap-2 w-full md:w-auto justify-end">
-          {/* Asset Dropdown */}
-          <div className="relative">
-            <select
-              id="asset-selector"
-              aria-label="Select Asset"
-              value={currentAsset}
-              onChange={(e) => onSelectAsset(e.target.value as AssetSymbol)}
-              disabled={botState === "IN_POSITION"}
-              className="appearance-none bg-neutral-900 border border-neutral-700/80 hover:border-neutral-600 rounded-lg px-3 py-1.5 pr-8 text-xs font-mono font-semibold text-neutral-200 focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {Object.values(SUPPORTED_ASSETS).map((asset) => (
-                <option key={asset.symbol} value={asset.symbol}>
-                  {asset.symbol} - {asset.name}
-                </option>
-              ))}
-            </select>
-            <ChevronDown className="w-3.5 h-3.5 absolute right-2.5 top-1/2 -translate-y-1/2 text-neutral-400 pointer-events-none" />
-          </div>
+          {/* Dynamic instrument search: provider catalog, not a hardcoded asset list */}
+          <InstrumentSearch
+            value={currentAsset}
+            disabled={botState === "IN_POSITION"}
+            onSelect={(instrument: Instrument) => onSelectAsset(instrument.symbol)}
+          />
 
+          {currentView === "PRACTICE" && (
+            <>
           {/* Auto-Trading Toggle */}
           <button
             id="toggle-autotrade-btn"
@@ -221,7 +223,7 @@ export const Header: React.FC<HeaderProps> = ({
             {isAutoTrading ? (
               <>
                 <Play className="w-3.5 h-3.5 fill-emerald-400 text-emerald-400" />
-                <span>AUTO-PILOT ACTIVE</span>
+                <span>PAPER AUTO ACTIVE</span>
               </>
             ) : (
               <>
@@ -273,7 +275,7 @@ export const Header: React.FC<HeaderProps> = ({
               <button
                 id="header-open-copilot-btn"
                 onClick={() => onOpenCopilot("CHAT")}
-                title="AEGIS Quantitative AI Copilot & Fiduciary Advisor"
+                title="Jarvis Finance AI Copilot & Research Assistant"
                 className="flex items-center gap-1.5 px-2.5 py-1.5 hover:bg-indigo-600/30 text-xs font-mono font-semibold transition-colors cursor-pointer"
               >
                 <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
@@ -283,7 +285,7 @@ export const Header: React.FC<HeaderProps> = ({
                 id="header-open-voice-btn"
                 type="button"
                 onClick={() => onOpenCopilot("VOICE")}
-                title="Direct Live Voice Interaction (gemini-3.8-live)"
+                title="Live voice research assistant"
                 className="px-2 py-1.5 border-l border-indigo-500/30 hover:bg-indigo-600/30 text-indigo-300 transition-colors"
               >
                 <Mic className="w-3.5 h-3.5 text-indigo-400" />
@@ -291,12 +293,12 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
           )}
 
-          {/* Cold Storage Profit Vault Button */}
+          {/* Paper Profit Reserve Button */}
           {onOpenProfitVault && (
             <button
               id="header-open-profit-vault-btn"
               onClick={onOpenProfitVault}
-              title="Cold Storage Profit Vault: Auto-withdrawn gains insulated from market risk"
+              title="Paper Profit Reserve: virtual transfer ledger only"
               className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/35 text-xs font-mono font-semibold transition-all shadow-[0_0_10px_rgba(245,158,11,0.15)] cursor-pointer"
             >
               <Vault className="w-3.5 h-3.5 text-amber-400" />
@@ -309,7 +311,7 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               id="header-open-radar-btn"
               onClick={onOpenRadar}
-              title="Autonomous Multi-Market Opportunity Scanner"
+              title="Review supported assets from connected market-data sources"
               className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-neutral-900 hover:bg-neutral-800 text-neutral-300 border border-neutral-800 text-xs font-mono transition-colors"
             >
               <Radar className="w-3.5 h-3.5 text-indigo-400" />
@@ -322,7 +324,7 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               id="header-open-vault-btn"
               onClick={onOpenVault}
-              title="Strategy Memory Vault & Anti-Duplication"
+              title="Strategy evidence journal and validation states"
               className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-neutral-900 hover:bg-neutral-800 text-neutral-300 border border-neutral-800 text-xs font-mono transition-colors"
             >
               <BookOpen className="w-3.5 h-3.5 text-emerald-400" />
@@ -343,16 +345,16 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
           )}
 
-          {/* 24/7 Market Hours & Android Auto-Pilot Button */}
+          {/* Market Sessions & Runtime Button */}
           {onOpenMarketHours && (
             <button
               id="header-open-market-hours-btn"
               onClick={onOpenMarketHours}
-              title="24/7 Market Hours & Android Phone Auto-Pilot Setup"
+              title="Market sessions and server runtime architecture"
               className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-neutral-900 hover:bg-neutral-800 text-neutral-300 border border-neutral-800 text-xs font-mono transition-colors cursor-pointer"
             >
               <Clock className="w-3.5 h-3.5 text-amber-400" />
-              <span className="hidden sm:inline">24/7 Hours</span>
+              <span className="hidden sm:inline">Market Sessions</span>
             </button>
           )}
 
@@ -361,7 +363,7 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               id="header-open-security-vault-btn"
               onClick={onOpenSecurityVault}
-              title="Security Vault, Legal Compliance & Cryptographic Ledger"
+              title="Security controls, disclosures and local audit checks"
               className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs font-mono transition-colors cursor-pointer"
             >
               <Shield className="w-3.5 h-3.5 text-emerald-400" />
@@ -375,6 +377,9 @@ export const Header: React.FC<HeaderProps> = ({
             onMarkAllRead={onMarkAllNotificationsRead}
             onClear={onClearNotifications}
           />
+
+            </>
+          )}
 
           {/* Risk & Paper Settings Modal */}
           {onOpenRiskSettings && (
@@ -423,6 +428,28 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
           )}
         </div>
+      <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2 pt-3 mt-3 border-t border-neutral-900">
+        <nav className="flex items-center gap-1 overflow-x-auto pb-0.5" aria-label="Jarvis workspace">
+          {(["TERMINAL", "MARKETS", "PORTFOLIO", "AUTOMATION", "RESEARCH", "PRACTICE"] as WorkspaceView[]).map((view) => (
+            <button
+              key={view}
+              type="button"
+              onClick={() => onChangeView(view)}
+              className={
+                "px-3 py-1.5 rounded-lg text-xs font-mono font-semibold whitespace-nowrap transition-colors " +
+                (currentView === view
+                  ? "bg-neutral-800 text-white border border-neutral-700"
+                  : "text-neutral-500 hover:text-neutral-200 hover:bg-neutral-900 border border-transparent")
+              }
+            >
+              {WORKSPACE_LABELS[view]}
+            </button>
+          ))}
+        </nav>
+        <div className="text-[10px] font-mono text-neutral-600 uppercase tracking-wider">
+          {currentView === "PRACTICE" ? "Paper / Simulation workspace" : "Live market workspace"}
+        </div>
+      </div>
       </div>
     </header>
   );

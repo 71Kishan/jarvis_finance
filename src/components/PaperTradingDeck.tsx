@@ -28,7 +28,7 @@ import {
 } from "lucide-react";
 
 interface PaperTradingDeckProps {
-  currentPrice: number;
+  currentPrice: number | null;
   asset: string;
   botState: BotState;
   vitality: BotVitality;
@@ -78,26 +78,26 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
 }) => {
   const [orderType, setOrderType] = useState<"LONG" | "SHORT">("LONG");
   const [amountUsd, setAmountUsd] = useState<number>(500);
-  const [leverage, setLeverage] = useState<number>(2);
+  const leverage = 1;
   const [stopLossPercent, setStopLossPercent] = useState<number>(strategy.stopLossPercent || 1.0);
   const [takeProfitPercent, setTakeProfitPercent] = useState<number>(strategy.takeProfitPercent || 2.5);
   const [trailingStop, setTrailingStop] = useState<boolean>(true);
   const [executionFeedback, setExecutionFeedback] = useState<string | null>(null);
 
   const availableCash = vitality.cash;
-  const positionSizeUsd = amountUsd * leverage;
-  const estimatedSlippage = (positionSizeUsd * 0.0002).toFixed(2);
-  const estimatedFee = (positionSizeUsd * 0.0004).toFixed(2);
+  const positionSizeUsd = amountUsd;
+  const hasTrustedPrice = Number.isFinite(currentPrice) && Number(currentPrice) > 0;
+  const calculatedStopPrice = hasTrustedPrice
+    ? orderType === "LONG"
+      ? Number(currentPrice) * (1 - stopLossPercent / 100)
+      : Number(currentPrice) * (1 + stopLossPercent / 100)
+    : null;
 
-  const calculatedStopPrice =
-    orderType === "LONG"
-      ? currentPrice * (1 - stopLossPercent / 100)
-      : currentPrice * (1 + stopLossPercent / 100);
-
-  const calculatedTargetPrice =
-    orderType === "LONG"
-      ? currentPrice * (1 + takeProfitPercent / 100)
-      : currentPrice * (1 - takeProfitPercent / 100);
+  const calculatedTargetPrice = hasTrustedPrice
+    ? orderType === "LONG"
+      ? Number(currentPrice) * (1 + takeProfitPercent / 100)
+      : Number(currentPrice) * (1 - takeProfitPercent / 100)
+    : null;
 
   const riskRewardRatio = (takeProfitPercent / (stopLossPercent || 0.1)).toFixed(1);
 
@@ -115,6 +115,12 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
       return;
     }
 
+    if (!hasTrustedPrice) {
+      setExecutionFeedback("Execution blocked: trusted market price is unavailable.");
+      setTimeout(() => setExecutionFeedback(null), 3000);
+      return;
+    }
+
     const ok = onExecutePaperTrade({
       type: orderType,
       amountUsd,
@@ -126,7 +132,7 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
     });
 
     if (ok) {
-      setExecutionFeedback(`✓ Paper ${orderType} filled at $${currentPrice.toFixed(2)}`);
+      setExecutionFeedback(`✓ Paper ${orderType} filled at ${Number(currentPrice).toFixed(2)}`);
       setTimeout(() => setExecutionFeedback(null), 4000);
     }
   };
@@ -146,11 +152,11 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
             <div className="font-bold text-neutral-100 flex items-center gap-2">
               <span>Paper Trading Terminal</span>
               <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-neutral-800 text-neutral-300">
-                Risk-Free Live Environment
+                {marketSource === "LIVE_MARKET_DATA" ? "Simulated Capital • Trusted Market Data" : "Synthetic Capital • Synthetic Market Data"}
               </span>
             </div>
             <div className="text-[11px] text-neutral-400">
-              Zero capital risk. Real live market fills and trailing execution.
+              No real capital is connected. Paper fills use modeled fees and slippage.
             </div>
           </div>
         </div>
@@ -160,22 +166,22 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
           <button
             id="feed-toggle-live-exchange"
             type="button"
-            onClick={() => onToggleMarketSource("LIVE_EXCHANGE")}
+            onClick={() => onToggleMarketSource("LIVE_MARKET_DATA")}
             className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
-              marketSource === "LIVE_EXCHANGE"
+              marketSource === "LIVE_MARKET_DATA"
                 ? "bg-emerald-950 text-emerald-300 border border-emerald-700/80 shadow-sm"
                 : "text-neutral-400 hover:text-neutral-200"
             }`}
           >
             <span
               className={`w-2 h-2 rounded-full ${
-                marketSource === "LIVE_EXCHANGE"
+                marketSource === "LIVE_MARKET_DATA"
                   ? "bg-emerald-400 animate-pulse shadow-[0_0_8px_#34d399]"
                   : "bg-neutral-600"
               }`}
             />
             <Radio className="w-3.5 h-3.5" />
-            <span>Live Exchange Feed</span>
+            <span>Trusted Live Data</span>
           </button>
 
           <button
@@ -195,11 +201,11 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
       </div>
 
       {/* Ticker Telemetry Strip */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-neutral-950/70 p-2.5 rounded-xl border border-neutral-800/80 font-mono text-xs">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 bg-neutral-950/70 p-2.5 rounded-xl border border-neutral-800/80 font-mono text-xs">
         <div>
           <div className="text-[10px] text-neutral-400 font-sans">Asset Price</div>
           <div className="text-neutral-100 font-bold text-sm">
-            ${currentPrice.toFixed(2)}
+            {hasTrustedPrice ? "$" + Number(currentPrice).toFixed(2) : "—"}
           </div>
         </div>
         <div>
@@ -216,12 +222,22 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
         <div>
           <div className="text-[10px] text-neutral-400 font-sans">24h High / Low</div>
           <div className="text-neutral-300 text-[11px]">
-            ${ticker?.high24h?.toFixed(1) || (currentPrice * 1.02).toFixed(1)} / $
-            {ticker?.low24h?.toFixed(1) || (currentPrice * 0.98).toFixed(1)}
+            {ticker?.high24h ? `${ticker.high24h.toFixed(1)}` : "—"} / {ticker?.low24h ? `${ticker.low24h.toFixed(1)}` : "—"}
           </div>
         </div>
         <div>
-          <div className="text-[10px] text-neutral-400 font-sans">Available Margin</div>
+          <div className="text-[10px] text-neutral-400 font-sans">Data Source</div>
+          <div className="text-neutral-300 text-[11px]">
+            {ticker?.source || (marketSource === "SIMULATED" ? "SIMULATOR" : "UNAVAILABLE")}
+          </div>
+          {marketSource === "LIVE_MARKET_DATA" && ticker?.lastUpdated ? (
+            <div className="text-[10px] text-neutral-500">
+              {Math.max(0, Math.round((Date.now() - ticker.lastUpdated) / 1000))}s old
+            </div>
+          ) : null}
+        </div>
+        <div>
+          <div className="text-[10px] text-neutral-400 font-sans">Available Cash</div>
           <div className="text-cyan-400 font-bold">
             ${vitality.cash.toFixed(2)}
           </div>
@@ -230,51 +246,37 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
 
       {/* Autonomous Action & Verification Command Bar */}
       <div className="bg-gradient-to-r from-neutral-950 via-neutral-900 to-neutral-950 p-3.5 rounded-xl border border-neutral-800 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 shadow-md">
-        {/* Daily Profit Goal Micro-Widget */}
+        {/* Daily Process Metrics */}
         <div className="flex items-center gap-3">
           <div className="p-2 bg-emerald-500/10 text-emerald-400 rounded-lg border border-emerald-500/20">
             <Target className="w-5 h-5" />
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <span className="text-xs font-bold text-neutral-200">
-                Daily Goal: ${dailyGoal.dailyTargetUsd.toFixed(0)}/day
-              </span>
-              <span
-                className={`text-[10px] font-mono font-bold px-1.5 py-0.2 rounded ${
-                  dailyGoal.currentDailyPnlUsd >= 0
-                    ? "bg-emerald-950 text-emerald-300 border border-emerald-800"
-                    : "bg-rose-950 text-rose-300 border border-rose-800"
-                }`}
-              >
-                {dailyGoal.currentDailyPnlUsd >= 0 ? "+" : ""}$
-                {dailyGoal.currentDailyPnlUsd.toFixed(2)} Today
-              </span>
-              <span className="text-[10px] text-amber-400 font-mono hidden sm:inline">
-                {dailyGoal.streakDays}d Streak 🔥
+              <span className="text-xs font-bold text-neutral-200">Daily Process</span>
+              <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-neutral-800 text-neutral-300 border border-neutral-700">
+                {dailyGoal.tradesCountToday} paper trade{dailyGoal.tradesCountToday === 1 ? "" : "s"} today
               </span>
             </div>
             <div className="text-[11px] text-neutral-400">
-              {dailyGoal.targetAchieved
-                ? "Daily target reached! Preserving capital."
-                : "Scanning setups to hit daily income target."}
+              No daily income target. Prioritize data quality, risk limits, trade quality and review.
             </div>
           </div>
         </div>
 
         {/* Primary Command Actions */}
         <div className="flex items-center gap-2 flex-wrap">
-          {/* RUN 1 VERIFIED TRADE BUTTON */}
+          {/* RUN QUALIFIED PAPER SCAN BUTTON */}
           <button
             id="run-verified-trade-btn"
             type="button"
             onClick={onRunImmediateTrade}
             disabled={botState === "HALTED_DEAD" || !!activeTrade}
             className="px-3.5 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs rounded-xl flex items-center gap-2 transition-all shadow-lg shadow-emerald-950/40 disabled:opacity-50"
-            title="Instantly executes 1 paper trade on live market to verify fills and record outcome into Strategy Vault"
+            title="Runs one fresh rules-based paper scan; it will not enter unless the signal and risk gates both pass"
           >
             <Zap className="w-4 h-4 fill-white" />
-            <span>⚡ Run 1 Trade to Verify</span>
+            <span>⚡ Run Qualified Scan</span>
           </button>
 
           {/* MULTI-ASSET RADAR BUTTON */}
@@ -283,7 +285,7 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
             type="button"
             onClick={onOpenMultiAssetRadar}
             className="px-3 py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 font-semibold text-xs rounded-xl flex items-center gap-1.5 transition-colors border border-neutral-700"
-            title="Scan 12 assets across Crypto, Stocks, Forex & Indices"
+            title="Review supported assets from trusted market-data sources"
           >
             <Radar className="w-4 h-4 text-indigo-400" />
             <span>Multi-Market Radar</span>
@@ -409,7 +411,7 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
           {/* Amount Sizing & Quick Chips */}
           <div>
             <div className="flex items-center justify-between text-xs text-neutral-400 mb-1">
-              <span>Order Margin ($ USD)</span>
+              <span>Order Notional ($ USD)</span>
               <span className="font-mono text-[11px]">
                 Max: ${availableCash.toFixed(0)}
               </span>
@@ -444,29 +446,14 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
             </div>
           </div>
 
-          {/* Leverage Selector */}
-          <div>
-            <div className="flex items-center justify-between text-xs text-neutral-400 mb-1">
+          {/* Leverage Policy */}
+          <div className="p-2.5 bg-neutral-900/70 rounded-lg border border-neutral-800">
+            <div className="flex items-center justify-between text-xs text-neutral-400">
               <span>Paper Leverage</span>
-              <span className="font-mono text-[11px] text-indigo-400">
-                Total Size: ${(amountUsd * leverage).toFixed(2)}
-              </span>
+              <span className="font-mono font-bold text-emerald-400">1x UNLEVERED PAPER SIMULATION</span>
             </div>
-            <div className="grid grid-cols-4 gap-1.5">
-              {[1, 2, 5, 10].map((lev) => (
-                <button
-                  key={lev}
-                  type="button"
-                  onClick={() => setLeverage(lev)}
-                  className={`py-1 rounded-lg font-mono text-xs font-bold border transition-all ${
-                    leverage === lev
-                      ? "bg-indigo-600 text-white border-indigo-500 shadow-sm"
-                      : "bg-neutral-900 text-neutral-400 border-neutral-800 hover:text-neutral-200"
-                  }`}
-                >
-                  {lev}x {lev === 1 ? "Spot" : "Margin"}
-                </button>
-              ))}
+            <div className="text-[10px] text-neutral-500 mt-1">
+              Leverage is disabled. Long/short mechanics here are simulated; instrument-specific borrow, funding, and margin rules are not modeled.
             </div>
           </div>
 
@@ -476,7 +463,7 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
               <div className="flex items-center justify-between text-[11px] text-neutral-400 mb-1">
                 <span className="text-rose-400 font-semibold">Stop Loss (%)</span>
                 <span className="font-mono text-neutral-400">
-                  ${calculatedStopPrice.toFixed(2)}
+                  {calculatedStopPrice == null ? "—" : "$" + calculatedStopPrice.toFixed(2)}
                 </span>
               </div>
               <input
@@ -494,7 +481,7 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
               <div className="flex items-center justify-between text-[11px] text-neutral-400 mb-1">
                 <span className="text-emerald-400 font-semibold">Take Profit (%)</span>
                 <span className="font-mono text-neutral-400">
-                  ${calculatedTargetPrice.toFixed(2)}
+                  {calculatedTargetPrice == null ? "—" : "$" + calculatedTargetPrice.toFixed(2)}
                 </span>
               </div>
               <input
@@ -518,7 +505,7 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
                 onChange={(e) => setTrailingStop(e.target.checked)}
                 className="rounded bg-neutral-800 border-neutral-700 text-indigo-500 focus:ring-0"
               />
-              <span>Dynamic Trailing Stop (+1% Lock)</span>
+              <span>Trailing Stop</span>
             </label>
             <span className="font-mono text-[11px] text-neutral-400">
               R:R <strong className="text-indigo-300">{riskRewardRatio} : 1</strong>
@@ -529,7 +516,7 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
           <button
             id="submit-paper-order-btn"
             type="submit"
-            disabled={!!activeTrade || botState === "HALTED_DEAD"}
+            disabled={!!activeTrade || botState === "HALTED_DEAD" || !hasTrustedPrice}
             className={`w-full py-2.5 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all shadow-md ${
               orderType === "LONG"
                 ? "bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white shadow-emerald-950/40"
@@ -553,7 +540,7 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-neutral-300 uppercase tracking-wide flex items-center gap-1.5">
                 <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
-                <span>Autonomous Execution Core</span>
+                <span>Paper Execution Core</span>
               </span>
 
               {/* Execution State Badge */}
@@ -584,7 +571,7 @@ export const PaperTradingDeck: React.FC<PaperTradingDeckProps> = ({
                 </div>
                 <div className="text-[11px] text-neutral-400">
                   {isAutoTrading
-                    ? "System executes automatically on verified confluence"
+                    ? "Session-local autopilot: enters only on a fresh eligible signal; unattended operation requires the server worker."
                     : "Automated execution paused"}
                 </div>
               </div>

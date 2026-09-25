@@ -9,11 +9,11 @@ export type AssetSymbol =
   | "XRP/USD"
   | "NVDA"
   | "AAPL"
-  | "TSLA"
+  | "MSFT"
+  | "AMZN"
+  | "META"
   | "SPY"
-  | "QQQ"
-  | "EUR/USD"
-  | "GBP/USD";
+  | "QQQ";
 
 export interface AssetInfo {
   symbol: AssetSymbol;
@@ -89,15 +89,34 @@ export const SUPPORTED_ASSETS: Record<AssetSymbol, AssetInfo> = {
     tickSize: 0.01,
     decimals: 2,
   },
-  TSLA: {
-    symbol: "TSLA",
-    name: "Tesla Inc",
+  MSFT: {
+    symbol: "MSFT",
+    name: "Microsoft Corp.",
     category: "STOCK",
-    basePrice: 242.6,
-    volatility: 0.0058,
+    basePrice: 500,
+    volatility: 0.0024,
     tickSize: 0.01,
     decimals: 2,
   },
+  AMZN: {
+    symbol: "AMZN",
+    name: "Amazon.com Inc.",
+    category: "STOCK",
+    basePrice: 220,
+    volatility: 0.0032,
+    tickSize: 0.01,
+    decimals: 2,
+  },
+  META: {
+    symbol: "META",
+    name: "Meta Platforms Inc.",
+    category: "STOCK",
+    basePrice: 650,
+    volatility: 0.0034,
+    tickSize: 0.01,
+    decimals: 2,
+  },
+
   SPY: {
     symbol: "SPY",
     name: "S&P 500 ETF Trust",
@@ -116,24 +135,7 @@ export const SUPPORTED_ASSETS: Record<AssetSymbol, AssetInfo> = {
     tickSize: 0.01,
     decimals: 2,
   },
-  "EUR/USD": {
-    symbol: "EUR/USD",
-    name: "Euro / US Dollar",
-    category: "FOREX",
-    basePrice: 1.085,
-    volatility: 0.0012,
-    tickSize: 0.0001,
-    decimals: 4,
-  },
-  "GBP/USD": {
-    symbol: "GBP/USD",
-    name: "British Pound / USD",
-    category: "FOREX",
-    basePrice: 1.305,
-    volatility: 0.0015,
-    tickSize: 0.0001,
-    decimals: 4,
-  },
+
 };
 
 
@@ -167,7 +169,7 @@ export class MarketSimulator {
     const candles: Candle[] = [];
     let price = this.assetInfo.basePrice;
     const now = Date.now();
-    const intervalMs = 60 * 1000; // 1-minute simulated candles
+    const intervalMs = 60 * 1000; // Demo-only 1-minute synthetic candles; never presented as live market data.
     let startTime = now - count * intervalMs;
 
     for (let i = 0; i < count; i++) {
@@ -272,7 +274,14 @@ export class MarketSimulator {
   }
 
   public setExternalCandles(candles: Candle[]) {
-    this.candles = attachIndicators(candles);
+    this.candles = attachIndicators(candles).slice(-250);
+    const last = this.candles[this.candles.length - 1];
+    if (!last?.indicators) return;
+    const { ema9, ema21, ema50, atr } = last.indicators;
+    if (ema9 > ema21 && ema21 > ema50) this.currentRegime = "BULL_EXPANSION";
+    else if (ema9 < ema21 && ema21 < ema50) this.currentRegime = "BEAR_TREND";
+    else if (atr > Math.max(0.01, last.close * 0.05)) this.currentRegime = "VOLATILITY_SPIKE";
+    else this.currentRegime = "CHOPPY_RANGE";
   }
 
   public getLastCandle(): Candle | undefined {

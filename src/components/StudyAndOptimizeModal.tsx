@@ -13,8 +13,9 @@ import {
   Sparkles,
   X,
 } from "lucide-react";
-import { BacktestResult, Candle, StrategyConfig, Trade } from "../types/trading";
-import { StrategyOptimizer } from "../engine/optimizer";
+import { Candle, StrategyConfig, Trade } from "../types/trading";
+import { LearningResearchLoop, LearningResearchResult } from "../learn/researchLoop";
+import type { LearningTradeRecord } from "../learn/types";
 
 interface StudyAndOptimizeModalProps {
   isOpen: boolean;
@@ -22,6 +23,7 @@ interface StudyAndOptimizeModalProps {
   currentStrategy: StrategyConfig;
   candles: Candle[];
   recentTrades: Trade[];
+  learningRecords: LearningTradeRecord[];
   drawdownPercent: number;
   onApplyStrategy: (newStrategy: StrategyConfig) => void;
 }
@@ -32,6 +34,7 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
   currentStrategy,
   candles,
   recentTrades,
+  learningRecords,
   drawdownPercent,
   onApplyStrategy,
 }) => {
@@ -40,26 +43,21 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
     survivalStatus?: string;
     regimeAssessment?: string;
     thoughtLog?: string;
-    survivalVow?: string;
+    riskDisciplineNote?: string;
     keyTakeaway?: string;
     recommendedStrategy?: StrategyConfig;
   } | null>(null);
 
-  const [optimizationData, setOptimizationData] = useState<{
-    bestStrategy: StrategyConfig;
-    bestResult: BacktestResult;
-    candidatesTested: { strategy: StrategyConfig; result: BacktestResult }[];
-    optimizationInsights: string[];
-  } | null>(null);
+  const [researchData, setResearchData] = useState<LearningResearchResult | null>(null);
 
   if (!isOpen) return null;
 
   const runDeepStudyAndOptimization = async () => {
     setIsLoading(true);
     try {
-      // 1. Run historical backtesting & genetic parameter search
-      const opt = StrategyOptimizer.runOptimizationStudy(currentStrategy, candles);
-      setOptimizationData(opt);
+      // 1. Run deterministic research with an explicit learning-data gate.
+      const research = LearningResearchLoop.run(currentStrategy, candles, learningRecords);
+      setResearchData(research);
 
       // 2. Call Gemini AI via server-side endpoint
       const res = await fetch("/api/bot/study", {
@@ -94,19 +92,10 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
     }
   };
 
-  const handleAdoptBestStrategy = () => {
-    if (aiAnalysis?.recommendedStrategy) {
-      onApplyStrategy({
-        ...currentStrategy,
-        ...aiAnalysis.recommendedStrategy,
-        id: `strat-evolved-v${(currentStrategy.version || 1) + 1}`,
-        version: (currentStrategy.version || 1) + 1,
-      });
-      onClose();
-    } else if (optimizationData?.bestStrategy) {
-      onApplyStrategy(optimizationData.bestStrategy);
-      onClose();
-    }
+  const handleLoadResearchCandidate = () => {
+    if (!researchData?.proposedCandidate || researchData.status !== "REVIEW_REQUIRED") return;
+    onApplyStrategy(researchData.proposedCandidate);
+    onClose();
   };
 
   return (
@@ -123,7 +112,7 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
                 Quantitative Strategy Evolution & Backtest Lab
               </h2>
               <p className="text-[11px] text-neutral-400">
-                Continuous optimization via historical market data and quantitative parameter search
+                Deterministic research, walk-forward validation, and learning-data gated candidate generation
               </p>
             </div>
           </div>
@@ -146,7 +135,7 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
                 <span>Execute Quantitative Strategy Optimization Cycle</span>
               </div>
               <p className="text-[11px] text-neutral-400 max-w-xl">
-                Evaluates {candles.length} historical candles, performs parameter surface search, backtests risk-to-reward ratios, and recalibrates algorithmic execution thresholds.
+                Evaluates {candles.length} historical candles and {learningRecords.length} structured trade outcomes. Historical candidates are research evidence; learning-driven proposals require a larger outcome sample.
               </p>
             </div>
 
@@ -180,7 +169,7 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
                     Quantitative Risk & Regime Assessment
                   </span>
                   <span className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 text-[10px]">
-                    Status: {aiAnalysis.survivalStatus || "OPTIMAL"}
+                    Status: {aiAnalysis.survivalStatus || "MONITOR"}
                   </span>
                 </div>
 
@@ -190,7 +179,7 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
 
                 <div className="bg-neutral-950 p-3 rounded-lg border border-neutral-800/80 text-[11px] space-y-1">
                   <div className="text-amber-400 font-semibold">
-                    Risk Mandate: "{aiAnalysis.survivalVow}"
+                    Risk Discipline: "{aiAnalysis.riskDisciplineNote || "Use configured limits; no model output overrides risk controls."}"
                   </div>
                   <div className="text-neutral-400">
                     Regime Assessment: <strong className="text-neutral-200">{aiAnalysis.regimeAssessment}</strong>
@@ -203,23 +192,118 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
             </div>
           )}
 
+          {researchData && (
+            <div className="bg-neutral-900/50 border border-neutral-800 rounded-xl p-3 space-y-2 text-[11px]">
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-neutral-300">Learning Dataset Readiness</span>
+                <span className={researchData.featureResearch.readyForFirstExperiment ? "text-emerald-400" : "text-amber-400"}>
+                  {researchData.featureResearch.readyForFirstExperiment ? "READY FOR CONTROLLED EXPERIMENT" : "RESEARCH DATA BUILDING"}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-neutral-400">
+                <span>Valid feature rows: <strong className="text-neutral-200">{researchData.featureResearch.audit.rowsValid}</strong></span>
+                <span>Required floor: <strong className="text-neutral-200">{90}</strong></span>
+                <span>Missing-feature rows: <strong className="text-neutral-200">{researchData.featureResearch.audit.rowsMissingFeatures}</strong></span>
+                <span>Leakage issues: <strong className={researchData.featureResearch.audit.leakageIssues.length ? "text-rose-400" : "text-emerald-400"}>{researchData.featureResearch.audit.leakageIssues.length}</strong></span>
+              </div>
+              <div className="text-[10px] text-neutral-500">
+                Chronological 60/20/20 dataset split; no shuffling and no target fields are included in the numeric feature vector.
+              </div>
+            </div>
+          )}
+
+          {researchData && researchData.mlExperiment && (
+            <div className="bg-neutral-900/50 border border-neutral-800 rounded-xl p-3 space-y-3 text-[11px]">
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="font-semibold text-neutral-300">First Controlled ML Experiment</span>
+                  <div className="text-[10px] text-neutral-500 mt-0.5">Logistic-regression meta-labeler on deterministic signals</div>
+                </div>
+                <span className={researchData.mlExperiment.status === "READY" ? "text-indigo-300" : "text-amber-400"}>
+                  {researchData.mlExperiment.status === "READY" ? "HELD-OUT TESTED" : researchData.mlExperiment.status}
+                </span>
+              </div>
+
+              {researchData.mlExperiment.status === "READY" ? (
+                <>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    <span className="text-neutral-400">Features <strong className="text-neutral-200">{researchData.mlExperiment.selectedFeatures.length}</strong></span>
+                    <span className="text-neutral-400">Threshold <strong className="text-neutral-200">{(researchData.mlExperiment.selectedThreshold! * 100).toFixed(0)}%</strong></span>
+                    <span className="text-neutral-400">Validation log loss <strong className="text-neutral-200">{researchData.mlExperiment.selectedValidationLogLoss}</strong></span>
+                    <span className="text-neutral-400">Test AUC <strong className="text-neutral-200">{researchData.mlExperiment.test!.rocAuc === null ? "N/A" : researchData.mlExperiment.test!.rocAuc}</strong></span>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div className="rounded-lg border border-neutral-800 bg-neutral-950/60 p-3">
+                      <div className="text-neutral-500 mb-1.5">Deterministic test baseline</div>
+                      <div className="grid grid-cols-2 gap-1.5 text-neutral-300">
+                        <span>Trades: {researchData.mlExperiment.deterministicTest!.tradesTaken}/{researchData.mlExperiment.deterministicTest!.rowsConsidered}</span>
+                        <span>P&L: {researchData.mlExperiment.deterministicTest!.totalPnlUsd >= 0 ? "+" : ""}${researchData.mlExperiment.deterministicTest!.totalPnlUsd.toFixed(2)}</span>
+                        <span>Win rate: {researchData.mlExperiment.deterministicTest!.winRate}%</span>
+                        <span>Profit factor: {researchData.mlExperiment.deterministicTest!.profitFactor}</span>
+                      </div>
+                    </div>
+
+                    <div className="rounded-lg border border-indigo-500/30 bg-indigo-950/10 p-3">
+                      <div className="text-neutral-500 mb-1.5">ML-filtered test overlay</div>
+                      <div className="grid grid-cols-2 gap-1.5 text-neutral-300">
+                        <span>Trades: {researchData.mlExperiment.modelFilteredTest!.tradesTaken}/{researchData.mlExperiment.modelFilteredTest!.rowsConsidered}</span>
+                        <span>P&L: {researchData.mlExperiment.modelFilteredTest!.totalPnlUsd >= 0 ? "+" : ""}${researchData.mlExperiment.modelFilteredTest!.totalPnlUsd.toFixed(2)}</span>
+                        <span>Win rate: {researchData.mlExperiment.modelFilteredTest!.winRate}%</span>
+                        <span>Max DD: ${researchData.mlExperiment.modelFilteredTest!.maxDrawdownUsd.toFixed(2)}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="text-[10px] text-neutral-500">
+                    Model inputs are normalized with TRAIN-only statistics. Hyperparameters and threshold are chosen on VALIDATION; the TEST partition is evaluated afterward and does not drive selection.
+                  </div>
+                </>
+              ) : (
+                <div className="text-[10px] text-neutral-400">
+                  {researchData.mlExperiment.blockedReasons.join(" ") || "Experiment is not ready."}
+                </div>
+              )}
+            </div>
+          )}
+
+          {researchData && (
+            <div className="bg-neutral-900/50 border border-neutral-800 rounded-xl p-3 space-y-2 text-[11px]">
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-neutral-300">Robustness & Baseline Checks</span>
+                <span className={researchData.mlRobustness.status === "READY" ? "text-indigo-300" : "text-amber-400"}>
+                  {researchData.mlRobustness.status === "READY" ? "ROLLING EVALUATION COMPLETE" : "MORE HISTORY REQUIRED"}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-neutral-400">
+                <span>Rolling folds <strong className="text-neutral-200">{researchData.mlRobustness.foldsCompleted}/{researchData.mlRobustness.foldsRequired}</strong></span>
+                <span>Test rows <strong className="text-neutral-200">{researchData.mlRobustness.totalTestRows}</strong></span>
+                <span>Mean Brier <strong className="text-neutral-200">{researchData.mlRobustness.meanTestBrierScore || "N/A"}</strong></span>
+                <span>Positive-P&L folds <strong className="text-neutral-200">{Math.round(researchData.mlRobustness.positiveFilteredPnlFoldRate * 100)}%</strong></span>
+              </div>
+              <div className="text-[10px] text-neutral-500">
+                Classification baseline uses training-set class prevalence. Trading baseline is the deterministic all-trades test path. TEST observations are never used for tuning.
+              </div>
+            </div>
+          )}
+
           {/* Backtest Results of Candidates */}
-          {optimizationData && (
+          {researchData && (
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <h3 className="font-bold text-neutral-200 text-xs flex items-center gap-2">
                   <Award className="w-4 h-4 text-emerald-400" />
-                  Simulated Strategy Candidates ({optimizationData.candidatesTested.length} tested across historical data)
+                  Research Candidates ({researchData.candidates.length} tested across train / validation / held-out test data)
                 </h3>
                 <span className="text-[10px] text-neutral-500">
-                  Sorted by Win-Rate & Survival Score
+                  Order shown: validation evidence and held-out test results
                 </span>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {optimizationData.candidatesTested.map((cand, idx) => {
-                  const isTop = idx === 0;
-                  const res = cand.result;
+                {researchData.candidates.map((cand, idx) => {
+                  const isTop = researchData.proposedCandidate?.id === cand.strategy.id;
+                  const res = cand.test;
 
                   return (
                     <div
@@ -238,7 +322,7 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
                             </span>
                             {isTop && (
                               <span className="px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 text-[9px] font-bold border border-emerald-500/40">
-                                TOP PERFORMER
+                                SELECTED RESEARCH CANDIDATE
                               </span>
                             )}
                           </div>
@@ -288,7 +372,7 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
                       </div>
 
                       <div className="flex items-center justify-between text-[10px] text-neutral-400 pt-1 border-t border-neutral-800/60">
-                        <span>Min Confidence: {cand.strategy.minConfidence}%</span>
+                        <span>Signal Threshold: {cand.strategy.minConfidence}%</span>
                         <span>SL: {cand.strategy.stopLossPercent}% | TP: +{cand.strategy.takeProfitPercent}%</span>
                       </div>
                     </div>
@@ -299,7 +383,7 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
               {/* Insights */}
               <div className="bg-neutral-900/50 border border-neutral-800 rounded-xl p-3 space-y-1.5 text-[11px]">
                 <div className="font-semibold text-neutral-300">Optimization Takeaways:</div>
-                {optimizationData.optimizationInsights.map((ins, i) => (
+                {researchData.notes.map((ins, i) => (
                   <div key={i} className="text-neutral-400 flex items-start gap-2">
                     <span className="text-emerald-400">&bull;</span>
                     <span>{ins}</span>
@@ -313,7 +397,7 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
         {/* Modal Footer */}
         <div className="px-5 py-3 border-t border-neutral-800 bg-neutral-900/70 flex items-center justify-between">
           <span className="text-neutral-500 text-[11px]">
-            Adopting updates the terminal's live execution matrix immediately.
+            A candidate can only be loaded after the structured learning and research gates are satisfied. AI analysis remains advisory.
           </span>
 
           <div className="flex items-center gap-2">
@@ -325,12 +409,12 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
             </button>
             <button
               id="adopt-strategy-btn"
-              onClick={handleAdoptBestStrategy}
-              disabled={!optimizationData && !aiAnalysis}
+              onClick={handleLoadResearchCandidate}
+              disabled={researchData?.status !== "REVIEW_REQUIRED"}
               className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition-all shadow-md disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
             >
               <CheckCircle2 className="w-3.5 h-3.5" />
-              <span>Adopt Optimized Strategy</span>
+              <span>Load Research Candidate</span>
             </button>
           </div>
         </div>
