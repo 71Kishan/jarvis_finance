@@ -1,8 +1,8 @@
 import fs from "fs";
 import path from "path";
 import { createHash } from "crypto";
-import type { LearningResearchResult } from "./researchLoop";
-import type { MlShadowModelArtifact } from "./mlBaseline";
+import type { LearningResearchResult } from "../learn/researchLoop";
+import type { MlShadowModelArtifact } from "../learn/mlBaseline";
 
 export interface LearningExperimentRecord {
   id: string;
