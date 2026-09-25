@@ -4,6 +4,7 @@ import {
   LEARNING_FEATURE_NAMES,
   LearningFeatureDataset,
   LearningFeatureDatasetRow,
+  toNumericFeatureVector,
 } from "./dataset";
 import { LEARNING_FEATURE_SCHEMA_VERSION, DecisionFeatureSnapshot } from "./features";
 
@@ -63,31 +64,6 @@ function finiteOrNull(value: number | null | undefined): number | null {
     : null;
 }
 
-function featureVectorIsExact(snapshot: DecisionFeatureSnapshot): boolean {
-  const names = Object.keys(
-    buildLearningFeatureDataset([
-      {
-        tradeId: "__schema_check__",
-        recordedAt: snapshot.decisionTimestamp,
-        decisionTimestamp: snapshot.decisionTimestamp,
-        entryTime: snapshot.decisionTimestamp,
-        exitTime: snapshot.decisionTimestamp,
-        holdingPeriodMs: 0,
-        asset: snapshot.asset,
-        strategyId: snapshot.strategyId,
-        strategyVersion: snapshot.strategyVersion,
-        outcome: "FLAT",
-        pnlUsd: 0,
-        pnlPercent: 0,
-        features: {},
-        // This object is replaced below by the real snapshot via direct vector conversion.
-      } as LearningTradeRecord,
-    ]).featureNames,
-  );
-  return names.length === LEARNING_FEATURE_NAMES.length &&
-    names.every((name, index) => name === LEARNING_FEATURE_NAMES[index]);
-}
-
 function auditRecord(
   record: LearningTradeRecord,
   expectedFeatureNames: readonly string[],
@@ -115,38 +91,13 @@ function auditRecord(
     issues.push("invalid_target");
   }
 
-  const vectorKeys = Object.keys((() => {
-    const snapshot = record.features!;
-    return {
-      signal_score: snapshot.signalScore,
-      signal_direction: snapshot.signalDirection === "LONG" ? 1 : snapshot.signalDirection === "SHORT" ? -1 : 0,
-      eligible: snapshot.eligible ? 1 : 0,
-      price_vs_ema9_pct: snapshot.priceVsEma9Pct,
-      price_vs_ema21_pct: snapshot.priceVsEma21Pct,
-      price_vs_ema50_pct: snapshot.priceVsEma50Pct,
-      ema9_vs_21_pct: snapshot.ema9Vs21Pct,
-      ema21_vs_50_pct: snapshot.ema21Vs50Pct,
-      rsi: snapshot.rsi,
-      macd: snapshot.macd,
-      macd_signal: snapshot.macdSignal,
-      macd_hist: snapshot.macdHist,
-      bollinger_position: snapshot.bollingerPosition,
-      bollinger_width_pct: snapshot.bollingerWidthPct,
-      atr_pct: snapshot.atrPct,
-      volume_ratio: snapshot.volumeRatio,
-      candle_return_pct: snapshot.candleReturnPct,
-      candle_range_pct: snapshot.candleRangePct,
-      candle_body_to_range: snapshot.candleBodyToRange,
-      trend_alignment: snapshot.trendAlignment,
-      momentum_alignment: snapshot.momentumAlignment,
-      rsi_alignment: snapshot.rsiAlignment,
-      volatility_structure_alignment: snapshot.volatilityStructureAlignment,
-      volume_confirmed: snapshot.volumeConfirmed ? 1 : 0,
-      spread_bps: snapshot.spreadBps,
-      market_open: snapshot.marketOpen === null ? null : snapshot.marketOpen ? 1 : 0,
-      market_data_age_ms: snapshot.marketDataAgeMs,
-    };
-  })());
+  const numericVector = toNumericFeatureVector(record.features);
+  const vectorKeys = Object.keys(numericVector);
+  for (const [name, value] of Object.entries(numericVector)) {
+    if (value !== null && !Number.isFinite(value)) {
+      issues.push(`non_finite_feature:${name}`);
+    }
+  }
 
   const unknown = vectorKeys.filter((name) => !expectedFeatureNames.includes(name as typeof LEARNING_FEATURE_NAMES[number]));
   const missing = expectedFeatureNames.filter((name) => !vectorKeys.includes(name));
@@ -220,7 +171,8 @@ export function auditLearningFeatureDataset(
     issue.includes("decision_after_entry") ||
     issue.includes("unsupported_feature_schema") ||
     issue.includes("unknown_features") ||
-    issue.includes("missing_feature_names"),
+    issue.includes("missing_feature_names") ||
+    issue.includes("non_finite_feature"),
   );
 
   const rowsInvalid = sorted.length - rowsValid - rowsMissingFeatures;

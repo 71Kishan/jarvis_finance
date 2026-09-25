@@ -2,6 +2,7 @@ import type { Candle, StrategyConfig } from "../types/trading";
 import type { LearningTradeRecord } from "./types";
 import { StrategyOptimizer } from "../engine/optimizer";
 import { generateResearchCandidates } from "./candidateGenerator";
+import { LearningFeatureResearchPreparation, prepareLearningFeatureResearch } from "./researchDataset";
 
 export type ResearchStatus =
   | "INSUFFICIENT_HISTORY"
@@ -31,6 +32,7 @@ export interface ResearchCandidateResult {
 export interface LearningResearchResult {
   status: ResearchStatus;
   dataset: LearningDatasetSummary;
+  featureResearch: LearningFeatureResearchPreparation;
   historyBars: number;
   candidates: ResearchCandidateResult[];
   proposedCandidate: StrategyConfig | null;
@@ -79,6 +81,7 @@ export class LearningResearchLoop {
     learningRecords: LearningTradeRecord[],
   ): LearningResearchResult {
     const dataset = this.summarizeDataset(learningRecords);
+    const featureResearch = prepareLearningFeatureResearch(learningRecords);
     const minimumHistoryBars = candles.length >= 360;
     const minimumLearningTrades = dataset.tradeRecords >= 30;
 
@@ -86,6 +89,7 @@ export class LearningResearchLoop {
       return {
         status: "INSUFFICIENT_HISTORY",
         dataset,
+        featureResearch,
         historyBars: candles.length,
         candidates: [],
         proposedCandidate: null,
@@ -153,6 +157,7 @@ export class LearningResearchLoop {
           ? "RESEARCH_ONLY"
           : "INSUFFICIENT_LEARNING_DATA",
       dataset,
+      featureResearch,
       historyBars: candles.length,
       candidates: ordered,
       proposedCandidate: proposed?.strategy ?? null,
@@ -169,6 +174,7 @@ export class LearningResearchLoop {
         minimumLearningTrades
           ? "The proposed candidate is a research proposal only and is never auto-promoted."
           : "Historical backtest candidates are shown, but no learning-driven proposal is allowed until at least 30 closed-trade records exist.",
+        `Feature dataset readiness: ${featureResearch.readyForFirstExperiment ? "ready for first controlled experiment" : featureResearch.blockedReasons.join(" ")}`,
         "Forward paper, shadow testing, and independent review remain required before any deployment gate.",
       ],
     };

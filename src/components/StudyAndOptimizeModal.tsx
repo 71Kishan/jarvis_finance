@@ -192,6 +192,26 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
             </div>
           )}
 
+          {researchData && (
+            <div className="bg-neutral-900/50 border border-neutral-800 rounded-xl p-3 space-y-2 text-[11px]">
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-neutral-300">Learning Dataset Readiness</span>
+                <span className={researchData.featureResearch.readyForFirstExperiment ? "text-emerald-400" : "text-amber-400"}>
+                  {researchData.featureResearch.readyForFirstExperiment ? "READY FOR CONTROLLED EXPERIMENT" : "RESEARCH DATA BUILDING"}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-neutral-400">
+                <span>Valid feature rows: <strong className="text-neutral-200">{researchData.featureResearch.audit.rowsValid}</strong></span>
+                <span>Required floor: <strong className="text-neutral-200">{90}</strong></span>
+                <span>Missing-feature rows: <strong className="text-neutral-200">{researchData.featureResearch.audit.rowsMissingFeatures}</strong></span>
+                <span>Leakage issues: <strong className={researchData.featureResearch.audit.leakageIssues.length ? "text-rose-400" : "text-emerald-400"}>{researchData.featureResearch.audit.leakageIssues.length}</strong></span>
+              </div>
+              <div className="text-[10px] text-neutral-500">
+                Chronological 60/20/20 dataset split; no shuffling and no target fields are included in the numeric feature vector.
+              </div>
+            </div>
+          )}
+
           {/* Backtest Results of Candidates */}
           {researchData && (
             <div className="space-y-3">
