@@ -87,10 +87,6 @@ export class LearningShadowStore {
     tradeId: string | null,
     recordedAt = Date.now(),
   ): ShadowPredictionRecord {
-    const features: Record<string, number | null> = {};
-    for (const name of Object.keys(prediction)) {
-      void name;
-    }
     const numeric = predictionFeatureVector(snapshot);
     const record: ShadowPredictionRecord = {
       id: "SHADOW-" + recordedAt + "-" + Math.random().toString(36).slice(2, 8),
@@ -212,7 +208,7 @@ export class LearningShadowStore {
       featureDriftScore: driftScore,
       missingFeatureRate: Number(missingRate.toFixed(4)),
       driftFlag: (driftScore !== null && driftScore > DRIFT_THRESHOLD) || missingRate > MISSING_THRESHOLD,
-      lastPredictionAt: this.state.predictions[0]?.createdAt ?? null,
+      lastPredictionAt: relevantPredictions[0]?.createdAt ?? null,
       lastResolvedAt: resolved[0]?.resolvedAt ?? null,
     };
   }
