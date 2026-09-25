@@ -231,6 +231,7 @@ export class TradingEngine {
       marketDataTimestamp: this.lastMarketDataTimestamp || undefined,
       marketDataSource: this.lastMarketDataSource,
     });
+    this.lastDecisionFeatures = features;
     const entered = this.executeEntry(signal.direction as "LONG" | "SHORT", currentCandle.close, signal.score, signal.reasons.join(" | "), currentCandle, features);
     return { entered, confidence: signal.score, reason: entered ? "Eligible paper signal executed." : "Signal passed, but risk controls rejected execution." };
   }
@@ -376,6 +377,7 @@ export class TradingEngine {
       marketDataTimestamp: this.lastMarketDataTimestamp || undefined,
       marketDataSource: this.lastMarketDataSource,
     });
+    this.lastDecisionFeatures = features;
     this.pendingEntry = {
       direction: signal.direction as "LONG" | "SHORT",
       signalScore: signal.score,
