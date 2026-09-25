@@ -134,6 +134,14 @@ describe("learning research dataset", () => {
     expect(prepared.blockedReasons[0]).toContain(`${LEARNING_RESEARCH_MIN_ROWS}`);
   });
 
+  test("requires live market provenance for a first ML experiment", () => {
+    const prepared = prepareLearningFeatureResearch(
+      Array.from({ length: LEARNING_RESEARCH_MIN_ROWS }, (_, index) => makeRecord(index)),
+    );
+    expect(prepared.readyForFirstExperiment).toBe(false);
+    expect(prepared.blockedReasons.join(" ")).toContain("LIVE_MARKET_DATA");
+  });
+
   test("flags a decision snapshot captured after entry as a leakage issue", () => {
     const record=makeRecord(0);
     record.features = {

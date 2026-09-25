@@ -112,9 +112,13 @@ describe("first ML experiment", () => {
 
     expect(a).toEqual(b);
     expect(a.status).toBe("READY");
+    expect(a.model?.classWeighting).toMatch(/NONE|BALANCED/);
+    expect(a.calibration?.method).toMatch(/PLATT|IDENTITY/);
     expect(a.train).not.toBeNull();
     expect(a.validation).not.toBeNull();
     expect(a.test).not.toBeNull();
+    expect(a.rawTest).not.toBeNull();
+    expect(a.baselineTest).not.toBeNull();
     expect(a.deterministicTest).not.toBeNull();
     expect(a.modelFilteredTest).not.toBeNull();
     expect(a.selectedThreshold).toBeGreaterThanOrEqual(0.5);
@@ -136,3 +140,4 @@ describe("first ML experiment", () => {
     expect(result.status).toBe("INSUFFICIENT_CLASS_VARIETY");
   });
 });
+
