@@ -3,6 +3,7 @@ import { DEFAULT_STRATEGY, TradingEngine } from "../engine/tradingEngine";
 import { Candle, StrategyConfig } from "../types/trading";
 import { attachIndicators } from "../engine/indicators";
 import { PaperStateStore, PaperStateStoreResult } from "./paperStateStore";
+import { LearningShadowRuntime, LearningShadowRuntimeSnapshot } from "./learningShadowRuntime";
 
 export type PaperRuntimeStatus =
   | "STOPPED"
@@ -20,6 +21,7 @@ export interface PaperRuntimeSnapshot {
   lastPollAt: number | null;
   lastDataAt: number | null;
   message: string;
+  learningShadow: LearningShadowRuntimeSnapshot;
   botState: ReturnType<TradingEngine["getBotState"]>;
   vitality: ReturnType<TradingEngine["getVitality"]>;
   activeTrade: ReturnType<TradingEngine["getActiveTrade"]>;
@@ -32,6 +34,7 @@ export class AutonomousPaperRuntime {
   private readonly gateway: BinanceMarketDataService;
   private readonly pollIntervalMs: number;
   private readonly stateStore: PaperStateStore;
+  private readonly learningShadow: LearningShadowRuntime;
   private restoredFromDisk = false;
   private recoveryNote = "";
   private pollInFlight = false;
@@ -62,6 +65,7 @@ export class AutonomousPaperRuntime {
       { ...strategy, indicatorWeights: { ...strategy.indicatorWeights } },
     );
     this.stateStore = new PaperStateStore();
+    this.learningShadow = new LearningShadowRuntime();
     const recovery = this.stateStore.loadInto(this.engine);
     this.applyRecoveryResult(recovery);
     this.lastProcessedCandleAt = this.engine.getLastProcessedCandleTimestamp() || null;
@@ -109,6 +113,7 @@ export class AutonomousPaperRuntime {
       lastPollAt: this.lastPollAt,
       lastDataAt: this.lastDataAt,
       message: this.recoveryNote ? this.message + " " + this.recoveryNote : this.message,
+      learningShadow: this.learningShadow.getSnapshot(),
       botState: this.engine.getBotState(),
       vitality: { ...this.engine.getVitality() },
       activeTrade: this.engine.getActiveTrade() ? { ...this.engine.getActiveTrade()! } : null,
@@ -122,7 +127,7 @@ export class AutonomousPaperRuntime {
     this.pollInFlight = true;
 
     try {
-      const snapshot = this.gateway.getSnapshot(this.symbol, 100);
+      const snapshot = this.gateway.getSnapshot(this.symbol, 500);
 
       if (!snapshot) {
         this.status = "WAITING_FOR_DATA";
