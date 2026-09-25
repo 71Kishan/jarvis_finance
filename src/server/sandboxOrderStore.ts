@@ -50,7 +50,7 @@ interface OrderRow {
 }
 
 function canTransitionOrderStatus(current: OrderStatus, incoming: OrderStatus): boolean {
-  const allowed: Record<OrderStatus, ReadonlySet<OrderStatus>> = {
+  const allowed: Record<string, ReadonlySet<string>> = {
     PENDING_SUBMIT: new Set(["PENDING_SUBMIT", "SUBMITTED", "PARTIALLY_FILLED", "FILLED", "CANCEL_PENDING", "CANCELLED", "REJECTED", "EXPIRED", "UNKNOWN_RECONCILIATION", "SUBMISSION_FAILED"]),
     SUBMITTED: new Set(["SUBMITTED", "PARTIALLY_FILLED", "FILLED", "CANCEL_PENDING", "CANCELLED", "REJECTED", "EXPIRED", "UNKNOWN_RECONCILIATION"]),
     PARTIALLY_FILLED: new Set(["PARTIALLY_FILLED", "FILLED", "CANCEL_PENDING", "CANCELLED", "EXPIRED", "UNKNOWN_RECONCILIATION"]),
