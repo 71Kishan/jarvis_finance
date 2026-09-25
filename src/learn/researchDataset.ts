@@ -26,6 +26,9 @@ export interface LearningFeatureAudit {
   rowsValid: number;
   rowsInvalid: number;
   rowsMissingFeatures: number;
+  liveMarketRows: number;
+  nonLiveSourceRows: number;
+  sourceCoveragePercent: number;
   leakageIssues: string[];
   duplicateTradeIds: number;
   featureStats: FeatureQualityStat[];
@@ -176,6 +179,13 @@ export function auditLearningFeatureDataset(
   );
 
   const rowsInvalid = sorted.length - rowsValid - rowsMissingFeatures;
+  const liveMarketRows = sorted.filter(
+    (record) => record.features?.marketDataSource === "LIVE_MARKET_DATA" && record.features?.schemaVersion === LEARNING_FEATURE_SCHEMA_VERSION,
+  ).length;
+  const featureRows = sorted.filter((record) => Boolean(record.features)).length;
+  const sourceCoveragePercent = featureRows
+    ? Number((liveMarketRows / featureRows * 100).toFixed(2))
+    : 0;
 
   return {
     schemaVersion: LEARNING_FEATURE_SCHEMA_VERSION,
@@ -183,6 +193,9 @@ export function auditLearningFeatureDataset(
     rowsValid,
     rowsInvalid: Math.max(0, rowsInvalid),
     rowsMissingFeatures,
+    liveMarketRows,
+    nonLiveSourceRows: Math.max(0, featureRows - liveMarketRows),
+    sourceCoveragePercent,
     leakageIssues,
     duplicateTradeIds: duplicateIds.size,
     featureStats,
@@ -244,6 +257,9 @@ export function prepareLearningFeatureResearch(
   }
   if (audit.duplicateTradeIds > 0) {
     blockedReasons.push("Duplicate trade IDs must be resolved before experimentation.");
+  }
+  if (audit.liveMarketRows < audit.rowsValid) {
+    blockedReasons.push("The first ML experiment requires LIVE_MARKET_DATA provenance for every valid feature row.");
   }
 
   return {
