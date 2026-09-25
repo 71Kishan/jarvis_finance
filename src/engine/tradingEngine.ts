@@ -33,6 +33,7 @@ export class TradingEngine {
   private readonly learningJournal = new LearningPerformanceJournal();
   private lastProcessedCandleTimestamp = 0;
   private lastSignal: SignalResult | null = null;
+  private lastDecisionFeatures: DecisionFeatureSnapshot | null = null;
   private pendingEntry: { direction: "LONG" | "SHORT"; signalScore: number; rationale: string; signalCandle: Candle; features: DecisionFeatureSnapshot } | null = null;
   private lastSpreadBps: number | undefined;
   private lastMarketDataTimestamp = 0;
@@ -74,6 +75,7 @@ export class TradingEngine {
   public getNotifications() { return [...this.notifications]; }
   public getEquityCurve() { return [...this.equityCurve]; }
   public getLastSignal() { return this.lastSignal; }
+  public getLastDecisionFeatures() { return this.lastDecisionFeatures ? { ...this.lastDecisionFeatures } : null; }
   public getLastProcessedCandleTimestamp() { return this.lastProcessedCandleTimestamp; }
   public getLearningRecords(limit = 200) { return this.learningJournal.list(limit); }
 
@@ -117,6 +119,7 @@ export class TradingEngine {
     // fresh completed-bar signal is safer than replaying an order after an outage.
     this.pendingEntry = null;
     this.lastSignal = null;
+    this.lastDecisionFeatures = null;
     this.lastSpreadBps = undefined;
     this.lastMarketDataTimestamp = 0;
     this.lastMarketDataSource = undefined;
@@ -192,7 +195,7 @@ export class TradingEngine {
   public fullResetAccount(initialCapital = 10000) {
     const limit = this.vitality.circuitBreakerThresholdPercent;
     const capital = Number.isFinite(initialCapital) && initialCapital > 0 ? initialCapital : 10000;
-    this.vitality = this.createInitialVitality(capital, limit); this.activeTrade = null; this.tradeHistory = []; this.learningJournal.clear(); this.thoughts = []; this.lastSignal = null; this.lastProcessedCandleTimestamp = 0; this.lastSpreadBps = undefined; this.lastMarketDataTimestamp = 0; this.lastMarketDataSource = undefined; this.lastMarketOpen = undefined; this.lastDailyKey = this.utcDayKey(Date.now()); this.botState = "HUNTING";
+    this.vitality = this.createInitialVitality(capital, limit); this.activeTrade = null; this.tradeHistory = []; this.lastDecisionFeatures = null; this.learningJournal.clear(); this.thoughts = []; this.lastSignal = null; this.lastProcessedCandleTimestamp = 0; this.lastSpreadBps = undefined; this.lastMarketDataTimestamp = 0; this.lastMarketDataSource = undefined; this.lastMarketOpen = undefined; this.lastDailyKey = this.utcDayKey(Date.now()); this.botState = "HUNTING";
     this.equityCurve = [{ timestamp: Date.now(), timeLabel: new Date().toLocaleTimeString(), equity: capital, cash: capital, drawdownPercent: 0, pnlDelta: 0, cumulativePnl: 0, tradeEvent: "Paper run reset" }];
     this.addNotification({ type: "RISK_ALERT", title: "Paper account reset", message: "New isolated paper run started. Previous run statistics were cleared.", badgeText: "RESET" });
     this.notify();
@@ -359,6 +362,7 @@ export class TradingEngine {
   private evaluateEntry(candle: Candle, recentCandles: Candle[]) {
     const signal = evaluateSignal(candle, recentCandles, this.strategy);
     this.lastSignal = signal;
+    this.lastDecisionFeatures = null;
 
     if (!signal.eligible) {
       this.logThought("STUDY", "No eligible setup", signal.reasons.join(" ") || "Composite score below threshold.", signal.score);
@@ -366,6 +370,7 @@ export class TradingEngine {
     }
 
     const features = buildDecisionFeatureSnapshot(candle, signal, this.strategy, {
+      recordedAt: Date.now(),
       spreadBps: this.lastSpreadBps,
       marketOpen: this.lastMarketOpen,
       marketDataTimestamp: this.lastMarketDataTimestamp || undefined,
