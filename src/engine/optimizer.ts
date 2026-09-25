@@ -72,7 +72,7 @@ export class StrategyOptimizer {
     };
 
     const closePosition = (p: SimPosition, exitPrice: number) => {
-      const exit = paperExecutionAdapter.exitFill({ expectedPrice: exitPrice, p.type, Math.abs(p.amount * exitPrice), settings);
+      const exit = paperExecutionAdapter.exitFill({ expectedPrice: exitPrice, side: p.type, notionalUsd: Math.abs(p.amount * exitPrice), settings });
       const gross = paperExecutionAdapter.grossPnL(p.type, p.entryPrice, exit.fillPrice, p.amount);
       const net = gross - p.entryFeeUsd - exit.feeUsd;
       recordClosedTrade(net, p.entryFeeUsd + exit.feeUsd, exit.slippageUsd);
@@ -98,7 +98,7 @@ export class StrategyOptimizer {
         const resolved = paperExecutionAdapter.resolveStopTarget(position.type, candle, position.stopLoss, position.takeProfit);
         if (resolved.kind !== "NONE") {
           const wasPositive = (() => {
-            const gross = paperExecutionAdapter.grossPnL(position!.type, position!.entryPrice, paperExecutionAdapter.exitFill({ expectedPrice: resolved.price, position!.type, Math.abs(position!.amount * resolved.price), settings).fillPrice, position!.amount);
+            const gross = paperExecutionAdapter.grossPnL(position!.type, position!.entryPrice, paperExecutionAdapter.exitFill({ expectedPrice: resolved.price, side: position!.type, notionalUsd: Math.abs(position!.amount * resolved.price), settings }).fillPrice, position!.amount);
             return gross - position!.entryFeeUsd > 0;
           })();
           closePosition(position, resolved.price);
@@ -158,7 +158,7 @@ export class StrategyOptimizer {
           );
 
           if (notional >= 10) {
-            const entry = paperExecutionAdapter.entryFill({ expectedPrice: next.open, signal.direction as "LONG" | "SHORT", notional, settings);
+            const entry = paperExecutionAdapter.entryFill({ expectedPrice: next.open, side: signal.direction as "LONG" | "SHORT", notionalUsd: notional, settings });
             if (notional + entry.feeUsd <= cash) {
               cash -= notional + entry.feeUsd;
               totalFees += entry.feeUsd;
