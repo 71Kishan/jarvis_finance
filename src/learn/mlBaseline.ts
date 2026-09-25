@@ -9,6 +9,16 @@ export interface LogisticModelConfig {
   regularization: number;
   learningRate: number;
   iterations: number;
+  classWeighting: "NONE" | "BALANCED";
+}
+
+export interface MlCalibrationMetrics {
+  method: "PLATT" | "IDENTITY";
+  fitRows: number;
+  rawLogLoss: number;
+  calibratedLogLoss: number;
+  rawBrierScore: number;
+  calibratedBrierScore: number;
 }
 
 export interface MlClassificationMetrics {
@@ -44,6 +54,9 @@ export interface MlExperimentResult {
   train: MlClassificationMetrics | null;
   validation: MlClassificationMetrics | null;
   test: MlClassificationMetrics | null;
+  rawTest?: MlClassificationMetrics | null;
+  baselineTest?: MlClassificationMetrics | null;
+  calibration?: MlCalibrationMetrics | null;
   deterministicTest: MlTradingOverlayMetrics | null;
   modelFilteredTest: MlTradingOverlayMetrics | null;
   blockedReasons: string[];
@@ -66,9 +79,12 @@ interface FittedModel {
 }
 
 const CONFIGS: LogisticModelConfig[] = [
-  { regularization: 0.25, learningRate: 0.05, iterations: 700 },
-  { regularization: 1, learningRate: 0.05, iterations: 700 },
-  { regularization: 4, learningRate: 0.03, iterations: 900 },
+  { regularization: 0.25, learningRate: 0.05, iterations: 700, classWeighting: "NONE" },
+  { regularization: 1, learningRate: 0.05, iterations: 700, classWeighting: "NONE" },
+  { regularization: 4, learningRate: 0.03, iterations: 900, classWeighting: "NONE" },
+  { regularization: 0.25, learningRate: 0.05, iterations: 700, classWeighting: "BALANCED" },
+  { regularization: 1, learningRate: 0.05, iterations: 700, classWeighting: "BALANCED" },
+  { regularization: 4, learningRate: 0.03, iterations: 900, classWeighting: "BALANCED" },
 ];
 
 const THRESHOLDS = [0.5, 0.55, 0.6, 0.65];
@@ -161,9 +177,19 @@ function fit(
   const classMean = Math.max(0.001, Math.min(0.999, mean(y)));
   let bias = Math.log(classMean / (1 - classMean));
 
+  const positives = y.filter((value) => value === 1).length;
+  const negatives = y.length - positives;
+  const positiveWeight = config.classWeighting === "BALANCED" && positives > 0
+    ? y.length / (2 * positives)
+    : 1;
+  const negativeWeight = config.classWeighting === "BALANCED" && negatives > 0
+    ? y.length / (2 * negatives)
+    : 1;
+
   for (let iteration = 0; iteration < config.iterations; iteration += 1) {
     const grad = new Array(names.length).fill(0) as number[];
     let gradBias = 0;
+    let totalWeight = 0;
 
     for (let rowIndex = 0; rowIndex < x.length; rowIndex += 1) {
       let linear = bias;
@@ -171,17 +197,20 @@ function fit(
         linear += weights[featureIndex] * x[rowIndex][featureIndex];
       }
 
-      const error = sigmoid(linear) - y[rowIndex];
+      const observationWeight = y[rowIndex] === 1 ? positiveWeight : negativeWeight;
+      const error = (sigmoid(linear) - y[rowIndex]) * observationWeight;
       gradBias += error;
+      totalWeight += observationWeight;
       for (let featureIndex = 0; featureIndex < names.length; featureIndex += 1) {
         grad[featureIndex] += error * x[rowIndex][featureIndex];
       }
     }
 
-    gradBias /= Math.max(1, x.length);
+    const normalizer = Math.max(1, totalWeight);
+    gradBias /= normalizer;
     for (let featureIndex = 0; featureIndex < names.length; featureIndex += 1) {
       grad[featureIndex] =
-        grad[featureIndex] / Math.max(1, x.length) +
+        grad[featureIndex] / normalizer +
         config.regularization * weights[featureIndex];
       weights[featureIndex] -= config.learningRate * grad[featureIndex];
     }
@@ -191,14 +220,48 @@ function fit(
   return { names, weights, bias };
 }
 
-function predict(model: FittedModel, x: number[][]): number[] {
+function rawLogits(model: FittedModel, x: number[][]): number[] {
   return x.map((row) => {
     let linear = model.bias;
     for (let i = 0; i < model.weights.length; i += 1) {
       linear += model.weights[i] * row[i];
     }
-    return clampProbability(sigmoid(linear));
+    return linear;
   });
+}
+
+function predict(model: FittedModel, x: number[][]): number[] {
+  return rawLogits(model, x).map((logit) => clampProbability(sigmoid(logit)));
+}
+
+function fitPlattCalibration(logits: number[], y: number[]): { slope: number; intercept: number } {
+  if (logits.length < 8 || new Set(y).size < 2) return { slope: 1, intercept: 0 };
+
+  let slope = 1;
+  let intercept = 0;
+  for (let iteration = 0; iteration < 500; iteration += 1) {
+    let slopeGradient = 0;
+    let interceptGradient = 0;
+    for (let i = 0; i < logits.length; i += 1) {
+      const p = sigmoid(slope * logits[i] + intercept);
+      const error = p - y[i];
+      slopeGradient += error * logits[i];
+      interceptGradient += error;
+    }
+    slope -= 0.02 * slopeGradient / logits.length;
+    intercept -= 0.02 * interceptGradient / logits.length;
+  }
+  return { slope, intercept };
+}
+
+function calibratedPredict(
+  model: FittedModel,
+  calibration: { slope: number; intercept: number },
+  x: number[][],
+): number[] {
+  return rawLogits(model, x).map((logit) =>
+    clampProbability(sigmoid(calibration.slope * logit + calibration.intercept)),
+  );
 }
 
 function logLoss(y: number[], p: number[]): number {
@@ -317,9 +380,17 @@ function selectModel(
   matrix: PreparedMatrix,
   trainRows: LearningFeatureDatasetRow[],
   validationRows: LearningFeatureDatasetRow[],
-): { model: FittedModel; config: LogisticModelConfig; threshold: number; validationLogLoss: number } {
+): {
+  model: FittedModel;
+  calibrator: { slope: number; intercept: number };
+  config: LogisticModelConfig;
+  threshold: number;
+  validationLogLoss: number;
+  calibration: MlCalibrationMetrics;
+} {
   let best: {
     model: FittedModel;
+    calibrator: { slope: number; intercept: number };
     config: LogisticModelConfig;
     threshold: number;
     validationLogLoss: number;
@@ -328,12 +399,23 @@ function selectModel(
     validationPnl: number;
   } | null = null;
 
-  const yTrain = trainRows.map(targetFor);
+  const innerFitCount = Math.max(2, Math.floor(trainRows.length * 0.8));
+  const yFit = trainRows.slice(0, innerFitCount).map(targetFor);
+  const yCalibration = trainRows.slice(innerFitCount).map(targetFor);
   const yValidation = validationRows.map(targetFor);
 
   for (const config of CONFIGS) {
-    const model = fit(matrix.train, yTrain, matrix.names, config);
-    const probabilities = predict(model, matrix.validation);
+    const model = fit(
+      matrix.train.slice(0, innerFitCount),
+      yFit,
+      matrix.names,
+      config,
+    );
+    const calibrator = fitPlattCalibration(
+      rawLogits(model, matrix.train.slice(innerFitCount)),
+      yCalibration,
+    );
+    const probabilities = calibratedPredict(model, calibrator, matrix.validation);
     const loss = logLoss(yValidation, probabilities);
     const brierScore = brier(yValidation, probabilities);
 
@@ -341,6 +423,7 @@ function selectModel(
       const overlay = tradingOverlay(validationRows, probabilities, threshold);
       const candidate = {
         model,
+        calibrator,
         config,
         threshold,
         validationLogLoss: loss,
@@ -361,11 +444,24 @@ function selectModel(
   }
 
   if (!best) throw new Error("No deterministic ML candidate could be selected.");
+
+  const rawCalibration = predict(best.model, matrix.train.slice(innerFitCount));
+  const calibratedCalibration = calibratedPredict(best.model, best.calibrator, matrix.train.slice(innerFitCount));
+
   return {
     model: best.model,
+    calibrator: best.calibrator,
     config: best.config,
     threshold: best.threshold,
     validationLogLoss: best.validationLogLoss,
+    calibration: {
+      method: best.calibrator.slope === 1 && best.calibrator.intercept === 0 ? "IDENTITY" : "PLATT",
+      fitRows: yCalibration.length,
+      rawLogLoss: logLoss(yCalibration, rawCalibration),
+      calibratedLogLoss: logLoss(yCalibration, calibratedCalibration),
+      rawBrierScore: brier(yCalibration, rawCalibration),
+      calibratedBrierScore: brier(yCalibration, calibratedCalibration),
+    },
   };
 }
 
@@ -432,9 +528,12 @@ export class FirstMlExperiment {
     const matrix = buildMatrix(names, split.train, split.validation, split.test);
     const selected = selectModel(matrix, split.train, split.validation);
 
-    const trainProbabilities = predict(selected.model, matrix.train);
-    const validationProbabilities = predict(selected.model, matrix.validation);
-    const testProbabilities = predict(selected.model, matrix.test);
+    const trainProbabilities = calibratedPredict(selected.model, selected.calibrator, matrix.train);
+    const validationProbabilities = calibratedPredict(selected.model, selected.calibrator, matrix.validation);
+    const testProbabilities = calibratedPredict(selected.model, selected.calibrator, matrix.test);
+    const rawTestProbabilities = predict(selected.model, matrix.test);
+    const baselineWinRate = split.train.filter((row) => targetFor(row) === 1).length / Math.max(1, split.train.length);
+    const baselineProbabilities = split.test.map(() => baselineWinRate);
 
     return {
       status: "READY",
@@ -442,9 +541,12 @@ export class FirstMlExperiment {
       selectedThreshold: selected.threshold,
       selectedValidationLogLoss: selected.validationLogLoss,
       selectedFeatures: names,
+      calibration: selected.calibration,
       train: classification(split.train, trainProbabilities),
       validation: classification(split.validation, validationProbabilities),
       test: classification(split.test, testProbabilities),
+      rawTest: classification(split.test, rawTestProbabilities),
+      baselineTest: classification(split.test, baselineProbabilities),
       deterministicTest: tradingOverlay(split.test, split.test.map(() => 1), 0),
       modelFilteredTest: tradingOverlay(split.test, testProbabilities, selected.threshold),
       blockedReasons: [],
@@ -452,6 +554,10 @@ export class FirstMlExperiment {
         "This is a logistic-regression meta-labeler: it predicts WIN versus non-WIN for an existing deterministic eligible trade.",
         "It does not choose direction, position size, exits, or submit orders.",
         "Missing-value imputation and normalization use TRAIN statistics only.",
+        "Balanced class weighting is tested as a deterministic alternative using TRAIN-only class counts.",
+        "The first experiment uses a fixed auditable feature subset through the existing feature-name selection, excluding constant training features.",
+        "Missing-value imputation and normalization use TRAIN statistics only.",
+        "The base model is fit on the inner 80% of TRAIN and Platt calibration is fit on the remaining 20% of TRAIN.",
         "Regularization and the filter threshold are selected on VALIDATION only; TEST remains held out.",
         "The test overlay compares all deterministic test trades with the subset accepted by the model.",
         "Predicted probabilities are research estimates, not guarantees or proof of live calibration.",
