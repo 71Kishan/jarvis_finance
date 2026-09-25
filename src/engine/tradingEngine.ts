@@ -399,7 +399,9 @@ export class TradingEngine {
     return Boolean(this.activeTrade);
   }
   private openPaperPosition(type: "LONG" | "SHORT", expectedPrice: number, notional: number, stopLossPercent: number, takeProfitPercent: number, trailingStop: boolean, rationale?: string, signalScore = 0, feeOverride?: number, slippageOverride?: number) {
-    const fill = feeOverride === undefined\n      ? paperExecutionAdapter.entryFill({ expectedPrice, side: type, notionalUsd: notional, settings: this.paperSettings })\n      : { expectedPrice, fillPrice: expectedPrice, feeUsd: feeOverride, slippageUsd: slippageOverride || 0 };
+    const fill = feeOverride === undefined
+      ? paperExecutionAdapter.entryFill({ expectedPrice, side: type, notionalUsd: notional, settings: this.paperSettings })
+      : { expectedPrice, fillPrice: expectedPrice, feeUsd: feeOverride, slippageUsd: slippageOverride || 0 };
     if (notional + fill.feeUsd > this.vitality.cash) return;
     const amount = notional / fill.fillPrice;
     this.vitality.cash = Number((this.vitality.cash - notional - fill.feeUsd).toFixed(2));
