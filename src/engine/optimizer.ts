@@ -1,6 +1,6 @@
 import { BacktestResult, Candle, PaperTradingSettings, StrategyConfig } from "../types/trading";
 import { evaluateSignal } from "./signalEngine";
-import { modelEntryFill, modelExitFill, resolveStopTarget, grossPnL } from "./executionModel";
+import { paperExecutionAdapter } from "../execution/paperExecutionAdapter";
 import { DEFAULT_RISK_POLICY } from "./riskPolicy";
 
 interface SimPosition {
@@ -72,8 +72,8 @@ export class StrategyOptimizer {
     };
 
     const closePosition = (p: SimPosition, exitPrice: number) => {
-      const exit = modelExitFill(exitPrice, p.type, Math.abs(p.amount * exitPrice), settings);
-      const gross = grossPnL(p.type, p.entryPrice, exit.fillPrice, p.amount);
+      const exit = paperExecutionAdapter.exitFill({ expectedPrice: exitPrice, p.type, Math.abs(p.amount * exitPrice), settings);
+      const gross = paperExecutionAdapter.grossPnL(p.type, p.entryPrice, exit.fillPrice, p.amount);
       const net = gross - p.entryFeeUsd - exit.feeUsd;
       recordClosedTrade(net, p.entryFeeUsd + exit.feeUsd, exit.slippageUsd);
       // Entry fee was already deducted when the position opened. Return the reserved notional
@@ -88,17 +88,17 @@ export class StrategyOptimizer {
       if (candleDay !== dailyKey) {
         dailyKey = candleDay;
         const markPrice = position ? candle.close : 0;
-        dailyStartEquity = markPrice > 0 ? cash + position!.sizeUsd + grossPnL(position!.type, position!.entryPrice, markPrice, position!.amount) : cash;
+        dailyStartEquity = markPrice > 0 ? cash + position!.sizeUsd + paperExecutionAdapter.grossPnL(position!.type, position!.entryPrice, markPrice, position!.amount) : cash;
       }
 
       if (position) {
         // Resolve exits using the stop/target state that existed before the bar.
         // Trailing-stop updates from this bar's extreme are applied only after the
         // bar has survived, preventing intrabar look-ahead bias.
-        const resolved = resolveStopTarget(position.type, candle, position.stopLoss, position.takeProfit);
+        const resolved = paperExecutionAdapter.resolveStopTarget(position.type, candle, position.stopLoss, position.takeProfit);
         if (resolved.kind !== "NONE") {
           const wasPositive = (() => {
-            const gross = grossPnL(position!.type, position!.entryPrice, modelExitFill(resolved.price, position!.type, Math.abs(position!.amount * resolved.price), settings).fillPrice, position!.amount);
+            const gross = paperExecutionAdapter.grossPnL(position!.type, position!.entryPrice, paperExecutionAdapter.exitFill({ expectedPrice: resolved.price, position!.type, Math.abs(position!.amount * resolved.price), settings).fillPrice, position!.amount);
             return gross - position!.entryFeeUsd > 0;
           })();
           closePosition(position, resolved.price);
@@ -127,7 +127,7 @@ export class StrategyOptimizer {
       }
 
       const openPnlBeforeEntry = position
-        ? grossPnL(position.type, position.entryPrice, candle.close, position.amount)
+        ? paperExecutionAdapter.grossPnL(position.type, position.entryPrice, candle.close, position.amount)
         : 0;
       const markedEquityBeforeEntry = cash + (position ? position.sizeUsd : 0) + openPnlBeforeEntry;
       const peakDrawdownPctBeforeEntry = peak > 0 ? ((peak - markedEquityBeforeEntry) / peak) * 100 : 0;
@@ -158,7 +158,7 @@ export class StrategyOptimizer {
           );
 
           if (notional >= 10) {
-            const entry = modelEntryFill(next.open, signal.direction as "LONG" | "SHORT", notional, settings);
+            const entry = paperExecutionAdapter.entryFill({ expectedPrice: next.open, signal.direction as "LONG" | "SHORT", notional, settings);
             if (notional + entry.feeUsd <= cash) {
               cash -= notional + entry.feeUsd;
               totalFees += entry.feeUsd;
@@ -189,7 +189,7 @@ export class StrategyOptimizer {
       }
 
       const openPnl = position
-        ? grossPnL(position.type, position.entryPrice, candle.close, position.amount)
+        ? paperExecutionAdapter.grossPnL(position.type, position.entryPrice, candle.close, position.amount)
         : 0;
       // A signal on bar i fills at bar i+1 open. Do not mark the new position
       // against bar i's close; that close predates the fill and would create
