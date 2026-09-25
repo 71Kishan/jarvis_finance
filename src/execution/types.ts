@@ -16,7 +16,7 @@ export interface FillRequest {
   settings: PaperTradingSettings;
 }
 
-export interface ExecutionAdapter {
+export interface FillExecutionModel {
   entryFill(request: FillRequest): FillCosts;
   exitFill(request: FillRequest): FillCosts;
   grossPnL(side: ExecutionSide, entryPrice: number, exitPrice: number, amount: number): number;
