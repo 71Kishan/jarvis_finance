@@ -13,8 +13,9 @@ import {
   Sparkles,
   X,
 } from "lucide-react";
-import { BacktestResult, Candle, StrategyConfig, Trade } from "../types/trading";
-import { StrategyOptimizer } from "../engine/optimizer";
+import { Candle, StrategyConfig, Trade } from "../types/trading";
+import { LearningResearchLoop, LearningResearchResult } from "../learn/researchLoop";
+import type { LearningTradeRecord } from "../learn/types";
 
 interface StudyAndOptimizeModalProps {
   isOpen: boolean;
@@ -22,6 +23,7 @@ interface StudyAndOptimizeModalProps {
   currentStrategy: StrategyConfig;
   candles: Candle[];
   recentTrades: Trade[];
+  learningRecords: LearningTradeRecord[];
   drawdownPercent: number;
   onApplyStrategy: (newStrategy: StrategyConfig) => void;
 }
@@ -32,6 +34,7 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
   currentStrategy,
   candles,
   recentTrades,
+  learningRecords,
   drawdownPercent,
   onApplyStrategy,
 }) => {
@@ -45,21 +48,16 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
     recommendedStrategy?: StrategyConfig;
   } | null>(null);
 
-  const [optimizationData, setOptimizationData] = useState<{
-    bestStrategy: StrategyConfig;
-    bestResult: BacktestResult;
-    candidatesTested: { strategy: StrategyConfig; result: BacktestResult }[];
-    optimizationInsights: string[];
-  } | null>(null);
+  const [researchData, setResearchData] = useState<LearningResearchResult | null>(null);
 
   if (!isOpen) return null;
 
   const runDeepStudyAndOptimization = async () => {
     setIsLoading(true);
     try {
-      // 1. Run historical backtesting & genetic parameter search
-      const opt = StrategyOptimizer.runOptimizationStudy(currentStrategy, candles);
-      setOptimizationData(opt);
+      // 1. Run deterministic research with an explicit learning-data gate.
+      const research = LearningResearchLoop.run(currentStrategy, candles, learningRecords);
+      setResearchData(research);
 
       // 2. Call Gemini AI via server-side endpoint
       const res = await fetch("/api/bot/study", {
@@ -94,19 +92,10 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
     }
   };
 
-  const handleAdoptBestStrategy = () => {
-    if (aiAnalysis?.recommendedStrategy) {
-      onApplyStrategy({
-        ...currentStrategy,
-        ...aiAnalysis.recommendedStrategy,
-        id: `strat-evolved-v${(currentStrategy.version || 1) + 1}`,
-        version: (currentStrategy.version || 1) + 1,
-      });
-      onClose();
-    } else if (optimizationData?.bestStrategy) {
-      onApplyStrategy(optimizationData.bestStrategy);
-      onClose();
-    }
+  const handleLoadResearchCandidate = () => {
+    if (!researchData?.proposedCandidate || researchData.status !== "REVIEW_REQUIRED") return;
+    onApplyStrategy(researchData.proposedCandidate);
+    onClose();
   };
 
   return (
@@ -123,7 +112,7 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
                 Quantitative Strategy Evolution & Backtest Lab
               </h2>
               <p className="text-[11px] text-neutral-400">
-                Continuous optimization via historical market data and quantitative parameter search
+                Deterministic research, walk-forward validation, and learning-data gated candidate generation
               </p>
             </div>
           </div>
@@ -146,7 +135,7 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
                 <span>Execute Quantitative Strategy Optimization Cycle</span>
               </div>
               <p className="text-[11px] text-neutral-400 max-w-xl">
-                Evaluates {candles.length} historical candles, tests a small set of strategy variants against historical data using the configured risk and execution model.
+                Evaluates {candles.length} historical candles and {learningRecords.length} structured trade outcomes. Historical candidates are research evidence; learning-driven proposals require a larger outcome sample.
               </p>
             </div>
 
@@ -204,12 +193,12 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
           )}
 
           {/* Backtest Results of Candidates */}
-          {optimizationData && (
+          {researchData && (
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <h3 className="font-bold text-neutral-200 text-xs flex items-center gap-2">
                   <Award className="w-4 h-4 text-emerald-400" />
-                  Simulated Strategy Candidates ({optimizationData.candidatesTested.length} tested across historical data)
+                  Research Candidates ({researchData.candidates.length} tested across train / validation / held-out test data)
                 </h3>
                 <span className="text-[10px] text-neutral-500">
                   Order shown: validation evidence and held-out test results
@@ -217,9 +206,9 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {optimizationData.candidatesTested.map((cand, idx) => {
-                  const isTop = idx === 0;
-                  const res = cand.result;
+                {researchData.candidates.map((cand, idx) => {
+                  const isTop = researchData.proposedCandidate?.id === cand.strategy.id;
+                  const res = cand.test;
 
                   return (
                     <div
@@ -299,7 +288,7 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
               {/* Insights */}
               <div className="bg-neutral-900/50 border border-neutral-800 rounded-xl p-3 space-y-1.5 text-[11px]">
                 <div className="font-semibold text-neutral-300">Optimization Takeaways:</div>
-                {optimizationData.optimizationInsights.map((ins, i) => (
+                {researchData.notes.map((ins, i) => (
                   <div key={i} className="text-neutral-400 flex items-start gap-2">
                     <span className="text-emerald-400">&bull;</span>
                     <span>{ins}</span>
@@ -313,7 +302,7 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
         {/* Modal Footer */}
         <div className="px-5 py-3 border-t border-neutral-800 bg-neutral-900/70 flex items-center justify-between">
           <span className="text-neutral-500 text-[11px]">
-            Loading a candidate updates the paper terminal configuration and pauses automated paper execution.
+            A candidate can only be loaded after the structured learning and research gates are satisfied. AI analysis remains advisory.
           </span>
 
           <div className="flex items-center gap-2">
@@ -325,8 +314,8 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
             </button>
             <button
               id="adopt-strategy-btn"
-              onClick={handleAdoptBestStrategy}
-              disabled={!optimizationData && !aiAnalysis}
+              onClick={handleLoadResearchCandidate}
+              disabled={researchData?.status !== "REVIEW_REQUIRED"}
               className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition-all shadow-md disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
             >
               <CheckCircle2 className="w-3.5 h-3.5" />
