@@ -108,6 +108,7 @@ export type OrderStatus =
   | "CANCEL_PENDING"
   | "CANCELLED"
   | "REJECTED"
+  | "SUBMISSION_FAILED"
   | "EXPIRED"
   | "UNKNOWN_RECONCILIATION";
 
@@ -143,6 +144,7 @@ export interface Fill {
   accountId: string;
   orderClientId: string;
   externalOrderId?: string;
+  externalTradeId?: string;
   instrumentId: string;
   side: OrderSide;
   quantity: string;

@@ -54,6 +54,65 @@ interface ReadOnlyAccountSnapshot {
   openOrders: BrokerOrder[];
 }
 
+interface BinanceTradeResponse {
+  symbol?: string;
+  id?: number;
+  orderId?: number;
+  orderListId?: number;
+  price?: string;
+  qty?: string;
+  quoteQty?: string;
+  commission?: string;
+  commissionAsset?: string;
+  time?: number;
+  isBuyer?: boolean;
+  isMaker?: boolean;
+  isBestMatch?: boolean;
+}
+
+export type BinanceProviderErrorKind =
+  | "AUTHENTICATION"
+  | "INVALID_ORDER"
+  | "INSUFFICIENT_BALANCE"
+  | "DUPLICATE_CLIENT_ORDER"
+  | "UNKNOWN_ORDER"
+  | "TIMESTAMP"
+  | "RATE_LIMIT"
+  | "NETWORK"
+  | "SERVER"
+  | "UNKNOWN";
+
+export class BinanceProviderError extends Error {
+  public readonly kind: BinanceProviderErrorKind;
+  public readonly code?: number;
+  public readonly httpStatus?: number;
+
+  constructor(
+    message: string,
+    kind: BinanceProviderErrorKind,
+    options: { code?: number; httpStatus?: number } = {},
+  ) {
+    super(message);
+    this.name = "BinanceProviderError";
+    this.kind = kind;
+    this.code = options.code;
+    this.httpStatus = options.httpStatus;
+  }
+}
+
+export function classifyBinanceError(code: number | undefined, httpStatus: number | undefined, message: string, network = false): BinanceProviderErrorKind {
+  if (network) return "NETWORK";
+  if (code === -2015 || httpStatus === 401 || httpStatus === 403) return "AUTHENTICATION";
+  if (code === -2018 || code === -2019 || /insufficient|balance is insufficient/i.test(message)) return "INSUFFICIENT_BALANCE";
+  if (code === -2013 || /order does not exist|unknown order/i.test(message)) return "UNKNOWN_ORDER";
+  if (/duplicate.*client|client.*order.*id/i.test(message)) return "DUPLICATE_CLIENT_ORDER";
+  if (code === -1021 || /timestamp|recvwindow/i.test(message)) return "TIMESTAMP";
+  if (httpStatus === 418 || httpStatus === 429 || code === -1003) return "RATE_LIMIT";
+  if (code === -2010 || code === -1013 || code === -1100 || code === -1101 || code === -1102 || code === -1111 || code === -1116 || code === -1121) return "INVALID_ORDER";
+  if ((httpStatus !== undefined && httpStatus >= 500) || (code !== undefined && code <= -1000 && code !== -1003)) return "SERVER";
+  return "UNKNOWN";
+}
+
 export function buildBinanceSignature(
   secret: string,
   params: Array<[string, string]>,
@@ -99,6 +158,7 @@ export interface BinanceSpotAccountAdapterOptions {
   accountId?: string;
   recvWindowMs?: number;
   testnetOnly?: boolean;
+  enableOrderSubmission?: boolean;
 }
 
 export class BinanceSpotAccountAdapter implements ExecutionAdapter {
@@ -110,6 +170,7 @@ export class BinanceSpotAccountAdapter implements ExecutionAdapter {
   private readonly accountId: string;
   private readonly recvWindowMs: number;
   private readonly testnetOnly: boolean;
+  private readonly enableOrderSubmission: boolean;
   private serverTimeOffsetMs = 0;
 
   private lastSuccessfulSyncAt: number | undefined;
@@ -126,6 +187,7 @@ export class BinanceSpotAccountAdapter implements ExecutionAdapter {
       Math.max(1_000, options.recvWindowMs ?? (Number(process.env.JARVIS_BINANCE_RECV_WINDOW_MS) || DEFAULT_RECV_WINDOW)),
     );
     this.testnetOnly = options.testnetOnly ?? process.env.JARVIS_BINANCE_TESTNET_ONLY !== "false";
+    this.enableOrderSubmission = options.enableOrderSubmission ?? process.env.JARVIS_BINANCE_TESTNET_ENABLE_ORDERS === "true";
 
     if (this.testnetOnly) {
       const hostname = new URL(this.baseUrl).hostname;
@@ -205,17 +267,98 @@ export class BinanceSpotAccountAdapter implements ExecutionAdapter {
     return (Array.isArray(payload) ? payload : []).map((row) => this.mapOrder(row));
   }
 
-  public async submitOrder(_order: OrderIntent): Promise<BrokerOrder> {
-    throw new Error("Binance Spot testnet adapter is read-only in this phase; order submission is intentionally disabled.");
+  public async submitOrder(order: OrderIntent): Promise<BrokerOrder> {
+    this.assertAccount(order.accountId);
+    this.assertOrderSubmissionAllowed();
+    if (!this.isConfigured()) {
+      throw new BinanceProviderError(
+        "Binance Spot testnet API credentials are not configured on the server.",
+        "AUTHENTICATION",
+      );
+    }
+
+    const symbol = this.extractProviderSymbol(order.instrumentId);
+    const params: Array<[string, string]> = [
+      ["symbol", symbol],
+      ["side", order.side],
+      ["type", this.toBinanceOrderType(order.type)],
+      ["quantity", order.quantity],
+      ["newClientOrderId", order.clientOrderId],
+    ];
+
+    if (order.limitPrice) params.push(["price", order.limitPrice]);
+    if (order.stopPrice) params.push(["stopPrice", order.stopPrice]);
+
+    const timeInForce = this.toBinanceTimeInForce(order);
+    if (timeInForce) params.push(["timeInForce", timeInForce]);
+
+    const response = await this.signedRequest<BinanceOrderResponse>("POST", "/api/v3/order", params);
+    return this.mapOrder(response);
   }
 
-  public async cancelOrder(_accountId: string, _clientOrderId: string): Promise<BrokerOrder> {
-    throw new Error("Binance Spot testnet adapter is read-only in this phase; order cancellation is intentionally disabled.");
+  public async cancelOrder(accountId: string, clientOrderId: string): Promise<BrokerOrder> {
+    this.assertAccount(accountId);
+    this.assertOrderSubmissionAllowed();
+
+    const openOrders = await this.getOpenOrders(accountId);
+    const existing = openOrders.find((order) => order.clientOrderId === clientOrderId);
+    if (!existing) {
+      throw new BinanceProviderError(
+        "Binance did not expose an open order for cancellation.",
+        "UNKNOWN_ORDER",
+        { code: -2013 },
+      );
+    }
+
+    const symbol = this.extractProviderSymbol(existing.instrumentId);
+    const response = await this.signedRequest<BinanceOrderResponse>("DELETE", "/api/v3/order", [
+      ["symbol", symbol],
+      ["origClientOrderId", clientOrderId],
+    ]);
+    return this.mapOrder(response);
+  }
+
+  public async getOrderBySymbol(
+    accountId: string,
+    providerSymbol: string,
+    clientOrderId: string,
+  ): Promise<BrokerOrder> {
+    this.assertAccount(accountId);
+    const symbol = providerSymbol.trim().toUpperCase();
+    if (!/^[A-Z0-9_]+$/.test(symbol)) throw new Error("Invalid Binance provider symbol.");
+    const response = await this.signedRequest<BinanceOrderResponse>("GET", "/api/v3/order", [
+      ["symbol", symbol],
+      ["origClientOrderId", clientOrderId],
+    ]);
+    return this.mapOrder(response);
+  }
+
+  public async getFills(accountId: string, providerSymbol: string, orderId: string): Promise<Fill[]> {
+    this.assertAccount(accountId);
+    const symbol = providerSymbol.trim().toUpperCase();
+    if (!/^[A-Z0-9_]+$/.test(symbol)) throw new Error("Invalid Binance provider symbol.");
+    const response = await this.signedRequest<BinanceTradeResponse[]>("GET", "/api/v3/myTrades", [
+      ["symbol", symbol],
+      ["orderId", orderId],
+      ["limit", "1000"],
+    ]);
+    return (Array.isArray(response) ? response : []).map((trade) => this.mapTrade(trade, symbol));
   }
 
   private async signedGet<T>(pathname: string, extraParams: Array<[string, string]> = []): Promise<T> {
+    return this.signedRequest<T>("GET", pathname, extraParams);
+  }
+
+  private async signedRequest<T>(
+    method: "GET" | "POST" | "DELETE",
+    pathname: string,
+    extraParams: Array<[string, string]> = [],
+  ): Promise<T> {
     if (!this.apiKey || !this.apiSecret) {
-      throw new Error("Binance Spot testnet API credentials are not configured on the server.");
+      throw new BinanceProviderError(
+        "Binance Spot testnet API credentials are not configured on the server.",
+        "AUTHENTICATION",
+      );
     }
 
     try {
@@ -236,6 +379,7 @@ export class BinanceSpotAccountAdapter implements ExecutionAdapter {
       const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
       try {
         const response = await fetch(this.baseUrl + pathname + "?" + query, {
+          method,
           headers: {
             Accept: "application/json",
             "X-MBX-APIKEY": this.apiKey,
@@ -253,9 +397,20 @@ export class BinanceSpotAccountAdapter implements ExecutionAdapter {
 
         if (!response.ok) {
           const code = Number(body?.code);
-          const message = typeof body?.msg === "string" ? body.msg : "Binance authenticated request failed.";
-          throw new Error(
-            Number.isFinite(code) ? "Binance error " + code + ": " + message : message,
+          const message = typeof body?.msg === "string"
+            ? body.msg
+            : "Binance authenticated request failed.";
+          const kind = classifyBinanceError(
+            Number.isFinite(code) ? code : undefined,
+            response.status,
+            message,
+          );
+          throw new BinanceProviderError(
+            Number.isFinite(code)
+              ? "Binance error " + code + ": " + message
+              : message,
+            kind,
+            { code: Number.isFinite(code) ? code : undefined, httpStatus: response.status },
           );
         }
 
@@ -266,7 +421,17 @@ export class BinanceSpotAccountAdapter implements ExecutionAdapter {
     } catch (error: any) {
       this.lastErrorAt = Date.now();
       this.lastError = error?.message || "Binance authenticated request failed.";
-      throw error;
+      if (error instanceof BinanceProviderError) throw error;
+      if (error?.name === "AbortError") {
+        throw new BinanceProviderError(
+          "Binance authenticated request timed out.",
+          "NETWORK",
+        );
+      }
+      throw new BinanceProviderError(
+        error?.message || "Binance authenticated request failed.",
+        classifyBinanceError(undefined, undefined, error?.message || "", true),
+      );
     }
   }
 
@@ -292,6 +457,42 @@ export class BinanceSpotAccountAdapter implements ExecutionAdapter {
     if (accountId !== this.accountId) {
       throw new Error("Unknown Binance Spot testnet account id.");
     }
+  }
+
+  private assertOrderSubmissionAllowed(): void {
+    if (!this.testnetOnly || this.baseUrl !== "https://testnet.binance.vision") {
+      throw new Error("Binance order submission is locked to the Spot Testnet endpoint.");
+    }
+    if (!this.enableOrderSubmission) {
+      throw new Error("Binance Spot testnet order submission is disabled by configuration.");
+    }
+  }
+
+  private extractProviderSymbol(instrumentId: string): string {
+    const match = String(instrumentId || "").match(/^BINANCE_SPOT:BINANCE:([A-Z0-9_]+)$/i);
+    if (!match) throw new Error("Order instrument is not a supported Binance Spot instrument.");
+    return match[1].toUpperCase();
+  }
+
+  private toBinanceOrderType(type: OrderIntent["type"]): string {
+    switch (type) {
+      case "MARKET": return "MARKET";
+      case "LIMIT": return "LIMIT";
+      case "LIMIT_MAKER": return "LIMIT_MAKER";
+      case "STOP": return "STOP_LOSS";
+      case "STOP_LIMIT": return "STOP_LOSS_LIMIT";
+      case "TAKE_PROFIT": return "TAKE_PROFIT";
+      case "TAKE_PROFIT_LIMIT": return "TAKE_PROFIT_LIMIT";
+      default: throw new Error("Unsupported Binance Spot order type: " + type);
+    }
+  }
+
+  private toBinanceTimeInForce(order: OrderIntent): string | undefined {
+    if (order.type === "LIMIT_MAKER") return "GTX";
+    if (["LIMIT", "STOP_LIMIT", "TAKE_PROFIT_LIMIT"].includes(order.type)) {
+      return order.timeInForce || "GTC";
+    }
+    return undefined;
   }
 
   private mapOrder(row: BinanceOrderResponse): BrokerOrder {
@@ -323,6 +524,33 @@ export class BinanceSpotAccountAdapter implements ExecutionAdapter {
       submittedAt: Number(row.time) > 0 ? Number(row.time) : undefined,
       updatedAt: Number(row.updateTime) > 0 ? Number(row.updateTime) : Date.now(),
       externalOrderId: String(row.orderId),
+    };
+  }
+
+  private mapTrade(trade: BinanceTradeResponse, symbol: string): Fill {
+    const tradeId = String(trade.id ?? "");
+    const orderId = String(trade.orderId ?? "");
+    const quantity = String(trade.qty ?? "0");
+    const price = String(trade.price ?? "0");
+    const executedAt = Number(trade.time);
+    if (!tradeId || !orderId || !Number.isFinite(executedAt) || executedAt <= 0) {
+      throw new Error("Binance returned a trade missing required identifiers/timestamp.");
+    }
+
+    return {
+      id: "binance-testnet:" + symbol + ":" + tradeId,
+      accountId: this.accountId,
+      orderClientId: "",
+      externalOrderId: orderId,
+      externalTradeId: tradeId,
+      instrumentId: "BINANCE_SPOT:BINANCE:" + symbol,
+      side: trade.isBuyer ? "BUY" : "SELL",
+      quantity,
+      price,
+      feeAmount: trade.commission,
+      feeAsset: trade.commissionAsset,
+      liquidity: trade.isMaker ? "MAKER" : "TAKER",
+      executedAt,
     };
   }
 }

@@ -5,6 +5,9 @@
 ALTER TABLE orders
   ADD COLUMN IF NOT EXISTS idempotency_key TEXT;
 
+ALTER TABLE fills
+  ADD COLUMN IF NOT EXISTS external_trade_id TEXT;
+
 ALTER TABLE orders
   ADD COLUMN IF NOT EXISTS idempotency_fingerprint TEXT;
 

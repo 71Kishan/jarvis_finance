@@ -1,5 +1,6 @@
 import type { PoolClient } from "pg";
-import type { BrokerOrder, OrderIntent, OrderStatus } from "../platform/types";
+import { randomUUID } from "crypto";
+import type { BrokerOrder, Fill, OrderIntent, OrderStatus } from "../platform/types";
 import { PlatformDatabase } from "./platformDatabase";
 
 export interface PersistedSandboxOrder extends OrderIntent {
@@ -54,7 +55,7 @@ function canTransitionOrderStatus(current: OrderStatus, incoming: OrderStatus): 
     PENDING_SUBMIT: new Set(["PENDING_SUBMIT", "SUBMITTED", "PARTIALLY_FILLED", "FILLED", "CANCEL_PENDING", "CANCELLED", "REJECTED", "EXPIRED", "UNKNOWN_RECONCILIATION", "SUBMISSION_FAILED"]),
     SUBMITTED: new Set(["SUBMITTED", "PARTIALLY_FILLED", "FILLED", "CANCEL_PENDING", "CANCELLED", "REJECTED", "EXPIRED", "UNKNOWN_RECONCILIATION"]),
     PARTIALLY_FILLED: new Set(["PARTIALLY_FILLED", "FILLED", "CANCEL_PENDING", "CANCELLED", "EXPIRED", "UNKNOWN_RECONCILIATION"]),
-    CANCEL_PENDING: new Set(["CANCEL_PENDING", "SUBMITTED", "PARTIALLY_FILLED", "FILLED", "CANCELLED", "EXPIRED", "UNKNOWN_RECONCILIATION"]),
+    CANCEL_PENDING: new Set(["CANCEL_PENDING", "SUBMITTED", "PARTIALLY_FILLED", "FILLED", "CANCELLED", "REJECTED", "EXPIRED", "UNKNOWN_RECONCILIATION"]),
     FILLED: new Set(["FILLED"]),
     CANCELLED: new Set(["CANCELLED"]),
     REJECTED: new Set(["REJECTED"]),
@@ -262,6 +263,147 @@ export class SandboxOrderStore {
 
       return updated.rows[0] ? mapOrder(updated.rows[0]) : null;
     });
+  }
+
+  public async recordFill(userId: string, fill: Fill): Promise<{ inserted: boolean; fill: Fill | null }> {
+    this.requireDatabase();
+
+    return this.database.transaction(async (client: PoolClient) => {
+      const ownership = await client.query<{ account_id: string }>(
+        [
+          "SELECT o.account_id",
+          "FROM orders o",
+          "JOIN account_connections a ON a.id = o.account_id",
+          "WHERE a.user_id = $1 AND o.client_order_id = $2",
+          "LIMIT 1",
+        ].join("\n"),
+        [userId, fill.orderClientId],
+      );
+
+      const ownedAccountId = ownership.rows[0]?.account_id;
+      if (!ownedAccountId || ownedAccountId !== fill.accountId) {
+        throw new Error("Fill does not belong to the authenticated order/account.");
+      }
+
+      const inserted = await client.query<{
+        id: string;
+        account_id: string;
+        client_order_id: string;
+        external_order_id: string | null;
+        external_trade_id: string | null;
+        instrument_id: string;
+        side: "BUY" | "SELL";
+        quantity: string;
+        price: string;
+        fee_amount: string | null;
+        fee_asset: string | null;
+        liquidity: "MAKER" | "TAKER" | "UNKNOWN" | null;
+        executed_at: Date;
+      }>(
+        [
+          "INSERT INTO fills(",
+          "  id, account_id, client_order_id, external_order_id, external_trade_id,",
+          "  instrument_id, side, quantity, price, fee_amount, fee_asset, liquidity, executed_at",
+          ") VALUES (",
+          "  $1, $2, $3, $4, $5, $6, $7, $8::numeric, $9::numeric, $10::numeric, $11, $12,",
+          "  to_timestamp($13 / 1000.0)",
+          ")",
+          "ON CONFLICT (account_id, external_order_id, external_trade_id) DO NOTHING",
+          "RETURNING id, account_id, client_order_id, external_order_id, external_trade_id,",
+          "  instrument_id, side, quantity::text, price::text, fee_amount::text, fee_asset, liquidity, executed_at",
+        ].join("\n"),
+        [
+          fill.id || randomUUID(),
+          fill.accountId,
+          fill.orderClientId,
+          fill.externalOrderId ?? null,
+          fill.externalTradeId ?? null,
+          fill.instrumentId,
+          fill.side,
+          fill.quantity,
+          fill.price,
+          fill.feeAmount ?? null,
+          fill.feeAsset ?? null,
+          fill.liquidity ?? null,
+          fill.executedAt,
+        ],
+      );
+
+      if (!inserted.rows[0]) {
+        return { inserted: false, fill: null };
+      }
+
+      const row = inserted.rows[0];
+      const mapped: Fill = {
+        id: row.id,
+        accountId: row.account_id,
+        orderClientId: row.client_order_id,
+        externalOrderId: row.external_order_id ?? undefined,
+        externalTradeId: row.external_trade_id ?? undefined,
+        instrumentId: row.instrument_id,
+        side: row.side,
+        quantity: row.quantity,
+        price: row.price,
+        feeAmount: row.fee_amount ?? undefined,
+        feeAsset: row.fee_asset ?? undefined,
+        liquidity: row.liquidity ?? "UNKNOWN",
+        executedAt: row.executed_at.getTime(),
+      };
+
+      await client.query(
+        [
+          "UPDATE orders o SET",
+          "  filled_quantity = agg.filled_quantity,",
+          "  average_fill_price = agg.average_fill_price,",
+          "  updated_at = now()",
+          "FROM (",
+          "  SELECT client_order_id,",
+          "         SUM(quantity) AS filled_quantity,",
+          "         CASE WHEN SUM(quantity) > 0 THEN SUM(quantity * price) / SUM(quantity) END AS average_fill_price",
+          "  FROM fills",
+          "  WHERE account_id = $1 AND client_order_id = $2",
+          "  GROUP BY client_order_id",
+          ") agg",
+          "WHERE o.client_order_id = agg.client_order_id",
+          "  AND o.account_id = $1",
+        ].join("\n"),
+        [fill.accountId, fill.orderClientId],
+      );
+
+      return { inserted: true, fill: mapped };
+    });
+  }
+
+  public async getStoredFills(userId: string, clientOrderId: string): Promise<Fill[]> {
+    this.requireDatabase();
+    const result = await this.database.query<any>(
+      [
+        "SELECT f.id, f.account_id, f.client_order_id, f.external_order_id, f.external_trade_id,",
+        "       f.instrument_id, f.side, f.quantity::text, f.price::text, f.fee_amount::text,",
+        "       f.fee_asset, f.liquidity, f.executed_at",
+        "FROM fills f",
+        "JOIN orders o ON o.client_order_id = f.client_order_id",
+        "JOIN account_connections a ON a.id = o.account_id",
+        "WHERE a.user_id = $1 AND f.client_order_id = $2",
+        "ORDER BY f.executed_at ASC, f.id ASC",
+      ].join("\n"),
+      [userId, clientOrderId],
+    );
+    return result.rows.map((row: any) => ({
+      id: row.id,
+      accountId: row.account_id,
+      orderClientId: row.client_order_id,
+      externalOrderId: row.external_order_id ?? undefined,
+      externalTradeId: row.external_trade_id ?? undefined,
+      instrumentId: row.instrument_id,
+      side: row.side,
+      quantity: row.quantity,
+      price: row.price,
+      feeAmount: row.fee_amount ?? undefined,
+      feeAsset: row.fee_asset ?? undefined,
+      liquidity: row.liquidity ?? "UNKNOWN",
+      executedAt: row.executed_at.getTime(),
+    }));
   }
 
   public async listActiveOrders(): Promise<Array<{ userId: string; order: PersistedSandboxOrder; externalAccountId: string | null }>> {

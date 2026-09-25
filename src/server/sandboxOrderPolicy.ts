@@ -6,6 +6,8 @@ interface TrustedQuote {
   updatedAt: number;
 }
 
+const MAX_TRUSTED_QUOTE_AGE_MS = 15_000;
+
 function normalizeDecimal(value: string): string {
   const text = String(value ?? "").trim();
   if (!/^\d+(\.\d+)?$/.test(text)) throw new Error("Invalid positive decimal.");
@@ -202,6 +204,30 @@ export function evaluateSandboxOrderPolicy(
 
   const reasons: string[] = [];
   const validation = validateBasicSpotOrder(input.order, input.instrument, input.balances, input.quote);
+
+  if (input.order.reduceOnly) {
+    reasons.push("reduceOnly is not supported by the Binance Spot sandbox adapter.");
+  }
+
+  if (input.order.timeInForce === "DAY") {
+    reasons.push("DAY time-in-force is not supported by the Binance Spot sandbox adapter.");
+  }
+
+  if (
+    input.order.type === "LIMIT_MAKER" &&
+    input.order.timeInForce &&
+    input.order.timeInForce !== "GTX"
+  ) {
+    reasons.push("LIMIT_MAKER orders require GTX time-in-force at the Binance Spot venue.");
+  }
+
+  if (
+    input.order.type === "MARKET" &&
+    input.quote &&
+    Date.now() - input.quote.updatedAt > MAX_TRUSTED_QUOTE_AGE_MS
+  ) {
+    reasons.push("The trusted bid/ask quote is stale for a market order.");
+  }
   reasons.push(...validation.reasons);
 
   if (input.account.provider !== "BINANCE_SPOT_TESTNET") {
