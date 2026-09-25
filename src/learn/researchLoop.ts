@@ -103,27 +103,6 @@ export class LearningResearchLoop {
       };
     }
 
-    if (!minimumLearningTrades) {
-      return {
-        status: "INSUFFICIENT_LEARNING_DATA",
-        dataset,
-        historyBars: candles.length,
-        candidates: [],
-        proposedCandidate: null,
-        proposedTestResult: null,
-        gates: {
-          minimumHistoryBars,
-          minimumLearningTrades,
-          candidateHasValidationEvidence: false,
-          candidateHasHeldOutTest: false,
-        },
-        notes: [
-          "At least 30 structured closed-trade records are required before the learning layer is allowed to propose a research candidate.",
-          "Historical bars may be sufficient for backtesting, but the self-improvement dataset is still too small.",
-        ],
-      };
-    }
-
     const candidates = generateResearchCandidates(baseStrategy);
     const trainEnd = Math.floor(candles.length * 0.6);
     const validationEnd = Math.floor(candles.length * 0.8);
@@ -158,7 +137,7 @@ export class LearningResearchLoop {
         b.validation.totalPnl - a.validation.totalPnl ||
         a.strategy.id.localeCompare(b.strategy.id),
     );
-    const proposed = ordered[0] ?? null;
+    const proposed = minimumLearningTrades ? (ordered[0] ?? null) : null;
 
     const candidateHasValidationEvidence = Boolean(
       proposed &&
@@ -185,7 +164,9 @@ export class LearningResearchLoop {
       notes: [
         "Candidate generation is deterministic and uses small auditable perturbations.",
         "Candidate selection uses train/validation evidence; the held-out test remains outside selection.",
-        "The proposed candidate is a research proposal only and is never auto-promoted.",
+        minimumLearningTrades
+          ? "The proposed candidate is a research proposal only and is never auto-promoted."
+          : "Historical backtest candidates are shown, but no learning-driven proposal is allowed until at least 30 closed-trade records exist.",
         "Forward paper, shadow testing, and independent review remain required before any deployment gate.",
       ],
     };
