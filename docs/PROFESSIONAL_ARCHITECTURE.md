@@ -96,3 +96,12 @@ Login attempts are throttled per IP/email combination and repeated failures temp
 The Binance Spot Testnet account adapter remains server-side. Browser clients never receive exchange API credentials. Read-only account synchronization persists provider-owned balances and open orders and marks locally active orders missing from the provider response as UNKNOWN_RECONCILIATION rather than assuming cancellation.
 
 The authenticated browser session controls the user-facing account plane. Runtime control-token endpoints remain a separate operator interface for unattended paper/shadow infrastructure until a dedicated authorization and service-identity model is introduced.
+
+
+## Sandbox order lifecycle
+
+Sandbox order intents are now designed as durable server-owned records. Each request is bound to an authenticated user/account, a stable idempotency key, an intent fingerprint, and a deterministic provider client-order identifier. The database keeps the lifecycle state and provider failure detail so an uncertain provider response is not mistaken for a cancellation or failure.
+
+The sandbox policy is intentionally narrow: Binance Spot Testnet only, connected/readable/trade-capable account, active provider instrument, fresh trusted quote when required, venue quantity/price rules, bounded notional, and bounded open-order count. Withdrawal permission is rejected for this first sandbox path because order placement does not need custody-transfer authority.
+
+The provider execution adapter remains a separately gated boundary. The current implementation has the persistent intent store and safety policy in place; provider money-moving/testnet order submission is not enabled by default and must remain behind explicit testnet-only flags and a separately reviewed execution path.
