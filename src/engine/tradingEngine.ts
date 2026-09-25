@@ -6,7 +6,7 @@ import { strategyVaultInstance } from "./strategyVault";
 import { DEFAULT_RISK_POLICY, evaluateRisk, RiskPolicyConfig } from "./riskPolicy";
 import { evaluateSignal, SignalResult } from "./signalEngine";
 import { paperExecutionAdapter } from "../execution/paperExecutionAdapter";
-import { learningPerformanceJournal } from "../learn/performanceJournal";
+import { LearningPerformanceJournal } from "../learn/performanceJournal";
 
 export const DEFAULT_STRATEGY: StrategyConfig = {
   id: "jarvis-base-v1", name: "Jarvis Base Confluence V1", version: 1, asset: "BTC/USD",
@@ -29,6 +29,7 @@ export class TradingEngine {
   private profitWithdrawals: ProfitWithdrawalRecord[] = [];
   private onStateChange?: () => void;
   private readonly riskPolicy: RiskPolicyConfig;
+  private readonly learningJournal = new LearningPerformanceJournal();
   private lastProcessedCandleTimestamp = 0;
   private lastSignal: SignalResult | null = null;
   private pendingEntry: { direction: "LONG" | "SHORT"; signalScore: number; rationale: string; signalCandle: Candle } | null = null;
@@ -72,7 +73,7 @@ export class TradingEngine {
   public getEquityCurve() { return [...this.equityCurve]; }
   public getLastSignal() { return this.lastSignal; }
   public getLastProcessedCandleTimestamp() { return this.lastProcessedCandleTimestamp; }
-  public getLearningRecords(limit = 200) { return learningPerformanceJournal.list(limit); }
+  public getLearningRecords(limit = 200) { return this.learningJournal.list(limit); }
 
   public exportRuntimeState(): TradingEngineRuntimeState {
     return {
@@ -87,7 +88,7 @@ export class TradingEngine {
       notifications: JSON.parse(JSON.stringify(this.notifications.slice(0, 100))),
       equityCurve: JSON.parse(JSON.stringify(this.equityCurve.slice(-2000))),
       profitWithdrawals: JSON.parse(JSON.stringify(this.profitWithdrawals.slice(0, 200))),
-      learningRecords: JSON.parse(JSON.stringify(learningPerformanceJournal.exportState())),
+      learningRecords: JSON.parse(JSON.stringify(this.learningJournal.exportState())),
       lastProcessedCandleTimestamp: this.lastProcessedCandleTimestamp,
     };
   }
@@ -107,7 +108,7 @@ export class TradingEngine {
     this.notifications = Array.isArray(state.notifications) ? JSON.parse(JSON.stringify(state.notifications.slice(0, 100))) : [];
     this.equityCurve = Array.isArray(state.equityCurve) ? JSON.parse(JSON.stringify(state.equityCurve.slice(-2000))) : [];
     this.profitWithdrawals = Array.isArray(state.profitWithdrawals) ? JSON.parse(JSON.stringify(state.profitWithdrawals.slice(0, 200))) : [];
-    learningPerformanceJournal.hydrate(Array.isArray(state.learningRecords) ? state.learningRecords : []);
+    this.learningJournal.hydrate(Array.isArray(state.learningRecords) ? state.learningRecords : []);
     this.lastProcessedCandleTimestamp = Math.max(0, Number(state.lastProcessedCandleTimestamp) || 0);
 
     // A queued signal is intentionally not persisted across restarts. Requiring a
@@ -187,7 +188,7 @@ export class TradingEngine {
   public fullResetAccount(initialCapital = 10000) {
     const limit = this.vitality.circuitBreakerThresholdPercent;
     const capital = Number.isFinite(initialCapital) && initialCapital > 0 ? initialCapital : 10000;
-    this.vitality = this.createInitialVitality(capital, limit); this.activeTrade = null; this.tradeHistory = []; this.thoughts = []; this.lastSignal = null; this.lastProcessedCandleTimestamp = 0; this.lastSpreadBps = undefined; this.lastMarketDataTimestamp = 0; this.lastMarketOpen = undefined; this.lastDailyKey = this.utcDayKey(Date.now()); this.botState = "HUNTING";
+    this.vitality = this.createInitialVitality(capital, limit); this.activeTrade = null; this.tradeHistory = []; this.learningJournal.clear(); this.thoughts = []; this.lastSignal = null; this.lastProcessedCandleTimestamp = 0; this.lastSpreadBps = undefined; this.lastMarketDataTimestamp = 0; this.lastMarketOpen = undefined; this.lastDailyKey = this.utcDayKey(Date.now()); this.botState = "HUNTING";
     this.equityCurve = [{ timestamp: Date.now(), timeLabel: new Date().toLocaleTimeString(), equity: capital, cash: capital, drawdownPercent: 0, pnlDelta: 0, cumulativePnl: 0, tradeEvent: "Paper run reset" }];
     this.addNotification({ type: "RISK_ALERT", title: "Paper account reset", message: "New isolated paper run started. Previous run statistics were cleared.", badgeText: "RESET" });
     this.notify();
@@ -440,7 +441,7 @@ export class TradingEngine {
     this.vitality.winRate = this.vitality.totalTrades ? Number((this.vitality.winningTrades / this.vitality.totalTrades * 100).toFixed(1)) : 0;
     const gp = this.tradeHistory.filter(t => t.pnl > 0).reduce((s, t) => s + t.pnl, 0) + (economicNet > 0 ? economicNet : 0); const gl = this.tradeHistory.filter(t => t.pnl < 0).reduce((s, t) => s + Math.abs(t.pnl), 0) + (economicNet < 0 ? Math.abs(economicNet) : 0); this.vitality.profitFactor = gl > 0 ? Number((gp / gl).toFixed(2)) : 0;
     this.tradeHistory.unshift({ ...trade });
-    learningPerformanceJournal.recordTrade(trade, this.strategy, trade.exitTime || Date.now());
+    this.learningJournal.recordTrade(trade, this.strategy, trade.exitTime || Date.now());
     strategyVaultInstance.recordTradeOutcome(this.strategy, trade);
     if (typeof window !== "undefined") {
       try {
