@@ -80,3 +80,8 @@ The first machine-learning experiment is intentionally narrow: a deterministic l
 ### Combined ML robustness gate
 
 The first ML path now combines balanced-class training, train-only Platt probability calibration, explicit classification/trading baselines, and three chronological rolling 90/30/30 experiments once at least 210 valid live-market feature rows exist. Each rolling period repeats model selection without using its future test rows. These results remain research evidence only.
+
+
+### Forward shadow validation
+
+The server now keeps bounded experiment records with model fingerprints. A versioned ML artifact can be restored for forward shadow scoring without execution access. The paper runtime records shadow predictions around paper decisions, resolves them against paper outcomes, and monitors log loss, Brier score, sample size, and recent feature drift. A separate review gate requires a ready experiment, rolling robustness, enough shadow evidence, baseline-level or better resolved-sample metrics, and clear drift. Passing this gate is review status only and never activates live trading.
