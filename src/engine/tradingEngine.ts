@@ -1,4 +1,4 @@
-import { ActionNotification, BotState, BotThoughtLog, BotVitality, Candle, EquityCurvePoint, PaperOrderRequest, PaperTradingSettings, ProfitWithdrawalRecord, StrategyConfig, Trade, TradingEngineRuntimeState } from "../types/trading";
+import { ActionNotification, BotState, BotThoughtLog, BotVitality, Candle, EquityCurvePoint, MarketDataSource, PaperOrderRequest, PaperTradingSettings, ProfitWithdrawalRecord, StrategyConfig, Trade, TradingEngineRuntimeState } from "../types/trading";
 import { soundFx } from "../utils/soundEffects";
 import { systemNotificationService } from "../utils/systemNotifications";
 import { cryptoSecurityService } from "../utils/cryptoSecurity";
