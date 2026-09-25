@@ -7,6 +7,7 @@ import { DEFAULT_RISK_POLICY, evaluateRisk, RiskPolicyConfig } from "./riskPolic
 import { evaluateSignal, SignalResult } from "./signalEngine";
 import { paperExecutionAdapter } from "../execution/paperExecutionAdapter";
 import { LearningPerformanceJournal } from "../learn/performanceJournal";
+import { buildDecisionFeatureSnapshot, DecisionFeatureSnapshot } from "../learn/features";
 
 export const DEFAULT_STRATEGY: StrategyConfig = {
   id: "jarvis-base-v1", name: "Jarvis Base Confluence V1", version: 1, asset: "BTC/USD",
@@ -32,9 +33,10 @@ export class TradingEngine {
   private readonly learningJournal = new LearningPerformanceJournal();
   private lastProcessedCandleTimestamp = 0;
   private lastSignal: SignalResult | null = null;
-  private pendingEntry: { direction: "LONG" | "SHORT"; signalScore: number; rationale: string; signalCandle: Candle } | null = null;
+  private pendingEntry: { direction: "LONG" | "SHORT"; signalScore: number; rationale: string; signalCandle: Candle; features: DecisionFeatureSnapshot } | null = null;
   private lastSpreadBps: number | undefined;
   private lastMarketDataTimestamp = 0;
+  private lastMarketDataSource: MarketDataSource | undefined;
   private lastMarketOpen: boolean | undefined;
   private lastDailyKey = "";
   private paperSettings: PaperTradingSettings = { slippageBps: 2, feeTierPercent: 0.04, leverage: 1, soundAlerts: true };
@@ -117,6 +119,7 @@ export class TradingEngine {
     this.lastSignal = null;
     this.lastSpreadBps = undefined;
     this.lastMarketDataTimestamp = 0;
+    this.lastMarketDataSource = undefined;
     this.lastMarketOpen = undefined;
 
     if (this.botState === "HALTED_DEAD") {
@@ -163,9 +166,10 @@ export class TradingEngine {
     this.notify();
   }
 
-  public setMarketQuality(input: { spreadBps?: number; dataTimestamp?: number; marketOpen?: boolean }) {
+  public setMarketQuality(input: { spreadBps?: number; dataTimestamp?: number; marketDataSource?: MarketDataSource; marketOpen?: boolean }) {
     this.lastSpreadBps = Number.isFinite(input.spreadBps) ? Math.max(0, Number(input.spreadBps)) : undefined;
     this.lastMarketDataTimestamp = Number.isFinite(input.dataTimestamp) ? Number(input.dataTimestamp) : Date.now();
+    this.lastMarketDataSource = input.marketDataSource;
     this.lastMarketOpen = input.marketOpen;
   }
   public getPaperSettings() { return { ...this.paperSettings }; }
@@ -188,7 +192,7 @@ export class TradingEngine {
   public fullResetAccount(initialCapital = 10000) {
     const limit = this.vitality.circuitBreakerThresholdPercent;
     const capital = Number.isFinite(initialCapital) && initialCapital > 0 ? initialCapital : 10000;
-    this.vitality = this.createInitialVitality(capital, limit); this.activeTrade = null; this.tradeHistory = []; this.learningJournal.clear(); this.thoughts = []; this.lastSignal = null; this.lastProcessedCandleTimestamp = 0; this.lastSpreadBps = undefined; this.lastMarketDataTimestamp = 0; this.lastMarketOpen = undefined; this.lastDailyKey = this.utcDayKey(Date.now()); this.botState = "HUNTING";
+    this.vitality = this.createInitialVitality(capital, limit); this.activeTrade = null; this.tradeHistory = []; this.learningJournal.clear(); this.thoughts = []; this.lastSignal = null; this.lastProcessedCandleTimestamp = 0; this.lastSpreadBps = undefined; this.lastMarketDataTimestamp = 0; this.lastMarketDataSource = undefined; this.lastMarketOpen = undefined; this.lastDailyKey = this.utcDayKey(Date.now()); this.botState = "HUNTING";
     this.equityCurve = [{ timestamp: Date.now(), timeLabel: new Date().toLocaleTimeString(), equity: capital, cash: capital, drawdownPercent: 0, pnlDelta: 0, cumulativePnl: 0, tradeEvent: "Paper run reset" }];
     this.addNotification({ type: "RISK_ALERT", title: "Paper account reset", message: "New isolated paper run started. Previous run statistics were cleared.", badgeText: "RESET" });
     this.notify();
@@ -218,7 +222,13 @@ export class TradingEngine {
     if (this.activeTrade) return { entered: false, confidence: 0, reason: "An open position is already active." };
     const signal = evaluateSignal(currentCandle, recentCandles, this.strategy); this.lastSignal = signal;
     if (!signal.eligible) { const reason = signal.reasons.join(" ") || "Composite score below threshold."; this.logThought("DEFENSE", "No eligible setup", reason, signal.score); this.notify(); return { entered: false, confidence: signal.score, reason }; }
-    const entered = this.executeEntry(signal.direction as "LONG" | "SHORT", currentCandle.close, signal.score, signal.reasons.join(" | "), currentCandle);
+    const features = buildDecisionFeatureSnapshot(currentCandle, signal, this.strategy, {
+      spreadBps: this.lastSpreadBps,
+      marketOpen: this.lastMarketOpen,
+      marketDataTimestamp: this.lastMarketDataTimestamp || undefined,
+      marketDataSource: this.lastMarketDataSource,
+    });
+    const entered = this.executeEntry(signal.direction as "LONG" | "SHORT", currentCandle.close, signal.score, signal.reasons.join(" | "), currentCandle, features);
     return { entered, confidence: signal.score, reason: entered ? "Eligible paper signal executed." : "Signal passed, but risk controls rejected execution." };
   }
 
@@ -251,7 +261,8 @@ export class TradingEngine {
           currentCandle.open,
           pending.signalScore,
           pending.rationale,
-          pending.signalCandle
+          pending.signalCandle,
+          pending.features
         );
       } else if (this.pendingEntry && (this.activeTrade || this.botState === "HALTED_DEAD")) {
         this.pendingEntry = null;
@@ -354,11 +365,18 @@ export class TradingEngine {
       return;
     }
 
+    const features = buildDecisionFeatureSnapshot(candle, signal, this.strategy, {
+      spreadBps: this.lastSpreadBps,
+      marketOpen: this.lastMarketOpen,
+      marketDataTimestamp: this.lastMarketDataTimestamp || undefined,
+      marketDataSource: this.lastMarketDataSource,
+    });
     this.pendingEntry = {
       direction: signal.direction as "LONG" | "SHORT",
       signalScore: signal.score,
       rationale: signal.reasons.join(" | "),
       signalCandle: candle,
+      features,
     };
     this.logThought(
       "SIGNAL",
@@ -368,7 +386,7 @@ export class TradingEngine {
     );
   }
 
-  private executeEntry(type: "LONG" | "SHORT", expectedPrice: number, signalScore: number, rationale: string, signalCandle?: Candle) {
+  private executeEntry(type: "LONG" | "SHORT", expectedPrice: number, signalScore: number, rationale: string, signalCandle?: Candle, features?: DecisionFeatureSnapshot) {
     const stopDistance = Math.max(0.001, this.strategy.stopLossPercent / 100);
     const configuredRiskBudget = this.vitality.currentEquity * Math.min(Math.max(0, Number(this.strategy.maxRiskPerTrade) || 0), 1) / 100;
     const intendedRiskNotional = Math.min(
@@ -400,10 +418,10 @@ export class TradingEngine {
     const notional = Math.min(riskSize, maxNotional, this.vitality.cash);
     if (notional < 10) { this.logThought("DEFENSE", "Signal rejected: position too small", "Risk budget cannot support a meaningful paper order.", signalScore); return false; }
     const fill = paperExecutionAdapter.entryFill({ expectedPrice, side: type, notionalUsd: notional, settings: this.paperSettings });
-    this.openPaperPosition(type, fill.fillPrice, notional, this.strategy.stopLossPercent, this.strategy.takeProfitPercent, this.strategy.trailingStop, rationale, signalScore, fill.feeUsd, fill.slippageUsd);
+    this.openPaperPosition(type, fill.fillPrice, notional, this.strategy.stopLossPercent, this.strategy.takeProfitPercent, this.strategy.trailingStop, rationale, signalScore, fill.feeUsd, fill.slippageUsd, features);
     return Boolean(this.activeTrade);
   }
-  private openPaperPosition(type: "LONG" | "SHORT", expectedPrice: number, notional: number, stopLossPercent: number, takeProfitPercent: number, trailingStop: boolean, rationale?: string, signalScore = 0, feeOverride?: number, slippageOverride?: number) {
+  private openPaperPosition(type: "LONG" | "SHORT", expectedPrice: number, notional: number, stopLossPercent: number, takeProfitPercent: number, trailingStop: boolean, rationale?: string, signalScore = 0, feeOverride?: number, slippageOverride?: number, learningFeatures?: DecisionFeatureSnapshot) {
     const fill = feeOverride === undefined
       ? paperExecutionAdapter.entryFill({ expectedPrice, side: type, notionalUsd: notional, settings: this.paperSettings })
       : { expectedPrice, fillPrice: expectedPrice, feeUsd: feeOverride, slippageUsd: slippageOverride || 0 };
@@ -412,7 +430,7 @@ export class TradingEngine {
     this.vitality.cash = Number((this.vitality.cash - notional - fill.feeUsd).toFixed(2));
     const stopLoss = type === "LONG" ? fill.fillPrice * (1 - stopLossPercent / 100) : fill.fillPrice * (1 + stopLossPercent / 100);
     const takeProfit = type === "LONG" ? fill.fillPrice * (1 + takeProfitPercent / 100) : fill.fillPrice * (1 - takeProfitPercent / 100);
-    const trade: Trade = { id: "PTRD-" + Date.now().toString(36).toUpperCase(), asset: this.strategy.asset, type, entryPrice: Number(fill.fillPrice.toFixed(4)), amount: Number(amount.toFixed(8)), sizeUsd: Number(notional.toFixed(2)), marginUsd: Number(notional.toFixed(2)), entryTime: Date.now(), stopLoss: Number(stopLoss.toFixed(4)), takeProfit: Number(takeProfit.toFixed(4)), highestPrice: fill.fillPrice, lowestPrice: fill.fillPrice, pnl: 0, pnlPercent: 0, feesUsd: Number(fill.feeUsd.toFixed(2)), slippageUsd: Number(fill.slippageUsd.toFixed(2)), status: "OPEN", signalScore, confidence: signalScore, rationale: rationale || "User-authorized paper order.", botSurvivalNote: "Paper execution only. Signal score is not a probability." };
+    const trade: Trade = { id: "PTRD-" + Date.now().toString(36).toUpperCase(), asset: this.strategy.asset, type, entryPrice: Number(fill.fillPrice.toFixed(4)), amount: Number(amount.toFixed(8)), sizeUsd: Number(notional.toFixed(2)), marginUsd: Number(notional.toFixed(2)), entryTime: Date.now(), stopLoss: Number(stopLoss.toFixed(4)), takeProfit: Number(takeProfit.toFixed(4)), highestPrice: fill.fillPrice, lowestPrice: fill.fillPrice, pnl: 0, pnlPercent: 0, feesUsd: Number(fill.feeUsd.toFixed(2)), slippageUsd: Number(fill.slippageUsd.toFixed(2)), status: "OPEN", signalScore, confidence: signalScore, rationale: rationale || "User-authorized paper order.", learningFeatures, botSurvivalNote: "Paper execution only. Signal score is not a probability." };
     this.vitality.totalFees = Number((this.vitality.totalFees + fill.feeUsd).toFixed(2));
     this.activeTrade = trade; this.botState = "IN_POSITION";
     this.addNotification({ type: "TRADE_OPENED", title: "Paper " + type + " " + trade.asset + " opened", message: "Fill $" + trade.entryPrice.toLocaleString() + " | Notional $" + trade.sizeUsd.toFixed(2) + " | Signal Score " + (signalScore || "manual"), badgeText: "PAPER", details: { asset: trade.asset, price: trade.entryPrice, size: trade.sizeUsd } });

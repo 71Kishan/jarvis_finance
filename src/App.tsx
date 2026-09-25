@@ -221,6 +221,7 @@ export default function App() {
         tradingEngineRef.current?.setMarketQuality({
           spreadBps,
           dataTimestamp: Number(data.ticker.lastUpdated) || Date.now(),
+          marketDataSource: marketSource,
           marketOpen: currentAsset.includes("/USD") ? true : isUsRegularMarketOpen(),
         });
         setLiveTicker(data.ticker);

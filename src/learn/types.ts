@@ -1,4 +1,5 @@
 import type { StrategyConfig, Trade } from "../types/trading";
+import type { DecisionFeatureSnapshot } from "./features";
 
 export type LearningOutcome = "WIN" | "LOSS" | "FLAT";
 
@@ -25,6 +26,7 @@ export interface LearningTradeRecord {
   holdingPeriodMs: number;
   exitStatus: Trade["status"];
   rationale: string;
+  features?: DecisionFeatureSnapshot;
 }
 
 export function buildLearningTradeRecord(
@@ -60,5 +62,6 @@ export function buildLearningTradeRecord(
     holdingPeriodMs: Math.max(0, exitTime - entryTime),
     exitStatus: trade.status,
     rationale: trade.rationale || "",
+    features: trade.learningFeatures ? { ...trade.learningFeatures } : undefined,
   };
 }

@@ -91,6 +91,7 @@ export interface Trade {
   signalScore: number;
   confidence: number; // Backward-compatible alias; treat as signal score, not probability.
   rationale: string;
+  learningFeatures?: DecisionFeatureSnapshot;
   botSurvivalNote?: string;
 }
 
@@ -307,6 +308,7 @@ export interface EquityCurvePoint {
   tradeEvent?: string;
 }
 
+import type { DecisionFeatureSnapshot } from "../learn/features";
 import type { LearningTradeRecord } from "../learn/types";
 
 export interface TradingEngineRuntimeState {

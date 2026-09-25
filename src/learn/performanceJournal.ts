@@ -1,5 +1,6 @@
 import type { StrategyConfig, Trade } from "../types/trading";
 import { buildLearningTradeRecord, LearningTradeRecord } from "./types";
+import { buildLearningFeatureDataset, LearningFeatureDataset } from "./dataset";
 
 const MAX_RECORDS = 2000;
 
@@ -46,6 +47,10 @@ export class LearningPerformanceJournal {
     for (const record of records.slice(-MAX_RECORDS)) {
       if (record?.tradeId) this.records.set(record.tradeId, { ...record });
     }
+  }
+
+  public exportLearningDataset(limit = MAX_RECORDS): LearningFeatureDataset {
+    return buildLearningFeatureDataset(this.list(limit));
   }
 
   public clear(): void {
