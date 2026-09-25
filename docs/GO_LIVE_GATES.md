@@ -20,6 +20,12 @@ Generate decisions without sending orders. Compare expected fills, timing, sprea
 ## Gate 5 — Production controls
 Authentication, durable database, secret management, idempotent orders, broker reconciliation, duplicate-order protection, stale-data protection, kill switch, loss/exposure/position limits, alerting, incident logs, and recovery procedure.
 
+### Authenticated control plane requirement
+
+Before any future money-moving service is considered, the operator control plane must have a durable user identity, server-side session enforcement, credential isolation, audit logging, account ownership checks, same-origin protection for state-changing requests, authentication rate limiting/lockout, and provider reconciliation that fails closed on unknown order state.
+
+These controls establish who is allowed to inspect or operate the platform; they do not authorize live trading.
+
 ## Gate 6 — Broker sandbox
 Use a broker paper/sandbox environment. Keep the execution service independent from the AI/research service.
 
