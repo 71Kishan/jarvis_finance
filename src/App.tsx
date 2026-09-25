@@ -21,6 +21,8 @@ import { AiCopilotModal } from "./components/AiCopilotModal";
 import { ProfitVaultModal } from "./components/ProfitVaultModal";
 import { MainTerminal } from "./components/MainTerminal";
 import { WorkspaceSurface } from "./components/WorkspaceSurface";
+import { LoginScreen } from "./components/LoginScreen";
+import type { AuthenticatedUser } from "./components/LoginScreen";
 import type { WorkspaceView } from "./platform/workspace";
 import { AssetSymbol, MarketSimulator, SUPPORTED_ASSETS } from "./engine/marketSimulator";
 import { DEFAULT_STRATEGY, TradingEngine } from "./engine/tradingEngine";
@@ -43,7 +45,7 @@ import {
   EquityCurvePoint,
 } from "./types/trading";
 
-export default function App() {
+function AuthenticatedApp() {
   const [currentAsset, setCurrentAsset] = useState<string>("BTC/USD");
   const [currentView, setCurrentView] = useState<WorkspaceView>("TERMINAL");
   const [marketSource, setMarketSource] = useState<MarketDataSource>("LIVE_MARKET_DATA");
@@ -753,5 +755,125 @@ export default function App() {
         <SecurityPinLockScreen onUnlock={() => setIsSessionLocked(false)} />
       )}
     </div>
+  );
+}
+
+
+export default function App() {
+  const [authState, setAuthState] = useState<{
+    loading: boolean;
+    required: boolean;
+    user: AuthenticatedUser | null;
+    error: string | null;
+  }>({
+    loading: true,
+    required: false,
+    user: null,
+    error: null,
+  });
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const bootstrap = async () => {
+      try {
+        const statusResponse = await fetch("/api/auth/status", {
+          credentials: "same-origin",
+          cache: "no-store",
+        });
+        const statusPayload = await statusResponse.json().catch(() => ({}));
+        if (!statusResponse.ok) throw new Error(statusPayload?.error || "Authentication status unavailable.");
+
+        const required = statusPayload?.required === true;
+        if (!required) {
+          if (!cancelled) setAuthState({ loading: false, required: false, user: null, error: null });
+          return;
+        }
+
+        const meResponse = await fetch("/api/me", {
+          credentials: "same-origin",
+          cache: "no-store",
+        });
+        if (meResponse.ok) {
+          const mePayload = await meResponse.json().catch(() => ({}));
+          if (!cancelled) {
+            setAuthState({
+              loading: false,
+              required: true,
+              user: mePayload?.user || null,
+              error: mePayload?.user ? null : "Authenticated session did not return a user.",
+            });
+          }
+          return;
+        }
+
+        if (!cancelled) {
+          setAuthState({ loading: false, required: true, user: null, error: null });
+        }
+      } catch (error: any) {
+        if (!cancelled) {
+          setAuthState({
+            loading: false,
+            required: true,
+            user: null,
+            error: error?.message || "Unable to initialize authenticated workspace.",
+          });
+        }
+      }
+    };
+
+    void bootstrap();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (authState.loading) {
+    return (
+      <div className="min-h-screen bg-neutral-950 text-neutral-300 flex items-center justify-center">
+        <div className="text-xs font-mono uppercase tracking-[0.18em]">Initializing Jarvis Finance…</div>
+      </div>
+    );
+  }
+
+  if (authState.error) {
+    return (
+      <div className="min-h-screen bg-neutral-950 text-neutral-100 flex items-center justify-center px-4">
+        <div className="max-w-md rounded-2xl border border-red-900/50 bg-neutral-900 p-6">
+          <div className="text-sm font-semibold">Workspace unavailable</div>
+          <p className="mt-2 text-xs text-neutral-500 leading-relaxed">{authState.error}</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (authState.required && !authState.user) {
+    return <LoginScreen onAuthenticated={(user) => setAuthState((state) => ({ ...state, loading: false, user, error: null }))} />;
+  }
+
+  const signOut = async () => {
+    await fetch("/api/auth/logout", {
+      method: "POST",
+      credentials: "same-origin",
+    }).catch(() => undefined);
+    setAuthState((state) => ({ ...state, user: null }));
+  };
+
+  return (
+    <>
+      <AuthenticatedApp />
+      {authState.required && authState.user && (
+        <div className="fixed top-2 right-2 z-50 flex items-center gap-2 rounded-lg border border-neutral-800 bg-neutral-950/95 px-2.5 py-1.5 shadow-xl">
+          <span className="hidden sm:inline text-[10px] font-mono text-neutral-500">{authState.user.email}</span>
+          <button
+            type="button"
+            onClick={() => void signOut()}
+            className="text-[10px] font-mono uppercase text-neutral-300 hover:text-white"
+          >
+            Sign out
+          </button>
+        </div>
+      )}
+    </>
   );
 }

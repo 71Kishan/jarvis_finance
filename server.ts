@@ -12,6 +12,16 @@ import { AutonomousPaperRuntime } from "./src/server/paperRuntime";
 import { PlatformDatabase } from "./src/server/platformDatabase";
 import { PlatformRepository } from "./src/platform/platformRepository";
 import { BinanceSpotAccountAdapter } from "./src/platform/binanceSpotAccountAdapter";
+import { AuthControlStore } from "./src/server/authControlStore";
+import {
+  JARVIS_SESSION_COOKIE,
+  SESSION_TTL_MS,
+  buildExpiredSessionCookie,
+  buildSessionCookie,
+  createSessionToken,
+  hashSessionToken,
+  parseCookies,
+} from "./src/server/auth";
 
 dotenv.config();
 
@@ -77,6 +87,80 @@ app.use("/api", (req: Request, res: Response, next) => {
 
   next();
 });
+
+interface AuthenticatedRequest extends Request {
+  jarvisUser?: import("./src/server/authControlStore").AuthUser;
+  jarvisSessionId?: string;
+}
+
+function secureCookies(req: Request): boolean {
+  if (process.env.JARVIS_SECURE_COOKIES === "true") return true;
+  if (process.env.JARVIS_SECURE_COOKIES === "false") return false;
+  return process.env.NODE_ENV === "production";
+}
+
+function requireSameOrigin(req: Request, res: Response, next: () => void) {
+  const origin = req.get("Origin");
+  if (!origin) return next();
+  try {
+    const originUrl = new URL(origin);
+    const expectedHost = req.get("Host");
+    if (!expectedHost || originUrl.host !== expectedHost) {
+      return res.status(403).json({ error: "Cross-origin state-changing request rejected." });
+    }
+  } catch {
+    return res.status(403).json({ error: "Invalid request origin." });
+  }
+  next();
+}
+
+async function requireSession(req: AuthenticatedRequest, res: Response, next: () => void) {
+  if (!platformDatabase.isReady()) {
+    return res.status(503).json({ error: "Authenticated account services require PostgreSQL." });
+  }
+
+  const token = parseCookies(req.headers.cookie)[JARVIS_SESSION_COOKIE];
+  if (!token) {
+    return res.status(401).json({ error: "Authentication required." });
+  }
+
+  const session = await authControlStore.getSession(hashSessionToken(token));
+  if (!session) {
+    res.setHeader("Set-Cookie", buildExpiredSessionCookie(secureCookies(req)));
+    return res.status(401).json({ error: "Authentication required." });
+  }
+
+  req.jarvisUser = session.user;
+  req.jarvisSessionId = session.sessionId;
+  void authControlStore.touchSession(session.sessionId).catch(() => undefined);
+  next();
+}
+
+const authRateLimitMap = new Map<string, { count: number; resetAt: number }>();
+const AUTH_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
+const AUTH_MAX_ATTEMPTS = 12;
+
+function authRateLimitKey(req: Request, email?: string): string {
+  const ip = req.ip || req.socket.remoteAddress || "client-local";
+  return ip + ":" + (email || "").trim().toLowerCase();
+}
+
+function consumeAuthAttempt(req: Request, email?: string): boolean {
+  const key = authRateLimitKey(req, email);
+  const now = Date.now();
+  const bucket = authRateLimitMap.get(key);
+  if (!bucket || now >= bucket.resetAt) {
+    authRateLimitMap.set(key, { count: 1, resetAt: now + AUTH_RATE_LIMIT_WINDOW_MS });
+    return true;
+  }
+  if (bucket.count >= AUTH_MAX_ATTEMPTS) return false;
+  bucket.count += 1;
+  return true;
+}
+
+function clearAuthRateLimit(email: string, req: Request): void {
+  authRateLimitMap.delete(authRateLimitKey(req, email));
+}
 
 // Initialize Gemini AI Client lazily and safely
 const getAIClient = () => {
@@ -243,6 +327,149 @@ function buildTechnicalScreen(rows: any[], change24hPercent = 0) {
   };
 }
 
+// Authenticated control plane. Account data requires a durable DB-backed session.
+// Runtime control-token endpoints remain separate and are not replaced by browser sessions.
+app.get("/api/auth/status", async (_req: Request, res: Response) => {
+  try {
+    const required = process.env.JARVIS_AUTH_REQUIRED === "true";
+    const configured = platformDatabase.isReady() && await authControlStore.isAuthenticationConfigured();
+    return res.json({ required, configured, sessionTtlMs: SESSION_TTL_MS });
+  } catch (error: any) {
+    return res.status(503).json({ required: process.env.JARVIS_AUTH_REQUIRED === "true", configured: false, error: error?.message || "Authentication status unavailable." });
+  }
+});
+
+app.post("/api/auth/login", requireSameOrigin, async (req: Request, res: Response) => {
+  const email = typeof req.body?.email === "string" ? req.body.email.trim().toLowerCase() : "";
+  const password = typeof req.body?.password === "string" ? req.body.password : "";
+
+  if (!email || email.length > 320 || !password || password.length > 256) {
+    return res.status(400).json({ authenticated: false, error: "Invalid credentials." });
+  }
+  if (!consumeAuthAttempt(req, email)) {
+    return res.status(429).json({ authenticated: false, error: "Too many authentication attempts. Try again later." });
+  }
+
+  try {
+    if (!platformDatabase.isReady() || !(await authControlStore.isAuthenticationConfigured())) {
+      return res.status(503).json({ authenticated: false, error: "Authenticated workspace is not configured on this server." });
+    }
+
+    const result = await authControlStore.authenticate(email, password);
+    if (result.status === "LOCKED") {
+      return res.status(423).json({
+        authenticated: false,
+        error: "Account temporarily locked after repeated failed attempts.",
+        lockedUntil: result.lockedUntil ?? null,
+      });
+    }
+    if (result.status !== "AUTHENTICATED" || !result.user) {
+      return res.status(401).json({ authenticated: false, error: "Invalid credentials." });
+    }
+
+    const token = createSessionToken();
+    const session = await authControlStore.createSession({
+      userId: result.user.id,
+      tokenHash: hashSessionToken(token),
+      expiresAt: Date.now() + SESSION_TTL_MS,
+      ipAddress: req.ip || req.socket.remoteAddress || undefined,
+      userAgent: req.get("User-Agent") || undefined,
+    });
+
+    clearAuthRateLimit(email, req);
+    await authControlStore.recordAuditEvent({
+      userId: result.user.id,
+      eventType: "AUTH_LOGIN",
+      requestId: req.get("X-Request-Id") || undefined,
+      payload: { sessionId: session.sessionId },
+    });
+
+    res.setHeader("Set-Cookie", buildSessionCookie(token, secureCookies(req)));
+    return res.json({
+      authenticated: true,
+      expiresAt: session.expiresAt,
+      user: result.user,
+    });
+  } catch (error: any) {
+    console.error("Jarvis authentication error:", error?.message || error);
+    return res.status(503).json({ authenticated: false, error: "Authentication service unavailable." });
+  }
+});
+
+app.post("/api/auth/logout", requireSameOrigin, async (req: Request, res: Response) => {
+  const token = parseCookies(req.headers.cookie)[JARVIS_SESSION_COOKIE];
+  if (token && platformDatabase.isReady()) {
+    try {
+      const session = await authControlStore.getSession(hashSessionToken(token));
+      await authControlStore.revokeSession(hashSessionToken(token));
+      if (session) {
+        await authControlStore.recordAuditEvent({
+          userId: session.user.id,
+          eventType: "AUTH_LOGOUT",
+          requestId: req.get("X-Request-Id") || undefined,
+          payload: { sessionId: session.sessionId },
+        });
+      }
+    } catch (error: any) {
+      console.warn("Jarvis logout persistence warning:", error?.message || error);
+    }
+  }
+
+  res.setHeader("Set-Cookie", buildExpiredSessionCookie(secureCookies(req)));
+  return res.json({ authenticated: false });
+});
+
+app.get("/api/me", requireSession, async (req: AuthenticatedRequest, res: Response) => {
+  return res.json({ authenticated: true, user: req.jarvisUser });
+});
+
+app.get("/api/account/overview", requireSession, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const overview = await authControlStore.getAccountOverview(req.jarvisUser!.id);
+    return res.json({ success: true, ...overview });
+  } catch (error: any) {
+    return res.status(503).json({ success: false, error: error?.message || "Account overview unavailable." });
+  }
+});
+
+app.post("/api/account/binance-testnet/sync", requireSession, requireSameOrigin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!binanceSpotTestnetAccount.isConfigured()) {
+      return res.status(503).json({ success: false, error: "Binance Spot testnet credentials are not configured on the server." });
+    }
+
+    const snapshot = await binanceSpotTestnetAccount.syncReadOnlyAccount();
+    const connection = await authControlStore.persistBinanceReadOnlySync(req.jarvisUser!.id, {
+      account: snapshot.account,
+      accountId: binanceSpotTestnetAccount.getAccountId(),
+      balances: snapshot.balances,
+      openOrders: snapshot.openOrders,
+    });
+
+    return res.json({
+      success: true,
+      connection,
+      account: {
+        accountType: snapshot.account.accountType,
+        canTrade: snapshot.account.canTrade === true,
+        canWithdraw: snapshot.account.canWithdraw === true,
+        canDeposit: snapshot.account.canDeposit === true,
+        permissions: Array.isArray(snapshot.account.permissions) ? snapshot.account.permissions : [],
+        updateTime: snapshot.account.updateTime ?? null,
+      },
+      balances: snapshot.balances,
+      openOrders: snapshot.openOrders,
+      health: await binanceSpotTestnetAccount.getHealth(),
+    });
+  } catch (error: any) {
+    return res.status(503).json({
+      success: false,
+      error: error?.message || "Binance Spot testnet account sync failed.",
+      health: await binanceSpotTestnetAccount.getHealth(),
+    });
+  }
+});
+
 // Health Check
 app.get("/api/health", (_req: Request, res: Response) => {
   const market = binanceMarketData.getHealth();
@@ -342,6 +569,7 @@ const STOCK_UNIVERSE: Record<string, { name: string; category: "STOCK" | "INDEX"
 const binanceMarketData = new BinanceMarketDataService(SYMBOL_MAP);
 const platformDatabase = new PlatformDatabase();
 const platformRepository = new PlatformRepository(platformDatabase);
+const authControlStore = new AuthControlStore(platformDatabase);
 const binanceSpotTestnetAccount = new BinanceSpotAccountAdapter();
 const binanceInstrumentCatalog = new BinanceInstrumentCatalog(
   platformDatabase.isConfigured()
@@ -968,6 +1196,27 @@ async function startServer() {
   // initialization and migrations happen before the instrument catalog refresh
   // so the first authoritative catalog can be durably persisted.
   await platformDatabase.start();
+
+  if (platformDatabase.isReady() && process.env.JARVIS_ADMIN_EMAIL && process.env.JARVIS_ADMIN_PASSWORD) {
+    try {
+      await authControlStore.bootstrapOperator({
+        email: process.env.JARVIS_ADMIN_EMAIL,
+        displayName: process.env.JARVIS_ADMIN_DISPLAY_NAME || "Jarvis Operator",
+        password: process.env.JARVIS_ADMIN_PASSWORD,
+        resetExistingPassword: process.env.JARVIS_ADMIN_RESET_PASSWORD === "true",
+      });
+    } catch (error: any) {
+      console.error("Jarvis admin bootstrap failed:", error?.message || error);
+      if (process.env.JARVIS_AUTH_REQUIRED === "true") throw error;
+    }
+  }
+
+  if (process.env.JARVIS_AUTH_REQUIRED === "true") {
+    const configured = platformDatabase.isReady() && await authControlStore.isAuthenticationConfigured();
+    if (!configured) {
+      throw new Error("JARVIS_AUTH_REQUIRED=true but no authenticated Jarvis operator is configured.");
+    }
+  }
   await binanceInstrumentCatalog.start();
 
   // Live API WebSocket Voice Gateway
