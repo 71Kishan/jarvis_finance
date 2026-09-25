@@ -212,6 +212,61 @@ export const StudyAndOptimizeModal: React.FC<StudyAndOptimizeModalProps> = ({
             </div>
           )}
 
+          {researchData && researchData.mlExperiment && (
+            <div className="bg-neutral-900/50 border border-neutral-800 rounded-xl p-3 space-y-3 text-[11px]">
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="font-semibold text-neutral-300">First Controlled ML Experiment</span>
+                  <div className="text-[10px] text-neutral-500 mt-0.5">Logistic-regression meta-labeler on deterministic signals</div>
+                </div>
+                <span className={researchData.mlExperiment.status === "READY" ? "text-indigo-300" : "text-amber-400"}>
+                  {researchData.mlExperiment.status === "READY" ? "HELD-OUT TESTED" : researchData.mlExperiment.status}
+                </span>
+              </div>
+
+              {researchData.mlExperiment.status === "READY" ? (
+                <>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    <span className="text-neutral-400">Features <strong className="text-neutral-200">{researchData.mlExperiment.selectedFeatures.length}</strong></span>
+                    <span className="text-neutral-400">Threshold <strong className="text-neutral-200">{(researchData.mlExperiment.selectedThreshold! * 100).toFixed(0)}%</strong></span>
+                    <span className="text-neutral-400">Validation log loss <strong className="text-neutral-200">{researchData.mlExperiment.selectedValidationLogLoss}</strong></span>
+                    <span className="text-neutral-400">Test AUC <strong className="text-neutral-200">{researchData.mlExperiment.test!.rocAuc === null ? "N/A" : researchData.mlExperiment.test!.rocAuc}</strong></span>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div className="rounded-lg border border-neutral-800 bg-neutral-950/60 p-3">
+                      <div className="text-neutral-500 mb-1.5">Deterministic test baseline</div>
+                      <div className="grid grid-cols-2 gap-1.5 text-neutral-300">
+                        <span>Trades: {researchData.mlExperiment.deterministicTest!.tradesTaken}/{researchData.mlExperiment.deterministicTest!.rowsConsidered}</span>
+                        <span>P&L: {researchData.mlExperiment.deterministicTest!.totalPnlUsd >= 0 ? "+" : ""}${researchData.mlExperiment.deterministicTest!.totalPnlUsd.toFixed(2)}</span>
+                        <span>Win rate: {researchData.mlExperiment.deterministicTest!.winRate}%</span>
+                        <span>Profit factor: {researchData.mlExperiment.deterministicTest!.profitFactor}</span>
+                      </div>
+                    </div>
+
+                    <div className="rounded-lg border border-indigo-500/30 bg-indigo-950/10 p-3">
+                      <div className="text-neutral-500 mb-1.5">ML-filtered test overlay</div>
+                      <div className="grid grid-cols-2 gap-1.5 text-neutral-300">
+                        <span>Trades: {researchData.mlExperiment.modelFilteredTest!.tradesTaken}/{researchData.mlExperiment.modelFilteredTest!.rowsConsidered}</span>
+                        <span>P&L: {researchData.mlExperiment.modelFilteredTest!.totalPnlUsd >= 0 ? "+" : ""}${researchData.mlExperiment.modelFilteredTest!.totalPnlUsd.toFixed(2)}</span>
+                        <span>Win rate: {researchData.mlExperiment.modelFilteredTest!.winRate}%</span>
+                        <span>Max DD: ${researchData.mlExperiment.modelFilteredTest!.maxDrawdownUsd.toFixed(2)}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="text-[10px] text-neutral-500">
+                    Model inputs are normalized with TRAIN-only statistics. Hyperparameters and threshold are chosen on VALIDATION; the TEST partition is evaluated afterward and does not drive selection.
+                  </div>
+                </>
+              ) : (
+                <div className="text-[10px] text-neutral-400">
+                  {researchData.mlExperiment.blockedReasons.join(" ") || "Experiment is not ready."}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Backtest Results of Candidates */}
           {researchData && (
             <div className="space-y-3">

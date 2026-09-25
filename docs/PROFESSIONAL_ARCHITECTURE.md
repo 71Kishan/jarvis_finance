@@ -72,3 +72,7 @@ Real-money brokerage execution is not enabled in this version.
 ### Controlled feature-research dataset
 
 The learning dataset now has an explicit preparation/audit stage before any ML experiment. It keeps chronological 60/20/20 partitions without shuffling, checks that decision-time features precede entry, rejects unsupported feature-schema or non-finite values, tracks missingness and constant features, and keeps target fields outside the numeric feature vector. The first controlled ML experiment requires at least 90 valid feature rows plus a clean leakage/schema audit. This is a research-data gate only; it does not promote or deploy a model.
+
+### First controlled ML experiment
+
+The first machine-learning experiment is intentionally narrow: a deterministic logistic-regression meta-labeler predicts WIN versus non-WIN for an already eligible deterministic signal. It does not generate direction, sizing, exits, orders, or capital decisions. The implementation uses TRAIN-only missing-value imputation and normalization, validation-only selection of regularization and the filter threshold, and a held-out TEST evaluation. The experiment reports classification metrics and a test P&L overlay against taking every deterministic signal. A successful experiment is evidence for further research only; it does not promote or deploy a model.
