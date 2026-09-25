@@ -307,6 +307,8 @@ export interface EquityCurvePoint {
   tradeEvent?: string;
 }
 
+import type { LearningTradeRecord } from "../learn/types";
+
 export interface TradingEngineRuntimeState {
   version: 1;
   savedAt: number;
@@ -319,5 +321,6 @@ export interface TradingEngineRuntimeState {
   notifications: ActionNotification[];
   equityCurve: EquityCurvePoint[];
   profitWithdrawals: ProfitWithdrawalRecord[];
+  learningRecords?: LearningTradeRecord[];
   lastProcessedCandleTimestamp: number;
 }
