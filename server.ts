@@ -912,6 +912,18 @@ app.post("/api/runtime/paper/stop", requireControlToken, (_req: Request, res: Re
   res.json(autonomousPaperRuntime.getStatus());
 });
 
+app.get("/api/runtime/paper/learning", requireControlToken, (_req: Request, res: Response) => {
+  const status = autonomousPaperRuntime.getStatus();
+  res.json({
+    modelAvailable: status.learningShadow.modelAvailable,
+    modelFingerprint: status.learningShadow.modelFingerprint,
+    experiment: status.learningShadow.experiment,
+    performance: status.learningShadow.performance,
+    gate: status.learningShadow.gate,
+    lastRefreshAt: status.learningShadow.lastRefreshAt,
+  });
+});
+
 // Read-only Binance Spot testnet account inspection.
 // This endpoint is intentionally protected by the existing control token while
 // the full authenticated user session layer is still under construction.
