@@ -149,7 +149,9 @@ export class LearningResearchLoop {
     return {
       status: proposed && candidateHasValidationEvidence && candidateHasHeldOutTest
         ? "REVIEW_REQUIRED"
-        : "RESEARCH_ONLY",
+        : minimumLearningTrades
+          ? "RESEARCH_ONLY"
+          : "INSUFFICIENT_LEARNING_DATA",
       dataset,
       historyBars: candles.length,
       candidates: ordered,
