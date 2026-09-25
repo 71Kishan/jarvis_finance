@@ -6,6 +6,7 @@ import { strategyVaultInstance } from "./strategyVault";
 import { DEFAULT_RISK_POLICY, evaluateRisk, RiskPolicyConfig } from "./riskPolicy";
 import { evaluateSignal, SignalResult } from "./signalEngine";
 import { paperExecutionAdapter } from "../execution/paperExecutionAdapter";
+import { learningPerformanceJournal } from "../learn/performanceJournal";
 
 export const DEFAULT_STRATEGY: StrategyConfig = {
   id: "jarvis-base-v1", name: "Jarvis Base Confluence V1", version: 1, asset: "BTC/USD",
@@ -71,6 +72,7 @@ export class TradingEngine {
   public getEquityCurve() { return [...this.equityCurve]; }
   public getLastSignal() { return this.lastSignal; }
   public getLastProcessedCandleTimestamp() { return this.lastProcessedCandleTimestamp; }
+  public getLearningRecords(limit = 200) { return learningPerformanceJournal.list(limit); }
 
   public exportRuntimeState(): TradingEngineRuntimeState {
     return {
@@ -85,6 +87,7 @@ export class TradingEngine {
       notifications: JSON.parse(JSON.stringify(this.notifications.slice(0, 100))),
       equityCurve: JSON.parse(JSON.stringify(this.equityCurve.slice(-2000))),
       profitWithdrawals: JSON.parse(JSON.stringify(this.profitWithdrawals.slice(0, 200))),
+      learningRecords: JSON.parse(JSON.stringify(learningPerformanceJournal.exportState())),
       lastProcessedCandleTimestamp: this.lastProcessedCandleTimestamp,
     };
   }
@@ -104,6 +107,7 @@ export class TradingEngine {
     this.notifications = Array.isArray(state.notifications) ? JSON.parse(JSON.stringify(state.notifications.slice(0, 100))) : [];
     this.equityCurve = Array.isArray(state.equityCurve) ? JSON.parse(JSON.stringify(state.equityCurve.slice(-2000))) : [];
     this.profitWithdrawals = Array.isArray(state.profitWithdrawals) ? JSON.parse(JSON.stringify(state.profitWithdrawals.slice(0, 200))) : [];
+    learningPerformanceJournal.hydrate(Array.isArray(state.learningRecords) ? state.learningRecords : []);
     this.lastProcessedCandleTimestamp = Math.max(0, Number(state.lastProcessedCandleTimestamp) || 0);
 
     // A queued signal is intentionally not persisted across restarts. Requiring a
@@ -435,7 +439,9 @@ export class TradingEngine {
     else if (economicNet < 0) { this.vitality.losingTrades++; this.vitality.survivalStreak = 0; this.vitality.consecutiveLosses++; this.vitality.lastLossAt = Date.now(); }
     this.vitality.winRate = this.vitality.totalTrades ? Number((this.vitality.winningTrades / this.vitality.totalTrades * 100).toFixed(1)) : 0;
     const gp = this.tradeHistory.filter(t => t.pnl > 0).reduce((s, t) => s + t.pnl, 0) + (economicNet > 0 ? economicNet : 0); const gl = this.tradeHistory.filter(t => t.pnl < 0).reduce((s, t) => s + Math.abs(t.pnl), 0) + (economicNet < 0 ? Math.abs(economicNet) : 0); this.vitality.profitFactor = gl > 0 ? Number((gp / gl).toFixed(2)) : 0;
-    this.tradeHistory.unshift({ ...trade }); strategyVaultInstance.recordTradeOutcome(this.strategy, trade);
+    this.tradeHistory.unshift({ ...trade });
+    learningPerformanceJournal.recordTrade(trade, this.strategy, trade.exitTime || Date.now());
+    strategyVaultInstance.recordTradeOutcome(this.strategy, trade);
     if (typeof window !== "undefined") {
       try {
         void cryptoSecurityService.appendTradeToAuditLedger({
