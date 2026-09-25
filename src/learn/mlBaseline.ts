@@ -1,0 +1,461 @@
+import type { LearningFeatureDatasetRow } from "./dataset";
+import { LEARNING_FEATURE_NAMES } from "./dataset";
+import { LEARNING_RESEARCH_MIN_ROWS, prepareLearningFeatureResearch } from "./researchDataset";
+import type { LearningTradeRecord } from "./types";
+
+export type MlExperimentStatus = "READY" | "BLOCKED" | "INSUFFICIENT_CLASS_VARIETY";
+
+export interface LogisticModelConfig {
+  regularization: number;
+  learningRate: number;
+  iterations: number;
+}
+
+export interface MlClassificationMetrics {
+  rows: number;
+  wins: number;
+  nonWins: number;
+  accuracy: number;
+  balancedAccuracy: number;
+  precision: number;
+  recall: number;
+  logLoss: number;
+  brierScore: number;
+  rocAuc: number | null;
+}
+
+export interface MlTradingOverlayMetrics {
+  rowsConsidered: number;
+  tradesTaken: number;
+  tradesSkipped: number;
+  winRate: number;
+  totalPnlUsd: number;
+  profitFactor: number;
+  maxDrawdownUsd: number;
+  averagePnlUsd: number;
+}
+
+export interface MlExperimentResult {
+  status: MlExperimentStatus;
+  model: LogisticModelConfig | null;
+  selectedThreshold: number | null;
+  selectedValidationLogLoss: number | null;
+  selectedFeatures: string[];
+  train: MlClassificationMetrics | null;
+  validation: MlClassificationMetrics | null;
+  test: MlClassificationMetrics | null;
+  deterministicTest: MlTradingOverlayMetrics | null;
+  modelFilteredTest: MlTradingOverlayMetrics | null;
+  blockedReasons: string[];
+  notes: string[];
+}
+
+interface PreparedMatrix {
+  names: string[];
+  means: number[];
+  scales: number[];
+  train: number[][];
+  validation: number[][];
+  test: number[][];
+}
+
+interface FittedModel {
+  names: string[];
+  weights: number[];
+  bias: number;
+}
+
+const CONFIGS: LogisticModelConfig[] = [
+  { regularization: 0.25, learningRate: 0.05, iterations: 700 },
+  { regularization: 1, learningRate: 0.05, iterations: 700 },
+  { regularization: 4, learningRate: 0.03, iterations: 900 },
+];
+
+const THRESHOLDS = [0.5, 0.55, 0.6, 0.65];
+const EPSILON = 1e-9;
+
+function targetFor(row: LearningFeatureDatasetRow): number {
+  return row.outcome === "WIN" ? 1 : 0;
+}
+
+function mean(values: number[]): number {
+  return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
+}
+
+function standardDeviation(values: number[], average: number): number {
+  if (values.length < 2) return 0;
+  const variance = values.reduce((sum, value) => sum + (value - average) ** 2, 0) / values.length;
+  return Math.sqrt(Math.max(0, variance));
+}
+
+function sigmoid(value: number): number {
+  if (value >= 0) {
+    const z = Math.exp(-value);
+    return 1 / (1 + z);
+  }
+  const z = Math.exp(value);
+  return z / (1 + z);
+}
+
+function clampProbability(value: number): number {
+  return Math.max(EPSILON, Math.min(1 - EPSILON, value));
+}
+
+function usableFeatureNames(rows: LearningFeatureDatasetRow[]): string[] {
+  return LEARNING_FEATURE_NAMES.filter((name) => {
+    const values = rows
+      .map((row) => row.features[name])
+      .filter((value): value is number => value !== null && Number.isFinite(value));
+    return values.length > 0 && new Set(values.map((value) => value.toString())).size > 1;
+  });
+}
+
+function buildMatrix(
+  names: string[],
+  trainRows: LearningFeatureDatasetRow[],
+  validationRows: LearningFeatureDatasetRow[],
+  testRows: LearningFeatureDatasetRow[],
+): PreparedMatrix {
+  const means = names.map((name) => {
+    const values = trainRows
+      .map((row) => row.features[name])
+      .filter((value): value is number => value !== null && Number.isFinite(value));
+    return mean(values);
+  });
+
+  const scales = names.map((name, index) => {
+    const values = trainRows.map((row) => {
+      const value = row.features[name];
+      return value !== null && Number.isFinite(value) ? value : means[index];
+    });
+    const sd = standardDeviation(values, means[index]);
+    return sd > EPSILON ? sd : 1;
+  });
+
+  const transform = (rows: LearningFeatureDatasetRow[]): number[][] =>
+    rows.map((row) =>
+      names.map((name, index) => {
+        const raw = row.features[name];
+        const value = raw !== null && Number.isFinite(raw) ? raw : means[index];
+        return (value - means[index]) / scales[index];
+      }),
+    );
+
+  return {
+    names,
+    means,
+    scales,
+    train: transform(trainRows),
+    validation: transform(validationRows),
+    test: transform(testRows),
+  };
+}
+
+function fit(
+  x: number[][],
+  y: number[],
+  names: string[],
+  config: LogisticModelConfig,
+): FittedModel {
+  const weights = new Array(names.length).fill(0) as number[];
+  const classMean = Math.max(0.001, Math.min(0.999, mean(y)));
+  let bias = Math.log(classMean / (1 - classMean));
+
+  for (let iteration = 0; iteration < config.iterations; iteration += 1) {
+    const grad = new Array(names.length).fill(0) as number[];
+    let gradBias = 0;
+
+    for (let rowIndex = 0; rowIndex < x.length; rowIndex += 1) {
+      let linear = bias;
+      for (let featureIndex = 0; featureIndex < names.length; featureIndex += 1) {
+        linear += weights[featureIndex] * x[rowIndex][featureIndex];
+      }
+
+      const error = sigmoid(linear) - y[rowIndex];
+      gradBias += error;
+      for (let featureIndex = 0; featureIndex < names.length; featureIndex += 1) {
+        grad[featureIndex] += error * x[rowIndex][featureIndex];
+      }
+    }
+
+    gradBias /= Math.max(1, x.length);
+    for (let featureIndex = 0; featureIndex < names.length; featureIndex += 1) {
+      grad[featureIndex] =
+        grad[featureIndex] / Math.max(1, x.length) +
+        config.regularization * weights[featureIndex];
+      weights[featureIndex] -= config.learningRate * grad[featureIndex];
+    }
+    bias -= config.learningRate * gradBias;
+  }
+
+  return { names, weights, bias };
+}
+
+function predict(model: FittedModel, x: number[][]): number[] {
+  return x.map((row) => {
+    let linear = model.bias;
+    for (let i = 0; i < model.weights.length; i += 1) {
+      linear += model.weights[i] * row[i];
+    }
+    return clampProbability(sigmoid(linear));
+  });
+}
+
+function logLoss(y: number[], p: number[]): number {
+  if (!y.length) return 0;
+  const loss = mean(y.map((actual, index) => {
+    const probability = clampProbability(p[index]);
+    return -(actual * Math.log(probability) + (1 - actual) * Math.log(1 - probability));
+  }));
+  return Number(loss.toFixed(6));
+}
+
+function brier(y: number[], p: number[]): number {
+  if (!y.length) return 0;
+  return Number(mean(y.map((actual, index) => (p[index] - actual) ** 2)).toFixed(6));
+}
+
+function auc(y: number[], p: number[]): number | null {
+  const positives = y.filter((value) => value === 1).length;
+  const negatives = y.length - positives;
+  if (!positives || !negatives) return null;
+
+  const ordered = y
+    .map((actual, index) => ({ actual, probability: p[index], index }))
+    .sort((a, b) => a.probability - b.probability || a.index - b.index);
+
+  let positiveRanks = 0;
+  ordered.forEach((item, index) => {
+    if (item.actual === 1) positiveRanks += index + 1;
+  });
+
+  return Number(
+    ((positiveRanks - positives * (positives + 1) / 2) / (positives * negatives)).toFixed(6),
+  );
+}
+
+function classification(
+  rows: LearningFeatureDatasetRow[],
+  probabilities: number[],
+): MlClassificationMetrics {
+  const y = rows.map(targetFor);
+  const predictions = probabilities.map((value) => value >= 0.5 ? 1 : 0);
+  let tp = 0;
+  let tn = 0;
+  let fp = 0;
+  let fn = 0;
+
+  for (let i = 0; i < y.length; i += 1) {
+    if (y[i] === 1 && predictions[i] === 1) tp += 1;
+    else if (y[i] === 0 && predictions[i] === 0) tn += 1;
+    else if (y[i] === 0 && predictions[i] === 1) fp += 1;
+    else fn += 1;
+  }
+
+  const wins = y.reduce((sum, value) => sum + value, 0);
+  const nonWins = y.length - wins;
+  const total = Math.max(1, y.length);
+  const tpr = wins ? tp / wins : 0;
+  const tnr = nonWins ? tn / nonWins : 0;
+
+  return {
+    rows: y.length,
+    wins,
+    nonWins,
+    accuracy: Number(((tp + tn) / total).toFixed(4)),
+    balancedAccuracy: Number(((tpr + tnr) / 2).toFixed(4)),
+    precision: Number((tp / Math.max(1, tp + fp)).toFixed(4)),
+    recall: Number(tpr.toFixed(4)),
+    logLoss: logLoss(y, probabilities),
+    brierScore: brier(y, probabilities),
+    rocAuc: auc(y, probabilities),
+  };
+}
+
+function tradingOverlay(
+  rows: LearningFeatureDatasetRow[],
+  probabilities: number[],
+  threshold: number,
+): MlTradingOverlayMetrics {
+  const taken = rows.filter((_, index) => probabilities[index] >= threshold);
+  const pnl = taken.map((row) => Number(row.pnlUsd) || 0);
+  const profits = pnl.filter((value) => value > 0);
+  const losses = pnl.filter((value) => value < 0).map((value) => Math.abs(value));
+
+  let cumulative = 0;
+  let peak = 0;
+  let maxDrawdown = 0;
+  for (const value of pnl) {
+    cumulative += value;
+    peak = Math.max(peak, cumulative);
+    maxDrawdown = Math.max(maxDrawdown, peak - cumulative);
+  }
+
+  const total = Number(pnl.reduce((sum, value) => sum + value, 0).toFixed(2));
+  const profitFactor = losses.length
+    ? profits.reduce((sum, value) => sum + value, 0) / losses.reduce((sum, value) => sum + value, 0)
+    : profits.length ? Infinity : 0;
+
+  return {
+    rowsConsidered: rows.length,
+    tradesTaken: taken.length,
+    tradesSkipped: rows.length - taken.length,
+    winRate: taken.length ? Number((profits.length / taken.length * 100).toFixed(2)) : 0,
+    totalPnlUsd: total,
+    profitFactor: Number.isFinite(profitFactor) ? Number(profitFactor.toFixed(4)) : 999,
+    maxDrawdownUsd: Number(maxDrawdown.toFixed(2)),
+    averagePnlUsd: taken.length ? Number((total / taken.length).toFixed(4)) : 0,
+  };
+}
+
+function bothClasses(rows: LearningFeatureDatasetRow[]): boolean {
+  const classes = new Set(rows.map(targetFor));
+  return classes.has(0) && classes.has(1);
+}
+
+function selectModel(
+  matrix: PreparedMatrix,
+  trainRows: LearningFeatureDatasetRow[],
+  validationRows: LearningFeatureDatasetRow[],
+): { model: FittedModel; config: LogisticModelConfig; threshold: number; validationLogLoss: number } {
+  let best: {
+    model: FittedModel;
+    config: LogisticModelConfig;
+    threshold: number;
+    validationLogLoss: number;
+    validationBrier: number;
+    validationTrades: number;
+    validationPnl: number;
+  } | null = null;
+
+  const yTrain = trainRows.map(targetFor);
+  const yValidation = validationRows.map(targetFor);
+
+  for (const config of CONFIGS) {
+    const model = fit(matrix.train, yTrain, matrix.names, config);
+    const probabilities = predict(model, matrix.validation);
+    const loss = logLoss(yValidation, probabilities);
+    const brierScore = brier(yValidation, probabilities);
+
+    for (const threshold of THRESHOLDS) {
+      const overlay = tradingOverlay(validationRows, probabilities, threshold);
+      const candidate = {
+        model,
+        config,
+        threshold,
+        validationLogLoss: loss,
+        validationBrier: brierScore,
+        validationTrades: overlay.tradesTaken,
+        validationPnl: overlay.totalPnlUsd,
+      };
+
+      if (!best ||
+        candidate.validationLogLoss < best.validationLogLoss ||
+        (candidate.validationLogLoss === best.validationLogLoss && candidate.validationBrier < best.validationBrier) ||
+        (candidate.validationLogLoss === best.validationLogLoss && candidate.validationBrier === best.validationBrier && candidate.validationTrades > best.validationTrades) ||
+        (candidate.validationLogLoss === best.validationLogLoss && candidate.validationBrier === best.validationBrier && candidate.validationTrades === best.validationTrades && candidate.validationPnl > best.validationPnl)
+      ) {
+        best = candidate;
+      }
+    }
+  }
+
+  if (!best) throw new Error("No deterministic ML candidate could be selected.");
+  return {
+    model: best.model,
+    config: best.config,
+    threshold: best.threshold,
+    validationLogLoss: best.validationLogLoss,
+  };
+}
+
+export class FirstMlExperiment {
+  public static run(records: LearningTradeRecord[]): MlExperimentResult {
+    const preparation = prepareLearningFeatureResearch(records);
+
+    if (!preparation.readyForFirstExperiment) {
+      return {
+        status: "BLOCKED",
+        model: null,
+        selectedThreshold: null,
+        selectedValidationLogLoss: null,
+        selectedFeatures: [],
+        train: null,
+        validation: null,
+        test: null,
+        deterministicTest: null,
+        modelFilteredTest: null,
+        blockedReasons: preparation.blockedReasons,
+        notes: [
+          "No model is fitted while the feature dataset gate is blocked.",
+          "The first experiment requires at least 90 valid rows plus a clean leakage/schema audit.",
+        ],
+      };
+    }
+
+    const split = preparation.split;
+    if (!bothClasses(split.train)) {
+      return {
+        status: "INSUFFICIENT_CLASS_VARIETY",
+        model: null,
+        selectedThreshold: null,
+        selectedValidationLogLoss: null,
+        selectedFeatures: [],
+        train: null,
+        validation: null,
+        test: null,
+        deterministicTest: null,
+        modelFilteredTest: null,
+        blockedReasons: ["Training partition must contain both WIN and non-WIN outcomes."],
+        notes: ["A binary classifier cannot be fitted from a single-class training partition."],
+      };
+    }
+
+    const names = usableFeatureNames(split.train);
+    if (!names.length) {
+      return {
+        status: "BLOCKED",
+        model: null,
+        selectedThreshold: null,
+        selectedValidationLogLoss: null,
+        selectedFeatures: [],
+        train: null,
+        validation: null,
+        test: null,
+        deterministicTest: null,
+        modelFilteredTest: null,
+        blockedReasons: ["No non-constant numeric features are available in the training partition."],
+        notes: [],
+      };
+    }
+
+    const matrix = buildMatrix(names, split.train, split.validation, split.test);
+    const selected = selectModel(matrix, split.train, split.validation);
+
+    const trainProbabilities = predict(selected.model, matrix.train);
+    const validationProbabilities = predict(selected.model, matrix.validation);
+    const testProbabilities = predict(selected.model, matrix.test);
+
+    return {
+      status: "READY",
+      model: selected.config,
+      selectedThreshold: selected.threshold,
+      selectedValidationLogLoss: selected.validationLogLoss,
+      selectedFeatures: names,
+      train: classification(split.train, trainProbabilities),
+      validation: classification(split.validation, validationProbabilities),
+      test: classification(split.test, testProbabilities),
+      deterministicTest: tradingOverlay(split.test, split.test.map(() => 1), 0),
+      modelFilteredTest: tradingOverlay(split.test, testProbabilities, selected.threshold),
+      blockedReasons: [],
+      notes: [
+        "This is a logistic-regression meta-labeler: it predicts WIN versus non-WIN for an existing deterministic eligible trade.",
+        "It does not choose direction, position size, exits, or submit orders.",
+        "Missing-value imputation and normalization use TRAIN statistics only.",
+        "Regularization and the filter threshold are selected on VALIDATION only; TEST remains held out.",
+        "The test overlay compares all deterministic test trades with the subset accepted by the model.",
+        "Predicted probabilities are research estimates, not guarantees or proof of live calibration.",
+      ],
+    };
+  }
+}
