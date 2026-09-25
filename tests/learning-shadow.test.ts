@@ -4,6 +4,7 @@ import os from "os";
 import path from "path";
 import { FirstMlExperiment } from "../src/learn/mlBaseline";
 import { LearningShadowStore } from "../src/server/learningShadowStore";
+import { evaluateShadowPromotionGate } from "../src/server/shadowPromotionGate";
 import type { DecisionFeatureSnapshot } from "../src/learn/features";
 import type { Trade } from "../src/types/trading";
 
@@ -64,4 +65,34 @@ test("shadow store persists and resolves a paper trade", () => {
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+
+test("shadow promotion review stays blocked until all gates are satisfied", () => {
+  const experiment = {
+    mlStatus: "READY",
+    modelFingerprint: "shadow-model-v1",
+    mlRobustnessStatus: "READY",
+    robustness: { stableAcrossFolds: true },
+  } as any;
+
+  const blocked = evaluateShadowPromotionGate(experiment, {
+    predictions: 99, resolvedPredictions: 49,
+    wins: 30, losses: 19, flats: 0, meanProbability: 0.6,
+    logLoss: 0.6, brierScore: 0.2,
+    baselineLogLoss: 0.7, baselineBrierScore: 0.25,
+    featureDriftScore: 0.5, missingFeatureRate: 0,
+    driftFlag: false, lastPredictionAt: 1, lastResolvedAt: 1,
+  });
+  expect(blocked.eligibleForReview).toBe(false);
+
+  const ready = evaluateShadowPromotionGate(experiment, {
+    predictions: 100, resolvedPredictions: 50,
+    wins: 30, losses: 20, flats: 0, meanProbability: 0.6,
+    logLoss: 0.6, brierScore: 0.2,
+    baselineLogLoss: 0.7, baselineBrierScore: 0.25,
+    featureDriftScore: 0.5, missingFeatureRate: 0,
+    driftFlag: false, lastPredictionAt: 2, lastResolvedAt: 2,
+  });
+  expect(ready.eligibleForReview).toBe(true);
 });
