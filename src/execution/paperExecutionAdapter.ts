@@ -1,7 +1,7 @@
 import type { Candle, PaperTradingSettings } from "../types/trading";
-import type { ExecutionAdapter, ExecutionSide, FillCosts, FillRequest } from "./types";
+import type { FillExecutionModel, ExecutionSide, FillCosts, FillRequest } from "./types";
 
-export class PaperExecutionAdapter implements ExecutionAdapter {
+export class PaperExecutionAdapter implements FillExecutionModel {
   public entryFill(request: FillRequest): FillCosts {
     return this.fill(request, true);
   }
