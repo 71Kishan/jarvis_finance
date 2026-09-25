@@ -127,6 +127,7 @@ describe("learning research dataset", () => {
     expect(audit.rowsConsidered).toBe(89);
     expect(audit.rowsMissingFeatures).toBe(1);
     expect(audit.rowsValid).toBe(88);
+    expect(audit.liveMarketRows).toBe(0);
 
     const prepared=prepareLearningFeatureResearch(records);
     expect(prepared.readyForFirstExperiment).toBe(false);

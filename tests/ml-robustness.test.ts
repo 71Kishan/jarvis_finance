@@ -1,13 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { FirstMlExperiment } from "../src/learn/mlBaseline";
+import { MlRollingRobustness } from "../src/learn/mlRobustness";
 import { buildDecisionFeatureSnapshot } from "../src/learn/features";
 import type { Candle, StrategyConfig } from "../src/types/trading";
 import type { SignalResult } from "../src/engine/signalEngine";
 import type { LearningTradeRecord } from "../src/learn/types";
 
 const strategy: StrategyConfig = {
-  id: "ml-test",
-  name: "ML Test",
+  id: "robust-test",
+  name: "Robust Test",
   version: 1,
   asset: "BTC/USD",
   description: "test",
@@ -42,7 +42,7 @@ function record(index: number): LearningTradeRecord {
     timestamp: 1_700_000_000_000 + index * 3_600_000,
     open: 99 + (index % 5) * 0.1,
     high: 103 + (index % 7) * 0.1,
-    low: 98,
+    low: 98 + (index % 3) * 0.05,
     close: 102 + (index % 11) * 0.2,
     volume: 200 + (index % 9) * 20,
     indicators: {
@@ -60,7 +60,6 @@ function record(index: number): LearningTradeRecord {
       volumeSMA: 180,
     },
   };
-
   const features = buildDecisionFeatureSnapshot(candle, signal, strategy, {
     recordedAt: candle.timestamp + 1_000,
     spreadBps: 3 + (index % 4),
@@ -68,10 +67,9 @@ function record(index: number): LearningTradeRecord {
     marketDataTimestamp: candle.timestamp,
     marketDataSource: "LIVE_MARKET_DATA",
   });
-
   const win = index % 3 !== 0;
   return {
-    tradeId: "ml-" + index,
+    tradeId: "rolling-" + index,
     recordedAt: candle.timestamp + 120_000,
     asset: "BTC/USD",
     side: "LONG",
@@ -85,7 +83,7 @@ function record(index: number): LearningTradeRecord {
     sizeUsd: 103,
     feesUsd: 0.1,
     slippageUsd: 0.02,
-    pnlUsd: win ? 1.2 + (index % 4) * 0.1 : -0.9,
+    pnlUsd: win ? 1.2 : -0.9,
     pnlPercent: win ? 1.2 : -0.9,
     outcome: win ? "WIN" : "LOSS",
     entryTime: candle.timestamp + 60_000,
@@ -97,42 +95,21 @@ function record(index: number): LearningTradeRecord {
   };
 }
 
-describe("first ML experiment", () => {
-  test("blocks below the research dataset gate", () => {
-    const result = FirstMlExperiment.run(Array.from({ length: 89 }, (_, i) => record(i)));
-    expect(result.status).toBe("BLOCKED");
-    expect(result.model).toBeNull();
-    expect(result.blockedReasons.join(" ")).toContain("90");
+describe("ML rolling robustness", () => {
+  test("requires enough chronological history for three independent folds", () => {
+    const result = MlRollingRobustness.run(Array.from({ length: 209 }, (_, i) => record(i)));
+    expect(result.status).toBe("INSUFFICIENT_HISTORY");
+    expect(result.foldsCompleted).toBe(0);
   });
 
-  test("is deterministic and keeps the test partition held out during selection", () => {
-    const records = Array.from({ length: 120 }, (_, i) => record(i));
-    const a = FirstMlExperiment.run(records);
-    const b = FirstMlExperiment.run(records);
-
-    expect(a).toEqual(b);
-    expect(a.status).toBe("READY");
-    expect(a.train).not.toBeNull();
-    expect(a.validation).not.toBeNull();
-    expect(a.test).not.toBeNull();
-    expect(a.deterministicTest).not.toBeNull();
-    expect(a.modelFilteredTest).not.toBeNull();
-    expect(a.selectedThreshold).toBeGreaterThanOrEqual(0.5);
-    expect(a.selectedThreshold).toBeLessThanOrEqual(0.65);
-    expect(a.test!.rows).toBe(24);
-    expect(a.selectedFeatures.length).toBeGreaterThan(0);
-    expect(a.test!.rows).toBe(24);
-    expect(a.test!.logLoss).toBeGreaterThanOrEqual(0);
-  });
-
-  test("blocks a single-class training partition", () => {
-    const records = Array.from({ length: 120 }, (_, i) => {
-      const row = record(i);
-      row.outcome = "WIN";
-      row.pnlUsd = 1;
-      return row;
-    });
-    const result = FirstMlExperiment.run(records);
-    expect(result.status).toBe("INSUFFICIENT_CLASS_VARIETY");
+  test("runs three chronological folds without using later rows for earlier selections", () => {
+    const records = Array.from({ length: 240 }, (_, i) => record(i));
+    const result = MlRollingRobustness.run(records);
+    expect(result.status).toBe("READY");
+    expect(result.foldsCompleted).toBe(3);
+    expect(result.totalTestRows).toBe(90);
+    expect(result.folds[0].testRows).toBe(30);
+    expect(result.folds[1].fold).toBe(2);
+    expect(result.notes.length).toBeGreaterThan(0);
   });
 });
