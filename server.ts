@@ -88,6 +88,11 @@ app.use("/api", (req: Request, res: Response, next) => {
   next();
 });
 
+interface AuthenticatedRequest extends Request {
+  jarvisUser?: import("./src/server/authControlStore").AuthUser;
+  jarvisSessionId?: string;
+}
+
 function secureCookies(req: Request): boolean {
   if (process.env.JARVIS_SECURE_COOKIES === "true") return true;
   if (process.env.JARVIS_SECURE_COOKIES === "false") return false;
