@@ -132,15 +132,18 @@ function buildMatrix(
   validationRows: LearningFeatureDatasetRow[],
   testRows: LearningFeatureDatasetRow[],
 ): PreparedMatrix {
+  const innerFitCount = Math.max(2, Math.floor(trainRows.length * 0.8));
+  const fitRows = trainRows.slice(0, innerFitCount);
+
   const means = names.map((name) => {
-    const values = trainRows
+    const values = fitRows
       .map((row) => row.features[name])
       .filter((value): value is number => value !== null && Number.isFinite(value));
     return mean(values);
   });
 
   const scales = names.map((name, index) => {
-    const values = trainRows.map((row) => {
+    const values = fitRows.map((row) => {
       const value = row.features[name];
       return value !== null && Number.isFinite(value) ? value : means[index];
     });
