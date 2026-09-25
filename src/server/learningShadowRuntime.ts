@@ -32,7 +32,8 @@ export class LearningShadowRuntime {
     this.model = this.shadowStore.getModel();
     this.refreshIntervalMs = Math.max(
       60_000,
-      options?.refreshIntervalMs ?? Number(process.env.JARVIS_LEARNING_MODEL_REFRESH_MS) || 300_000,
+      options?.refreshIntervalMs ??
+        (Number(process.env.JARVIS_LEARNING_MODEL_REFRESH_MS) || 300_000),
     );
   }
 
